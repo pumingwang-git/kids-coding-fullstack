@@ -59,6 +59,7 @@ from ..models import (
     Problem,
     User,
 )
+from ..permissions import is_reviewer
 from ..results_common import (
     build_item_analysis,
     build_students,
@@ -79,10 +80,6 @@ from .exam import counted_attempt
 
 router = APIRouter(prefix="/api/admin", tags=["admin-results"])
 
-REVIEWER_ROLES = {"reviewer"}
-SUPER_ROLE = "super_admin"
-
-
 def _iso(value: datetime | None) -> str | None:
     aware = _as_utc(value) if value is not None else None
     return aware.isoformat() if aware else None
@@ -90,7 +87,7 @@ def _iso(value: datetime | None) -> str | None:
 
 def _sees_all(admin: AdminUser) -> bool:
     """与 _can_read 的 SQL 版：超管与审核员看全部，其余只看自己录入/负责的卷。"""
-    return admin.role == SUPER_ROLE or admin.role in REVIEWER_ROLES
+    return is_reviewer(admin)
 
 
 def _full_score(db: Session, paper_id: int) -> int:

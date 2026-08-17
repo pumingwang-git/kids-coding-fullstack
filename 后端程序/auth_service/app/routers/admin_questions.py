@@ -37,6 +37,10 @@ from ..models import (
     Video,
 )
 from ..oj_testdata import build_config_yaml, parse_testdata_zip, write_testdata_files
+from ..permissions import EDITOR_ROLES, REVIEWER_ROLES, SUPER_ROLE
+from ..permissions import is_editor as _is_editor
+from ..permissions import is_reviewer as _is_reviewer
+from ..permissions import is_super as _is_super
 from ..schemas import (
     BLANK_KEY_RE,
     CreateTagPayload,
@@ -52,9 +56,6 @@ from .admin_auth import audit, client_ip, current_admin, db_session, limit, requ
 router = APIRouter(prefix="/api/admin", tags=["admin-questions"])
 
 TAG_CATEGORIES = ("knowledge", "stage", "business")
-EDITOR_ROLES = {"editor", "admin"}  # admin 是上线前已有角色，按 editor 兼容。
-REVIEWER_ROLES = {"reviewer"}
-SUPER_ROLE = "super_admin"
 # 题干、解析和选项内容在库里存 Markdown 源码，入库时不做净化：Markdown 里 `<` 是合法正文
 # （`#include <iostream>`、`vector<int>`），按标签剥离会把代码打断。XSS 由渲染出口统一负责，
 # 见 前端程序/study-blog-vue/public/admin/vendor/README.md。
@@ -115,18 +116,6 @@ def _display_title(problem_type: str, stem: str) -> str:
     label = {"choice": "单选题", "multi_choice": "多选题", "judge": "判断题",
              "fill": "填空题", "programming": "操作题"}.get(problem_type, "题目")
     return f"[图片{label}]" if _any_image(stem) else ""
-
-
-def _is_super(admin: AdminUser) -> bool:
-    return admin.role == SUPER_ROLE
-
-
-def _is_editor(admin: AdminUser) -> bool:
-    return admin.role in EDITOR_ROLES or _is_super(admin)
-
-
-def _is_reviewer(admin: AdminUser) -> bool:
-    return admin.role in REVIEWER_ROLES or _is_super(admin)
 
 
 def _forbid(message: str = "没有执行该题库操作的权限。") -> None:

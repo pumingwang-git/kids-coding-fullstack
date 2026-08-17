@@ -16,28 +16,17 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from ..models import AdminUser, AuditEvent, ChoiceOption, CourseLessonBlock, ExamLink, FillAnswer, LessonPaperBlock, Paper, PaperAttempt, PaperQuestion, Problem, ProgrammingDetail, ReferenceSolution, TestCase
+from ..permissions import EDITOR_ROLES, REVIEWER_ROLES, SUPER_ROLE
+from ..permissions import is_editor as _is_editor
+from ..permissions import is_reviewer as _is_reviewer
+from ..permissions import is_super as _is_super
 from ..schemas import ExamLinkPayload, PaperPayload, TransferPaperOwnerPayload
 from ..scoring import parse_blank_alternatives
 from .admin_auth import audit, client_ip, current_admin, db_session, limit, require_csrf
 
 router = APIRouter(prefix="/api/admin", tags=["admin-papers"])
 
-EDITOR_ROLES = {"editor", "admin"}  # admin 是上线前已有角色，按 editor 兼容。
-REVIEWER_ROLES = {"reviewer"}
-SUPER_ROLE = "super_admin"
 EDITABLE_STATUSES = {"draft", "published"}  # 试卷不走审核流，已发布仍可改；归档即锁定
-
-
-def _is_super(admin: AdminUser) -> bool:
-    return admin.role == SUPER_ROLE
-
-
-def _is_editor(admin: AdminUser) -> bool:
-    return admin.role in EDITOR_ROLES or _is_super(admin)
-
-
-def _is_reviewer(admin: AdminUser) -> bool:
-    return admin.role in REVIEWER_ROLES or _is_super(admin)
 
 
 def _forbid(message: str = "没有执行该试卷操作的权限。") -> None:

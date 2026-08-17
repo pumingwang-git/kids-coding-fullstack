@@ -23,15 +23,11 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from ..models import AdminUser, CourseCover, MediaAsset
+from ..permissions import is_editor as _is_content_editor
+from ..permissions import is_reviewer
 from .admin_auth import audit, client_ip, current_admin, db_session, limit, require_csrf
 
 router = APIRouter(prefix="/api/admin", tags=["admin-media"])
-
-# 与 admin_questions.py 保持同一套角色常量。故意复制而不是 import：那个文件正在被
-# 频繁改动，为一个三元组建立跨路由依赖不划算；不一致会被 test_admin_media 里的用例逮到。
-EDITOR_ROLES = {"editor", "admin"}
-REVIEWER_ROLES = {"reviewer"}
-SUPER_ROLE = "super_admin"
 
 # 输出格式白名单。键是 Pillow 解出来的 format，值是（落盘扩展名, 保存用的 format）。
 # 不在表里的一律转 PNG——包括 BMP、TIFF 这些能解但不该出现在网页上的格式。
@@ -47,7 +43,7 @@ _MAX_GIF_FRAMES = 200
 
 def _is_editor(admin: AdminUser) -> bool:
     # 审核员也放行：审核时补一张说明图是合理的，为此把图存不进去只会逼人绕路。
-    return admin.role in EDITOR_ROLES | REVIEWER_ROLES or admin.role == SUPER_ROLE
+    return _is_content_editor(admin) or is_reviewer(admin)
 
 
 def _decode(raw: bytes) -> tuple[Image.Image, str]:

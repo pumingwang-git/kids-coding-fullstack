@@ -35,15 +35,12 @@ from ..models import (
     TestCase,
 )
 from ..oj_testdata import JudgeDataUnavailable, read_case_content
+from ..permissions import EDITOR_ROLES, REVIEWER_ROLES, SUPER_ROLE
 from ..schemas import DryRunPayload
 from .admin_auth import audit, client_ip, current_admin, db_session, limit, require_csrf
 
 router = APIRouter(prefix="/api/admin", tags=["admin-dryrun"])
 logger = logging.getLogger(__name__)
-
-EDITOR_ROLES = {"editor", "admin"}
-REVIEWER_ROLES = {"reviewer"}
-SUPER_ROLE = "super_admin"
 
 TERMINAL_STATUSES = frozenset(
     {"accepted", "wrong_answer", "compile_error", "runtime_error",

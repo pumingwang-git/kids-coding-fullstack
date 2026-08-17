@@ -130,6 +130,31 @@ def _require_editor(request: Request, db: Session):
     return admin
 
 
+def _require_submission_reader(request: Request, db: Session):
+    """学生作品（提交列表 / 详情 / .sb3 / project.json）的读闸。
+
+    **这是过渡措施。E2 落地 `class_teachers` 后，这里应换成 `class_scope`
+    （`permissions.visible_class_ids()`）。**
+
+    口径刻意与写端点（`/review`、`/return` 的 `_require_editor`）拉平。这四条原先
+    只调 `current_admin(request, db)`、连返回值都不接——只做了身份认证、没有任何
+    授权，任何后台登录态（包括只该审题的 reviewer）都能列出并下载**全站**学生的
+    作品源文件；`keyword` 那条 `User.username.like()` 更等于把全站学生姓名搜索开给
+    了所有角色。读写口径不一致本身就是遗漏的证据：能看全站作品的人比能改一条判定
+    的人还多，说不通。
+
+    **为什么现在只能做到角色闸**：真正该有的是数据范围——老师只看自己带的班。但
+    班级归属表 `class_teachers` 要到 E2 才建，库里现在没有任何能把管理员映射到学生
+    集合的事实，此刻写出来的"范围"只会是假的（要么恒空、要么恒全量），不如先把闸门
+    拉平、把限制写在明处。E2 的替换点就是本函数与它的四个调用点：列表端点按可见班级
+    收窄 where 条件，三个按 id 取单条的端点还要显式校验该提交的学生在可见集内——否则
+    列表收窄了，仍能靠逐个试 submission_id 穿透（同 admin_results 第 4 条的教训）。
+
+    详见《32、E0-权限矩阵与数据范围对账-2026-08-17》§3.2 与 §5 问题 1、2。
+    """
+    return _require_editor(request, db)
+
+
 def _validate_rules(rules: list[dict]) -> list[dict]:
     """规则写入时就校验类型，不留到判定时才发现。
 
@@ -966,8 +991,11 @@ def list_submissions(request: Request, db: Session = Depends(db_session),
     `latest_only=true` 时按 `(user_id, lesson_block_id)` 只取 `attempt_no` 最大的那一行
     （批改队列用——一个学生交五次就只排一条）。默认 false，保持"学生作品"只读列表
     看完整历史的行为不变。
+
+    `keyword` 是**全站**学生用户名模糊搜索，所以这条与 `.sb3` 下载同级，卡
+    `_require_submission_reader`（过渡期 = editor 级；E2 后按可见班级收窄）。
     """
-    current_admin(request, db)
+    _require_submission_reader(request, db)
     limit_size = page_size or size
     stmt = select(ScratchSubmission)
     if challenge_id:
@@ -1009,7 +1037,9 @@ def list_submissions(request: Request, db: Session = Depends(db_session),
 
 @router.get("/submissions/{submission_id}")
 def get_submission(submission_id: int, request: Request, db: Session = Depends(db_session)):
-    current_admin(request, db)
+    """单份提交详情。鉴权见 `_require_submission_reader`——E2 之后这里还要补一条
+    "该提交的学生是否在可见班级内"，否则按 id 逐个试仍能穿透。"""
+    _require_submission_reader(request, db)
     submission = db.get(ScratchSubmission, submission_id)
     if submission is None:
         raise HTTPException(404, "提交记录不存在。")
@@ -1023,8 +1053,10 @@ def download_submission_project(submission_id: int, request: Request,
 
     刻意不提供"下载学生当前工作副本"的入口：老师看到的必须是判定时的那份，
     否则学生交完再改两下，老师回看到的作品与判定证据对不上（模型注释同）。
+
+    这是本模块泄露面最大的一条（整份作品源文件），鉴权见 `_require_submission_reader`。
     """
-    current_admin(request, db)
+    _require_submission_reader(request, db)
     submission = db.get(ScratchSubmission, submission_id)
     if submission is None:
         raise HTTPException(404, "提交记录不存在。")
@@ -1046,9 +1078,9 @@ def download_submission_project_json(submission_id: int, request: Request,
     """只返回提交时冻结版本的 `project.json`（批改台画积木图用）。
 
     整包 `.sb3` 含素材，动辄几 MB；这里只解出 `project.json` 一个条目，前端不必
-    再引 JSZip 自己解压。鉴权口径与 `.sb3` 下载一致：卡 `current_admin`。
+    再引 JSZip 自己解压。鉴权口径与 `.sb3` 下载一致：卡 `_require_submission_reader`。
     """
-    current_admin(request, db)
+    _require_submission_reader(request, db)
     submission = db.get(ScratchSubmission, submission_id)
     if submission is None:
         raise HTTPException(404, "提交记录不存在。")
