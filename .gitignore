@@ -104,6 +104,12 @@ Desktop.ini
 # *-dev.html (e.g. lightbox-dev.html) and they stay out.
 /前端程序/study-blog-vue/*-dev.html
 
+# 同一类东西的第三种形态：用 CDP 连本机 Chrome 手动实测某个行为的一次性脚本。
+# 里面写死了 chrome.exe 路径、C:/Users/asus/... 的 profile 目录和 127.0.0.1
+# 端口，换台机器一行都跑不通；查一个问题往往会攒出 v1/v2/v3 好几版。
+# 命名成 test-cdp*.mjs 就不会再混进提交，真正的测试放 tests/ 下。
+**/test-cdp*.mjs
+
 # Local frontend build checks, preview pages, and test command output
 # 每次核对构建产物都会 build 到一个新的 dist-xxx 目录（dist-check、dist-verify、
 # dist-verify-av3…），一条通配把整族收掉，真正要提交的产物只走 dist/ 之外的路径。
