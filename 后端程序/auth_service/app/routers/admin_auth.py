@@ -12,11 +12,17 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from ..models import AdminSession, AdminUser, AuditEvent, SliderCaptchaChallenge
-from ..permissions import KNOWN_ROLE_NAMES, ROLE_LABELS, is_super, validate_admin_role
+from ..permissions import (
+    KNOWN_ROLE_NAMES,
+    ROLE_LABELS,
+    SUPER_ROLE,
+    is_super,
+    validate_admin_role,
+)
 from ..rate_limit import RateLimiterUnavailable
 from ..schemas import AdminLoginRequest, AdminRoleUpdateRequest, SliderVerifyRequest
 from ..security import (
@@ -410,6 +416,36 @@ def update_admin_user_role(
         )
         db.commit()
         raise HTTPException(409, "目标账号已经是该角色。")
+
+    # 最后一名超管不能降级：改角色只有超管能做（ADR-001 §2.4），降到零之后
+    # 网页后台里没有任何人能改回来，只能上服务器跑 create_admin 重建——那条路
+    # 还会顺带重置密码。交接不受影响：先把接班人提成超管，再改自己，两步都能过。
+    # 只数 active：停用的超管登不进来（current_admin 会 401），不构成兜底。
+    if target.role == SUPER_ROLE and new_role != SUPER_ROLE:
+        remaining_supers = db.scalar(
+            select(func.count())
+            .select_from(AdminUser)
+            .where(
+                AdminUser.role == SUPER_ROLE,
+                AdminUser.status == "active",
+                AdminUser.id != target.id,
+            )
+        )
+        if not remaining_supers:
+            _audit_role_change(
+                db,
+                request,
+                actor.id,
+                target.id,
+                "failure",
+                _role_change_summary(
+                    old_role=target.role,
+                    new_role=new_role,
+                    reason_code="invalid_state",
+                ),
+            )
+            db.commit()
+            raise HTTPException(409, "系统必须至少保留一名超级管理员。")
 
     old_role = target.role
     target.role = new_role

@@ -275,6 +275,77 @@ def test_role_options_come_from_permissions_single_source(tmp_path):
         ]
 
 
+# ==================== 最后一名超管不得降级 ====================
+
+
+def test_last_super_admin_cannot_demote_themselves(tmp_path):
+    """降到零个超管就没人能改回来了，只能上服务器重建；接口必须拦住。"""
+    with admin_client(tmp_path) as client:
+        headers = login_root(client)
+        root_id = client.get("/api/admin/me").json()["id"]
+
+        response = put_role(client, headers, root_id, "teacher")
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "系统必须至少保留一名超级管理员。"
+        # 拦下了就必须什么都没变，超管仍然是超管。
+        assert current_role(client, root_id) == "super_admin"
+        assert client.get("/api/admin/me").json()["can_manage_admin_roles"] is True
+
+        assert role_events(client, "success") == []
+        events = role_events(client, "failure")
+        assert len(events) == 1
+        summary = json.loads(events[0].summary_json)
+        assert summary["reason_code"] == "invalid_state"
+        assert summary["old_role"] == "super_admin"
+        assert summary["new_role"] == "teacher"
+
+
+def test_a_disabled_super_admin_does_not_count_as_a_remaining_super(tmp_path):
+    """停用的超管登不进来，不能拿它当「还剩一个」的兜底。"""
+    with admin_client(tmp_path) as client:
+        spare_id = seed_admin(client, "spare-super", "super_admin")
+        db = client.app.state.session_factory()
+        try:
+            db.get(AdminUser, spare_id).status = "disabled"
+            db.commit()
+        finally:
+            db.close()
+
+        headers = login_root(client)
+        root_id = client.get("/api/admin/me").json()["id"]
+
+        assert put_role(client, headers, root_id, "editor").status_code == 409
+        assert current_role(client, root_id) == "super_admin"
+
+
+def test_super_admin_can_step_down_after_appointing_a_successor(tmp_path):
+    """守卫拦的是「归零」，不是「改自己」——正常交接必须还能走通。"""
+    with admin_client(tmp_path) as client:
+        successor_id = seed_admin(client, "successor", "editor")
+        headers = login_root(client)
+        root_id = client.get("/api/admin/me").json()["id"]
+
+        # 第一步：先把接班人提成超管。
+        assert put_role(client, headers, successor_id, "super_admin").status_code == 200
+        # 第二步：老超管这时才能退位。
+        assert put_role(client, headers, root_id, "teacher").status_code == 200
+
+        assert current_role(client, root_id) == "teacher"
+        assert current_role(client, successor_id) == "super_admin"
+        assert len(role_events(client, "success")) == 2
+
+
+def test_demoting_another_super_admin_is_still_allowed(tmp_path):
+    """还剩别的活跃超管时，降级照常放行（发起人自己就算一个）。"""
+    with admin_client(tmp_path) as client:
+        other_id = seed_admin(client, "second-super", "super_admin")
+        headers = login_root(client)
+
+        assert put_role(client, headers, other_id, "editor").status_code == 200
+        assert current_role(client, other_id) == "editor"
+
+
 # ==================== 即时生效（不需要重新登录） ====================
 
 
