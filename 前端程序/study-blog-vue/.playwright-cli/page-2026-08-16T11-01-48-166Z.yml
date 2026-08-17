@@ -1,0 +1,64 @@
+- generic [ref=f2e3]:
+  - complementary "少儿编程专区导航" [ref=f2e4]:
+    - link "少儿编程 学习空间" [ref=f2e5] [cursor=pointer]:
+      - /url: /areas/kids
+      - generic [ref=f2e6]:
+        - generic [ref=f2e7]: 少儿编程
+        - generic [ref=f2e8]: 学习空间
+    - navigation [ref=f2e9]:
+      - link "学习首页" [ref=f2e11] [cursor=pointer]:
+        - /url: /areas/kids
+      - link "工具箱" [ref=f2e17] [cursor=pointer]:
+        - /url: /areas/kids/toolbox
+      - generic [ref=f2e22]:
+        - link "题库" [ref=f2e23] [cursor=pointer]:
+          - /url: /areas/kids/tasks/mistakes
+        - button "展开" [ref=f2e28] [cursor=pointer]
+    - generic [ref=f2e31]:
+      - link "返回网站首页" [ref=f2e32] [cursor=pointer]:
+        - /url: /
+      - link "设置" [ref=f2e35] [cursor=pointer]:
+        - /url: /settings?area=kids
+  - generic [ref=f2e39]:
+    - generic [ref=f2e40]:
+      - generic [ref=f2e41]: 少儿编程学习空间
+      - generic [ref=f2e44]:
+        - link "预览同学" [ref=f2e45] [cursor=pointer]:
+          - /url: /profile?area=kids
+        - button "退出" [ref=f2e46] [cursor=pointer]
+    - main [ref=f2e47]:
+      - generic [ref=f2e49]:
+        - heading "工具箱" [level=1] [ref=f2e50]
+        - generic [ref=f2e51]: 轻量学习工具集合：打字、口算、换算……即开即用，边玩边练。 现在可以挑战 24 点、练打字，也可以开启一段专注时间。
+      - generic [ref=f2e52]:
+        - link "打字星球 已上线 3-6 岁字母乐园 · 单词打字 · 中文打字 · 编程词库。PEP 教材/中考/高考/CET 全词库，默写模式、错题本、数据统计 3-6 岁 7-12 岁 13+ 打开工具" [ref=f2e53] [cursor=pointer]:
+          - generic [ref=f2e58]:
+            - generic [ref=f2e59]:
+              - heading "打字星球" [level=2] [ref=f2e60]
+              - generic [ref=f2e61]: 已上线
+            - paragraph [ref=f2e62]: 3-6 岁字母乐园 · 单词打字 · 中文打字 · 编程词库。PEP 教材/中考/高考/CET 全词库，默写模式、错题本、数据统计
+            - generic [ref=f2e63]:
+              - generic [ref=f2e64]: 3-6 岁
+              - generic [ref=f2e65]: 7-12 岁
+              - generic [ref=f2e66]: 13+
+          - button "打开工具" [ref=f2e67]
+        - link "口算挑战 24 点已上线 先玩 24 点：四个数字各用一次，组合加减乘除；支持自由练习和 60 秒挑战 7-12 岁 13+ 玩 24 点" [ref=f2e70] [cursor=pointer]:
+          - generic [ref=f2e75]:
+            - generic [ref=f2e76]:
+              - heading "口算挑战" [level=2] [ref=f2e77]
+              - generic [ref=f2e78]: 24 点已上线
+            - paragraph [ref=f2e79]: 先玩 24 点：四个数字各用一次，组合加减乘除；支持自由练习和 60 秒挑战
+            - generic [ref=f2e80]:
+              - generic [ref=f2e81]: 7-12 岁
+              - generic [ref=f2e82]: 13+
+          - button "玩 24 点" [ref=f2e83]
+        - link "专注星球 已上线 小番茄番茄钟：15 分钟专心学，任务清单 + 专注记录，劳逸结合更高效 7-12 岁 13+ 打开工具" [ref=f2e86] [cursor=pointer]:
+          - generic [ref=f2e91]:
+            - generic [ref=f2e92]:
+              - heading "专注星球" [level=2] [ref=f2e93]
+              - generic [ref=f2e94]: 已上线
+            - paragraph [ref=f2e95]: 小番茄番茄钟：15 分钟专心学，任务清单 + 专注记录，劳逸结合更高效
+            - generic [ref=f2e96]:
+              - generic [ref=f2e97]: 7-12 岁
+              - generic [ref=f2e98]: 13+
+          - button "打开工具" [ref=f2e99]

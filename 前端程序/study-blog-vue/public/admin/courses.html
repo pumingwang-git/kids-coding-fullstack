@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>课包管理 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+  <!-- 课包简介用 Vditor（与题库录入同一套编辑器）；DOMPurify 用于预览净化。 -->
+  <link rel="stylesheet" href="vendor/vditor/dist/index.css" />
+  <script src="vendor/dompurify/purify.min.js"></script>
+  <script src="vendor/vditor/dist/index.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <!-- ==================== 页面标题 + 标准检索栏 ==================== -->
+      <div class="page-head">
+        <div>
+          <h1>课包管理</h1>
+          <p>建课包、填基本信息、发布上下架——目录编排在「节点管理」</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn" id="manageCategoryBtn" type="button">学习目录</button>
+          <button class="btn primary" id="newCourseBtn" type="button">＋ 新建课包</button>
+        </div>
+      </div>
+
+      <div class="card search-card">
+        <div class="search-form">
+          <div class="field">
+            <label>关键词</label><input id="sKeyword" placeholder="课包名称" />
+          </div>
+          <div class="field">
+            <label>学习专区</label><select id="sArea"><option value="">全部</option></select>
+          </div>
+          <div class="field">
+            <label>分类</label
+            ><select id="sCategory"><option value="">全部</option></select>
+          </div>
+          <div class="field">
+            <label>难度</label
+            ><select id="sDifficulty">
+              <option value="">全部</option>
+              <option value="beginner">入门</option>
+              <option value="intermediate">进阶</option>
+              <option value="advanced">高阶</option>
+            </select>
+          </div>
+          <div class="search-actions">
+            <button class="btn primary" id="searchBtn" type="button">查询</button>
+            <button class="btn" id="resetBtn" type="button">重置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 草稿 / 已发布 / 已下架 ==================== -->
+      <!-- 默认落在「已发布」：运营第一眼看到的是对外可见的课包 -->
+      <div class="card" style="margin-top: 20px">
+        <div class="zone-tabs">
+          <button data-zone="draft">草稿 <span class="count" id="draftCount">0</span></button>
+          <button class="active" data-zone="published">已发布 <span class="count" id="publishedCount">0</span></button>
+          <button data-zone="off_shelf">已下架 <span class="count" id="offShelfCount">0</span></button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 60px">ID</th>
+                <th>课包名称</th>
+                <th style="width: 110px">分类</th>
+                <th style="width: 76px">难度</th>
+                <th style="width: 110px">章节 / 课时</th>
+                <th style="width: 78px">状态</th>
+                <th style="width: 150px">更新时间</th>
+                <th style="width: 300px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="courseRows"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="emptyTip" hidden>没有符合条件的课包</div>
+        <div class="list-error" id="errorTip" hidden>
+          <span id="errorText">列表加载失败。</span>
+          <button class="btn" id="retryBtn" type="button">重新加载</button>
+        </div>
+        <div class="pager">
+          <span id="totalTip">共 0 条</span>
+          <label class="muted">
+            每页最多展示
+            <select id="pageSize" aria-label="每页条数">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+            条
+          </label>
+          <span class="spacer"></span
+          ><button class="btn" id="prevPageBtn" type="button">‹ 上一页</button
+          ><button class="btn" id="nextPageBtn" type="button">下一页 ›</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ==================== 课包编辑 Modal ====================
+     单栏表单：.modal.narrow + .modal-body.form-only + .form-field 是本模块新增的
+     样式（admin.css 末尾）。现有 .modal-body 是 modal-left + modal-right 两栏 flex，
+     直接套单栏表单会塌成一行。 -->
+<div class="modal-mask" id="courseMask">
+  <div class="modal narrow" id="courseModal" role="dialog" aria-modal="true" aria-labelledby="courseModalTitle">
+    <header class="modal-head">
+      <h2 id="courseModalTitle">新建课包</h2>
+      <button class="icon-btn" id="courseClose" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body form-only">
+      <div class="form-field">
+        <label>课包名称 <b class="req">*</b></label>
+        <input id="cTitle" maxlength="200" placeholder="如：CSP-J 冲刺营" />
+        <p class="field-error" data-err="title" hidden></p>
+      </div>
+      <div class="form-field">
+        <label>副标题</label>
+        <input id="cSubtitle" maxlength="300" placeholder="选填，一句话说明面向谁" />
+      </div>
+      <div class="form-field">
+        <label>学习专区 <b class="req">*</b></label>
+        <select id="cAreaKey"></select>
+        <span class="muted">专区决定课程进入哪一个学习空间。</span>
+      </div>
+      <div class="form-field">
+        <label>主分类 <b class="req">*</b></label>
+        <select id="cCategory"></select>
+        <p class="field-error" data-err="category_id" hidden></p>
+      </div>
+      <div class="form-field">
+        <label>课程类型 <b class="req">*</b></label>
+        <select id="cCourseKind"></select>
+        <span class="muted">课程类型与分类树相互独立。</span>
+      </div>
+      <div class="form-field">
+        <label>课程特色（可选）</label>
+        <div id="cTags" class="course-tag-picker" role="group" aria-label="课程特色，可多选"></div>
+        <span class="muted">用于课程列表的进一步筛选；请不要填写方向、知识主题或难度。</span>
+      </div>
+      <div class="form-field">
+        <label>难度</label>
+        <div class="rdot-group" id="cDifficultyGroup"></div>
+      </div>
+      <div class="form-field">
+        <label>封面图</label>
+        <!-- 应用内上传：走 /api/admin/course-covers（独立存储区域，不与题库配图混存）。
+             不上传则学员端显示默认插画，所以「移除封面」后保存即回落。 -->
+        <div class="cover-uploader">
+          <button class="btn" id="cCoverPick" type="button">选择图片</button>
+          <span class="muted">PNG / JPG / GIF / WebP，不超过 5MB；不上传则学员端用默认插画</span>
+        </div>
+        <div class="cover-preview" id="cCoverPreview" hidden>
+          <img id="cCoverImg" alt="封面预览" />
+          <button class="btn-text link danger" id="cCoverRemove" type="button">移除封面</button>
+        </div>
+        <input type="file" id="cCoverFile" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
+      </div>
+      <div class="form-field">
+        <label>课包简介</label>
+        <!-- 与题库录入同一套 Vditor 编辑器（IR 模式，可插图）；学员端详情页渲染 Markdown -->
+        <div id="cDescriptionEditor"></div>
+        <span class="muted">学员在课包详情页看到的介绍，支持 Markdown 与插图</span>
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <span class="muted" id="courseModalHint"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="courseCancel" type="button">取消</button>
+      <button class="btn primary" id="courseSave" type="button">保存</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ==================== 分类维护 Modal ==================== -->
+<div class="modal-mask" id="categoryMask">
+  <div class="modal narrow" id="categoryModal" role="dialog" aria-modal="true" aria-labelledby="categoryModalTitle">
+    <header class="modal-head">
+      <h2 id="categoryModalTitle">分类维护</h2>
+      <button class="icon-btn" id="categoryClose" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body form-only">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>名称</th><th style="width: 90px">排序</th><th style="width: 130px">操作</th></tr>
+          </thead>
+          <tbody id="categoryRows"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="categoryEmpty" hidden>还没有分类，先在下面添加一个</div>
+      <div class="inline-add">
+        <input id="newCategoryName" maxlength="50" placeholder="新分类名称" />
+        <input id="newCategorySort" type="number" value="0" style="width: 90px" aria-label="排序值" />
+        <button class="btn primary" id="addCategoryBtn" type="button">添加</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="courses.js"></script>
+</body>
+</html>

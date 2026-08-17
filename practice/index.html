@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="汪蒲明的前端入门学习系统视觉 Demo" />
+    <title>学习系统 | 汪蒲明</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="app-brand" href="../index.html" aria-label="返回个人博客">
+        <img src="../assets/otter-avatar.png" alt="水獭 IP 头像" />
+        <span>汪蒲明 · 学习系统</span>
+      </a>
+      <nav class="app-nav" aria-label="学习系统导航">
+        <a href="#/" data-route="#/">入口</a>
+        <a href="#/login" data-route="#/login">登录</a>
+        <a href="#/courses" data-route="#/courses">课程</a>
+        <a href="#/courses/html-basics" data-route="#/courses/html-basics"
+          >练习预览</a
+        >
+      </nav>
+      <button class="theme-toggle" type="button" aria-label="切换深浅色主题">
+        ◐
+      </button>
+    </header>
+
+    <main class="app-main">
+      <section class="screen landing-screen" data-screen="landing">
+        <div class="landing-copy">
+          <p class="eyebrow">FRONTEND PRACTICE · DEMO</p>
+          <h1>慢慢学，<br />把知识变成<span>作品。</span></h1>
+          <p>
+            一个为前端入门准备的练习空间。课程、知识点和小练习，都在同一条清晰的学习路径上。
+          </p>
+          <div class="action-row">
+            <a class="button button-primary" href="#/login"
+              >开始学习 <span>↗</span></a
+            >
+            <a class="text-link" href="#/courses">看看课程 <span>↓</span></a>
+          </div>
+          <p class="demo-note">
+            这是纯前端视觉 Demo，不会创建账号或保存学习数据。
+          </p>
+        </div>
+        <div class="landing-art" aria-label="挥手欢迎的水獭">
+          <span class="art-ring ring-one"></span
+          ><span class="art-ring ring-two"></span>
+          <img src="../assets/otter-welcome.png" alt="挥手欢迎的水獭" />
+        </div>
+      </section>
+
+      <section class="screen auth-screen" data-screen="auth" hidden>
+        <div class="auth-intro">
+          <p class="eyebrow">WELCOME BACK</p>
+          <h1>准备好，<br />继续往前走。</h1>
+          <p>
+            登录后可以查看课程和练习记录。现在先用这一页感受学习系统的表单样式。
+          </p>
+          <img src="../assets/otter-reading.png" alt="阅读笔记的水獭" />
+        </div>
+        <div class="auth-card">
+          <div class="auth-tabs" role="tablist" aria-label="账号操作">
+            <button class="auth-tab active" type="button" data-auth="login">
+              登录
+            </button>
+            <button class="auth-tab" type="button" data-auth="register">
+              注册
+            </button>
+          </div>
+          <div class="auth-heading">
+            <p class="section-index">ACCOUNT</p>
+            <h2 data-auth-title>欢迎回来</h2>
+            <p data-auth-copy>输入账号和密码，继续上一次的学习。</p>
+          </div>
+          <form class="auth-form" novalidate>
+            <label
+              >邮箱或用户名<input type="text" placeholder="例如：wangpuming"
+            /></label>
+            <label
+              >密码<input type="password" placeholder="请输入密码"
+            /></label>
+            <p class="form-error">示例提示：账号或密码不正确，再检查一下。</p>
+            <button
+              class="button button-primary"
+              type="submit"
+              data-auth-submit
+            >
+              登录并继续 <span>↗</span>
+            </button>
+          </form>
+          <p class="form-footnote" data-auth-footnote>
+            还没有账号？可以切换到注册页看看。
+          </p>
+        </div>
+      </section>
+
+      <section class="screen courses-screen" data-screen="courses" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="section-index">COURSES / 03</p>
+            <h1>从基础开始，<br />建立前端直觉。</h1>
+          </div>
+          <p>每门课都是一小段可以完成的旅程。先动手，再理解背后的原理。</p>
+        </div>
+        <div class="course-grid">
+          <article class="course-card course-html">
+            <div class="course-art">
+              <img src="../assets/otter-writing.png" alt="书写笔记的水獭" />
+            </div>
+            <div class="course-body">
+              <span class="course-tag">01 / HTML</span>
+              <h2>网页结构与语义</h2>
+              <p>从标签到页面骨架，写出清晰、易理解的内容结构。</p>
+              <div class="course-meta">
+                <span>4 个章节</span><span>已完成 40%</span>
+              </div>
+              <div class="progress"><i style="width: 40%"></i></div>
+              <a class="text-link" href="#/courses/html-basics"
+                >进入课程 <span>→</span></a
+              >
+            </div>
+          </article>
+          <article class="course-card course-css">
+            <div class="course-art">
+              <img src="../assets/otter-thinking.png" alt="思考解题的水獭" />
+            </div>
+            <div class="course-body">
+              <span class="course-tag">02 / CSS</span>
+              <h2>布局与视觉表达</h2>
+              <p>用颜色、间距与响应式布局，让内容舒适地呈现在屏幕上。</p>
+              <div class="course-meta">
+                <span>5 个章节</span><span>即将开始</span>
+              </div>
+              <div class="progress"><i style="width: 8%"></i></div>
+              <a class="text-link" href="#/courses/html-basics"
+                >查看课程 <span>→</span></a
+              >
+            </div>
+          </article>
+          <article class="course-card course-js">
+            <div class="course-art">
+              <img src="../assets/otter-coding.png" alt="专注编程的水獭" />
+            </div>
+            <div class="course-body">
+              <span class="course-tag">03 / JAVASCRIPT</span>
+              <h2>让页面动起来</h2>
+              <p>从事件和条件判断开始，为静态内容增加自然的交互反馈。</p>
+              <div class="course-meta">
+                <span>6 个章节</span><span>即将开始</span>
+              </div>
+              <div class="progress"><i style="width: 0%"></i></div>
+              <a class="text-link" href="#/courses/html-basics"
+                >查看课程 <span>→</span></a
+              >
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="screen lesson-screen" data-screen="lesson" hidden>
+        <aside class="lesson-sidebar">
+          <a class="back-link" href="#/courses">← 全部课程</a>
+          <p class="section-index">HTML / 01</p>
+          <h2>网页结构与语义</h2>
+          <ol class="lesson-outline">
+            <li class="complete"><span>01</span>网页是什么</li>
+            <li class="active"><span>02</span>认识语义标签</li>
+            <li><span>03</span>页面的基本骨架</li>
+            <li><span>04</span>小练习：个人介绍页</li>
+          </ol>
+          <div class="sidebar-progress">
+            <span>课程进度</span><strong>40%</strong>
+            <div class="progress"><i style="width: 40%"></i></div>
+          </div>
+        </aside>
+        <div class="lesson-content">
+          <p class="eyebrow">CHAPTER 02 / 10 MIN</p>
+          <h1>让标签说出<br />内容的<span>意义。</span></h1>
+          <p class="lesson-lead">
+            语义标签不只是让代码更好看。它能让浏览器、搜索引擎和辅助工具知道这一块内容承担什么角色。
+          </p>
+          <div class="concept-card">
+            <span>&lt;nav&gt;</span>
+            <div>
+              <h2>导航区域</h2>
+              <p>用来放置页面或网站中的主要跳转链接。</p>
+            </div>
+          </div>
+          <div class="quiz-card">
+            <div class="quiz-heading">
+              <div>
+                <p class="section-index">QUICK PRACTICE</p>
+                <h2>选一选</h2>
+              </div>
+              <span>01 / 01</span>
+            </div>
+            <p class="quiz-question">
+              以下哪个标签最适合包裹一组网站导航链接？
+            </p>
+            <div class="option-list">
+              <button type="button">A. &lt;div&gt;</button
+              ><button class="selected" type="button">B. &lt;nav&gt;</button
+              ><button type="button">C. &lt;span&gt;</button>
+            </div>
+            <p class="quiz-note">此处仅展示视觉状态，不会提交答案。</p>
+          </div>
+          <div class="feedback-grid">
+            <article class="feedback-card success">
+              <img src="../assets/otter-celebrating.png" alt="完成庆祝的水獭" />
+              <div>
+                <span>答对了</span>
+                <h2>很棒，继续保持！</h2>
+                <p>&lt;nav&gt; 能清楚表达“这里是导航”。</p>
+              </div>
+            </article>
+            <article class="feedback-card retry">
+              <img src="../assets/otter-encouraging.png" alt="鼓励陪伴的水獭" />
+              <div>
+                <span>再想想</span>
+                <h2>没关系，慢一点。</h2>
+                <p>看看标签是否能直接说出内容的作用。</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="script.js"></script>
+  </body>
+</html>

@@ -1,0 +1,169 @@
+# Python virtual environments and generated files
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+junit*.xml
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.cache/
+
+# Local databases and runtime user data
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Node.js installed dependencies and build output
+node_modules/
+dist/
+# 核对构建产物时会 build 到 dist-check / dist-verify-av3 / dist-build28 这类
+# 临时目录，各个子项目都有，所以在这里一条通配收掉，不再逐个项目写规则。
+dist-*/
+build/
+.next/
+.nuxt/
+coverage/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+
+# The static admin page vendors Vditor under public/ and must ship its dist assets.
+!前端程序/study-blog-vue/public/admin/vendor/vditor/dist/
+!前端程序/study-blog-vue/public/admin/vendor/vditor/dist/**
+
+# Pytest scratch directories left behind by local runs (may be unreadable by git).
+# --basetemp 指向项目根时留下 .pt*/ 时间戳目录。.pytest-*/ 一条覆盖所有横杠变体
+# （-tmp/-temp/-data/-audit/-codex…），不要再逐个后缀加规则；注意 .pt*/ 匹配不到
+# .pytest-* （第三个字符是 y 不是 t），两条都得留着。
+.pytest-*/
+.codex-pytest-*/
+.test-tmp*/
+.pt*/
+
+# Local configuration, IDE settings, and operating-system files
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Generic local runtime output
+*.log
+*.pid
+*.tmp
+
+# Local browser-review screenshots generated in the repository root
+/demo-*.jpg
+/exam-*.jpg
+/*-check.jpg
+# Request files dropped by the local browser bridge while reviewing pages
+/.webbridge-req-*.json
+# Local bridge / sandbox diagnostics and tool scratch dirs: never commit.
+# 一条 /.tmp-* 覆盖整族（.tmp-webbridge/、.tmp-catalog-api.err、
+# .tmp-catalog-api.log…），以后再冒出新的 .tmp-xxx 不用回来改这里。
+/.tmp-*
+
+# Playwright 复核截图：每次跑页面核对都会重新生成一批，属于产物不是素材。
+/output/
+# Playwright CLI 自己的抓取缓存（console-*.log 会被 *.log 收掉，
+# 但 page-*.yml 不会，所以整个目录挡掉）。
+/.playwright-cli/
+
+# Local-only style preview harness for the exam pages: it mounts a single
+# component against fixture data so layout can be eyeballed without a backend.
+# Useful to keep on disk, not something the repository should carry.
+/前端程序/study-blog-vue/preview-exam.html
+/前端程序/study-blog-vue/src/__preview__/
+# Same idea, throwaway version: Vite treats any *.html at the project root as an
+# entry, so hand-verifying one component in a real browser costs a single file.
+# They get created often and committed by accident just as often — name them
+# *-dev.html (e.g. lightbox-dev.html) and they stay out.
+/前端程序/study-blog-vue/*-dev.html
+
+# Local frontend build checks, preview pages, and test command output
+# 每次核对构建产物都会 build 到一个新的 dist-xxx 目录（dist-check、dist-verify、
+# dist-verify-av3…），一条通配把整族收掉，真正要提交的产物只走 dist/ 之外的路径。
+/前端程序/study-blog-vue/dist-*/
+/前端程序/study-blog-vue/preview-lesson.html
+/前端程序/study-blog-vue/p2-*.txt
+/前端程序/study-blog-vue/vitest-out.txt
+/前端程序/study-blog-vue/vite.*.log
+
+# Codex stores local task hooks and session metadata here.
+/.codex/
+
+# Local UI-tool caches and development-server output, wherever they are generated.
+**/.impeccable/
+**/.codex-runtime/
+**/vite.*.log
+
+# Accidental empty lockfile created by running npm in the parent directory
+/前端程序/package-lock.json
+
+# Keep dependency manifests and lockfiles under version control:
+# requirements.txt, pyproject.toml, package.json, package-lock.json, pnpm-lock.yaml
+dashboard-demo/index.html
+dashboard-demo/main.js
+dashboard-demo/package-lock.json
+dashboard-demo/package.json
+dashboard-demo/styles.css
+
+# Windows 下误把 /dev/null 写成相对路径的构建垃圾（dev/null），忽略整个 dev/
+前端程序/study-blog-vue/dev/
+
+# Recovery metadata from the previous damaged Git repository. These folders are
+# intentionally retained locally for rollback only and must never be committed.
+/.git-damaged-backup-*/
+
+# One-off local archive used while inspecting the previous repository state.
+/_head_test.tar
+
+# ---------------------------------------------------------------------
+# 开发文档：设计稿、交接说明、评审记录、路线图裁决等 59 份内部文档。
+# 这个仓库后面要推远程、上部署服务器，跑起来的只有代码，文档带过去没有
+# 意义，还会把每次部署的传输量拉大。文件继续留在本地磁盘，只是不进版本库。
+# 注意：根目录的 README.md / DESIGN.md / PRODUCT.md 不在此列，仍然提交。
+# ---------------------------------------------------------------------
+/开发文档/
+
+# ---------------------------------------------------------------------
+# 参考项目：Scratch 生态第三方项目的上游克隆（nuzzlebug / scratch-editor /
+# turbowarp-scratch-gui）加一份索引 README，纯查阅用的参考资料。和开发文档
+# 同理，推远程、上部署服务器都用不到，整个目录不入库，留在本地磁盘即可。
+# ---------------------------------------------------------------------
+/参考项目/
+
+# ---------------------------------------------------------------------
+# 自带 .git 的嵌套仓库。不挡住的话 git 会把它们当成 gitlink 提交：仓库里
+# 只留一条 commit 号，没有 .gitmodules，别人克隆下来是空目录 —— 等于既
+# 占了位置又没有内容，是最难排查的一种坏提交。
+# 参考项目下的三个上游克隆已经被上面的 /参考项目/ 一并挡住，这里剩下的两个
+# 是你自己的项目，只是各自维护着独立的 git 仓库。若想把它们并进本仓库统一
+# 管理，删掉对应项目里的 .git 目录，再把这两行去掉即可。
+# ---------------------------------------------------------------------
+/前端程序/focus-studio/
+/前端程序/typing-studio-qwerty/

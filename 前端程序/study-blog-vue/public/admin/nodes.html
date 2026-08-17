@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>内容编排 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+  <!-- 课时图文的 Markdown 预览走 admin-markdown.js（与题库/试卷页同一条渲染管线），
+       它依赖 window.Vditor + window.DOMPurify，这两个 vendor 必须在这里加载。
+       少了它们不会报错，只会在预览区显示「预览组件未加载」。 -->
+  <link rel="stylesheet" href="vendor/vditor/dist/index.css" />
+  <script src="vendor/dompurify/purify.min.js"></script>
+  <script src="vendor/vditor/dist/index.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <h1 id="courseTitle">内容编排</h1>
+          <p id="courseMeta" class="muted">正在载入课包…</p>
+        </div>
+        <div class="head-actions">
+          <a class="btn" href="courses.html">返回课包列表</a>
+          <button class="btn" id="addSectionBtn" type="button">＋ 新建章节</button>
+          <button class="btn primary" id="publishBtn" type="button">发布课包</button>
+        </div>
+      </div>
+
+      <!-- 无 course 参数：不做课包选择器（那等于把 courses.html 的检索逻辑抄第二份） -->
+      <div class="card" id="noCourseTip" hidden>
+        <div class="empty">
+          <p style="font-size: 34px; margin: 0 0 12px">📁</p>
+          请从「课包管理」点<strong>编排目录</strong>进入<br />
+          <span class="muted">目录永远从属于某个课包，本页不单独选课包</span>
+          <p style="margin-top: 16px"><a class="btn primary" href="courses.html">去课包管理</a></p>
+        </div>
+      </div>
+
+      <div class="nodes-scroll" id="nodesLayout" hidden>
+      <div class="nodes-layout">
+        <!-- ==================== 左：目录树 ==================== -->
+        <section class="card tree-pane">
+          <div class="tree-toolbar">
+            <span class="muted">按住 ⠿ 拖拽排序；课时可直接拖到别的章节</span>
+            <span class="spacer"></span>
+            <span class="muted" id="treeSaving" hidden>保存中…</span>
+          </div>
+          <ol class="section-list" id="sectionList"></ol>
+          <div class="empty" id="treeEmpty" hidden>还没有章节，点右上角「＋ 新建章节」开始</div>
+        </section>
+
+        <div class="composer-column-resizer tree-resizer" id="treeResizer" role="separator" aria-label="调整课程目录栏宽度" aria-orientation="vertical" aria-valuemin="230" aria-valuemax="420" aria-valuenow="280" tabindex="0"></div>
+
+        <!-- ==================== 中：课时内容块 ==================== -->
+        <section class="card composer-pane" aria-label="课时内容">
+          <div class="composer-empty-state" id="composerEmptyState">
+            <p>从左侧选择一个课时开始编排内容</p>
+            <p class="muted">视频、图文、练习、作业会按学习顺序展示在这里</p>
+          </div>
+          <!-- 表头与内容块列表是两个兄弟区域：表头固定不参与滚动，滚动条只长在 .composer-scroll 上。
+               不要退回 position: sticky —— 那样表头和列表同处一个滚动层，滚到边界时列表会从表头
+               与外层课程标题下方透出来（"伪置顶"），加背景/提 z-index 只能遮，改不掉结构。 -->
+          <div class="composer-shell" id="lessonComposer" hidden>
+            <div class="composer-head">
+              <div>
+                <span class="eyebrow">课时内容</span>
+                <h2 id="composerLessonTitle">课时标题</h2>
+                <p class="muted" id="composerLessonMeta"></p>
+              </div>
+              <div class="composer-actions">
+                <button class="btn" id="composerEditLesson" type="button">编辑课时</button>
+                <button class="btn" id="composerBatchBtn" type="button">批量操作</button>
+                <div class="composer-add-wrap">
+                  <button class="btn primary" id="composerAddBtn" type="button">＋ 添加内容</button>
+                  <div class="composer-add-menu" id="composerAddMenu" hidden>
+                    <button type="button" data-add-block="markdown">图文内容</button>
+                    <button type="button" data-add-block="video">视频资源</button>
+                    <button type="button" data-add-block="practice">课中练习（单题）</button>
+                    <button type="button" data-add-block="homework">课后练习（试卷）</button>
+                    <button type="button" data-add-block="materials">阅读资料</button>
+                    <button type="button" data-add-block="scratch">Scratch 编程挑战</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="composer-scroll" id="composerScroll">
+              <ol class="lesson-block-list" id="lessonBlockList"></ol>
+              <button class="composer-drop-add" id="composerDropAdd" type="button">＋ 点击添加内容，或拖动内容块调整学习顺序</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 编辑内容块时会移入独立弹窗，不占编排画布的第三栏。 -->
+        <section class="card lesson-pane">
+          <div class="lesson-empty-state" id="lessonEmptyState">
+            <p>从左侧选择一个课时开始编辑</p>
+            <p class="muted">或在章节右侧的 ＋ 新增课时</p>
+          </div>
+
+          <form class="lesson-form" id="lessonForm" hidden onsubmit="return false">
+            <div class="form-field">
+              <label>课时标题 <b class="req">*</b></label>
+              <input id="lTitle" maxlength="200" />
+              <p class="field-error" data-err="title" hidden></p>
+            </div>
+            <div class="form-field">
+              <label>一句话摘要</label>
+              <input id="lSummary" maxlength="500" placeholder="选填，学员在目录里看到的说明" />
+            </div>
+
+            <div class="form-field">
+              <label>时长（分钟）</label>
+              <input id="lDuration" type="number" min="0" value="0" style="width: 90px" />
+            </div>
+
+            <!-- 学习开放策略（2026-08-10 起替代「设为试看课时」复选框）：
+                 课时级参数，作用于本课时所有内容块，由后端逐块判定 can_access。 -->
+            <div class="form-field">
+              <label>学习开放策略</label>
+              <select id="lOpenPolicy">
+                <option value="closed">不开放 · 仅目录可见，需开通课包</option>
+                <option value="whole">整节试看 · 视频/图文/资料整节可学</option>
+                <option value="first_n">试看前 N 块 · 前 N 个内容块可学，其余锁定</option>
+              </select>
+            </div>
+            <div class="form-field inline" id="lTrialBlocksField" hidden>
+              <label>试看块数 N</label>
+              <input id="lTrialBlocks" type="number" min="1" max="50" value="1" style="width: 90px" />
+              <span class="muted">按内容块顺序计：图文/视频/练习/作业/资料一视同仁</span>
+            </div>
+
+            <div class="lesson-actions">
+              <button class="btn danger" id="lessonDelete" type="button">删除课时</button>
+              <span class="spacer"></span>
+              <span class="muted" id="lessonSaveHint"></span>
+              <button class="btn primary" id="lessonSave" type="button">保存课时</button>
+            </div>
+          </form>
+        </section>
+
+        <!-- 编辑内容块弹窗的宿主：不占编排画布，由 nodes.js 移入独立 Modal（只配置当前块）。 -->
+        <section class="block-pane" id="blockPane" hidden>
+          <div class="block-inspector" id="blockInspector"></div>
+        </section>
+
+        <section class="composer-readiness" aria-label="发布就绪度">
+          <div><strong>发布就绪度 <span id="readinessPercent">0%</span></strong><span class="muted" id="readinessSummary">正在计算课包内容…</span></div>
+          <div class="readiness-track"><span id="readinessTrack"></span></div>
+          <div class="readiness-items" id="readinessItems"></div>
+          <button class="btn primary" id="readinessSaveBtn" type="button">保存并继续</button>
+        </section>
+      </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script type="module" src="nodes.js"></script>
+</body>
+</html>

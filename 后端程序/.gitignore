@@ -1,0 +1,3 @@
+
+# pytest 临时目录（WorkBuddy 沙箱会拦截其 rmtree 清理，改名规避）
+.pytest-tmp*

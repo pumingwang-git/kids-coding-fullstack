@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>学习目录 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div><h1>学习目录</h1><p>维护专区、工作台能力、分类树、课程类型与检索标签</p></div>
+        <div class="head-actions">
+          <button class="btn" id="openAreaSettingsBtn" type="button">专区设置</button>
+          <button class="btn primary" id="newAreaBtn" type="button">＋ 新建专区</button>
+        </div>
+      </div>
+      <div class="modal-mask" id="createCatalogItem" hidden inert>
+        <section class="modal catalog-create-modal" role="dialog" aria-modal="true" aria-labelledby="createCatalogTitle">
+        <header class="modal-head">
+          <div>
+            <h2 id="createCatalogTitle">新增内容</h2>
+            <p id="createCatalogHint">填写名称和稳定标识后保存。</p>
+          </div>
+          <button class="modal-close" id="cancelCreateCatalogItem" type="button" aria-label="关闭新增面板">×</button>
+        </header>
+        <form id="createCatalogItemForm" class="catalog-form-grid">
+          <label>名称<input id="createCatalogName" maxlength="50" required autocomplete="off" /></label>
+          <label>稳定标识<input id="createCatalogKey" maxlength="64" required pattern="[a-z][a-z0-9-]{1,62}" aria-describedby="createCatalogKeyHint" autocomplete="off" /></label>
+          <label class="catalog-wide" id="createCatalogDescriptionRow">说明<textarea id="createCatalogDescription" maxlength="300" rows="2"></textarea></label>
+          <small class="catalog-wide muted" id="createCatalogKeyHint">使用小写字母、数字和连字符，创建后不可修改。</small>
+          <div class="catalog-actions catalog-wide"><button class="btn primary" type="submit">保存新增内容</button></div>
+        </form>
+        </section>
+      </div>
+      <p id="catalogReadOnlyHint" class="catalog-read-only" hidden>当前为只读审核角色：可以查看目录，但不能修改内容。</p>
+      <section class="catalog-context" aria-label="当前维护专区">
+        <label for="areaPicker">当前学习专区</label>
+        <select id="areaPicker" aria-describedby="areaPickerHint"></select>
+        <p id="areaPickerHint">切换后将显示该专区的导航、分类、课程类型与检索标签。</p>
+      </section>
+      <div class="catalog-layout">
+        <section class="catalog-main">
+          <div class="modal-mask" id="areaSettingsMask" hidden inert>
+            <section class="modal catalog-settings-modal" id="areaEditorCard" role="dialog" aria-modal="true" aria-labelledby="areaEditorTitle">
+            <header class="modal-head"><div><h2 id="areaEditorTitle">专区设置</h2><p id="areaEditorHint">选择左侧专区后维护</p></div><button class="modal-close" id="closeAreaSettingsBtn" type="button" aria-label="关闭专区设置">×</button></header>
+            <div class="catalog-form-grid">
+          <label>稳定标识<input id="areaKey" maxlength="32" pattern="[a-z][a-z0-9-]{1,62}" aria-describedby="areaKeyHint" placeholder="如：kids" /></label>
+              <label>专区名称<input id="areaName" maxlength="50" /></label>
+              <label>状态<select id="areaStatus"><option value="active">已开放</option><option value="planning">规划中</option><option value="hidden">已隐藏</option></select></label>
+              <label>主题<select id="areaTheme"><option value="default">通用主题</option><option value="kids">少儿主题</option><option value="programmer">开发者主题</option></select></label>
+              <label>排序<input id="areaSort" type="number" value="0" /></label>
+              <label class="catalog-wide">目标人群<input id="areaAudience" maxlength="200" /></label>
+          <label class="catalog-wide">专区简介<textarea id="areaDescription" maxlength="500" rows="3"></textarea></label>
+          <small class="catalog-wide muted" id="areaKeyHint">只使用小写字母、数字和连字符；创建后会用于路由和接口，不能修改。</small>
+            </div>
+            <div class="catalog-actions"><button class="btn danger" id="deleteAreaBtn" type="button">删除专区</button><button class="btn primary" id="saveAreaBtn" type="button">保存专区</button></div>
+            </section>
+          </div>
+
+          <div class="card catalog-tabs-card" id="catalogDetails" hidden>
+            <nav class="zone-tabs" role="tablist" aria-label="目录维护分类">
+              <button class="active" id="tab-modules" role="tab" aria-selected="true" aria-controls="panel-modules" data-tab="modules">工作台导航</button>
+              <button id="tab-categories" role="tab" aria-selected="false" aria-controls="panel-categories" tabindex="-1" data-tab="categories">分类树</button>
+              <button id="tab-types" role="tab" aria-selected="false" aria-controls="panel-types" tabindex="-1" data-tab="types">课程类型</button>
+              <button id="tab-tags" role="tab" aria-selected="false" aria-controls="panel-tags" tabindex="-1" data-tab="tags">检索标签</button>
+            </nav>
+            <section class="catalog-tab active" id="panel-modules" role="tabpanel" aria-labelledby="tab-modules" data-panel="modules">
+              <div class="catalog-panel-head"><div><h2>工作台导航</h2><p>选择已有能力，设置名称、状态和顺序</p></div><button class="btn" id="addModuleBtn" type="button">添加模块</button></div>
+              <div id="moduleRows" class="catalog-rows"></div>
+              <div class="catalog-actions"><button class="btn primary" id="saveModulesBtn" type="button">保存导航</button></div>
+            </section>
+            <section class="catalog-tab" id="panel-categories" role="tabpanel" aria-labelledby="tab-categories" data-panel="categories">
+              <div class="catalog-panel-head"><div><h2>分类树</h2><p>首两层在学员端显示为方向与主题，可继续添加更深层级</p></div><button class="btn" id="addRootCategoryBtn" type="button">添加方向</button></div>
+              <div class="catalog-tree-scroll" tabindex="0" aria-label="分类树编辑区，可横向滚动查看完整字段">
+                <div class="catalog-tree-columns" aria-hidden="true">
+                  <span>分类名称</span><span>稳定标识</span><span>说明</span><span>上级分类</span><span>排序</span><span>状态</span><span>操作</span>
+                </div>
+                <div id="categoryTree" class="catalog-tree"></div>
+              </div>
+            </section>
+            <section class="catalog-tab" id="panel-types" role="tabpanel" aria-labelledby="tab-types" data-panel="types">
+              <div class="catalog-panel-head"><div><h2>课程类型</h2><p>与分类树并行的课程组织方式</p></div><button class="btn" id="addTypeBtn" type="button">添加类型</button></div>
+              <div class="catalog-rows-scroll" tabindex="0" aria-label="课程类型编辑区，可横向滚动查看完整字段"><div id="typeRows" class="catalog-rows"></div></div>
+            </section>
+            <section class="catalog-tab" id="panel-tags" role="tabpanel" aria-labelledby="tab-tags" data-panel="tags">
+              <div class="catalog-panel-head"><div><h2>课程特色</h2><p>用于进一步筛选；不要重复填写方向、知识主题或难度</p></div><button class="btn" id="addTagBtn" type="button">添加特色</button></div>
+              <div class="catalog-rows-scroll" tabindex="0" aria-label="检索标签编辑区，可横向滚动查看完整字段"><div id="tagRows" class="catalog-rows"></div></div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module" src="learning-catalog.js?v=20260814-actions"></script>
+</body>
+</html>

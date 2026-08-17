@@ -1,0 +1,39 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>资料管理 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div><h1>资料管理</h1><p class="muted">文件夹负责归类，标签和全文名检索负责跨目录查找；列表始终由服务端分页。</p></div>
+        <div class="head-actions"><button class="btn" id="newFolderBtn" type="button">＋ 新建文件夹</button><button class="btn" id="importFolderBtn" type="button">准备 Windows 文件夹迁移</button><button class="btn primary" id="uploadBtn" type="button">上传资料</button></div>
+      </div>
+
+      <input id="uploadInput" type="file" multiple hidden />
+      <input id="importInput" type="file" webkitdirectory directory multiple hidden />
+      <div class="materials-layout">
+        <section class="card materials-folders"><div class="tree-toolbar"><strong>资料文件夹</strong><button class="btn-text link" id="allMaterialsBtn" type="button">全部资料</button></div><ol id="materialFolderTree" class="material-folder-tree"></ol></section>
+        <section class="card materials-main">
+          <div class="materials-toolbar"><input id="materialKeyword" placeholder="按文件名搜索（支持上万条资料）" /><select id="materialType"><option value="">全部类型</option><option value="document">文档</option><option value="image">图片</option><option value="video">视频</option><option value="audio">音频</option><option value="archive">压缩包</option><option value="other">其他</option></select><button class="btn" id="searchMaterialsBtn" type="button">搜索</button></div>
+          <div class="materials-path" id="materialPath">全部资料</div>
+          <div class="materials-summary" id="materialsSummary">正在载入资料…</div>
+          <div class="table-wrap"><table><thead><tr><th>文件名</th><th>类型</th><th>所在文件夹</th><th>大小</th><th>状态</th><th></th></tr></thead><tbody id="materialRows"></tbody></table></div>
+          <div class="pager"><button class="btn" id="materialsPrev" type="button">上一页</button><span id="materialsPage">第 1 页</span><button class="btn" id="materialsNext" type="button">下一页</button></div>
+        </section>
+      </div>
+      <section class="card material-import-status" id="importStatus" hidden></section>
+    </main>
+  </div>
+</div>
+<script type="module" src="materials.js"></script>
+</body>
+</html>
+

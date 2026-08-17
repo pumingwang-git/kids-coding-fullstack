@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>考试链接 · DEMO</title>
+  <link rel="stylesheet" href="admin.css" />
+  <!-- DEMO 专用：拦截 /api/admin/* 返回 mock 数据，让真实页面代码（exam-links.js）
+       在无后端的环境下直接渲染。只看界面用的，别拿它验收逻辑。 -->
+  <script>
+    document.cookie = "admin_csrf_token=demo-token";
+    (() => {
+      const PAPERS = [
+        { id: 7, paper_id_no: "P000007", title: "三班期中卷", paper_type: "测试卷", subject: "cpp", status: "published" },
+        { id: 8, paper_id_no: "P000008", title: "C++ 期末模拟卷", paper_type: "模拟卷", subject: "cpp", status: "published" },
+        { id: 9, paper_id_no: "P000009", title: "上学期旧卷", paper_type: "测试卷", subject: "cpp", status: "archived" },
+      ];
+      const LINK_BASE = {
+        paper_id: 7, exam_url: "/exam/3f9a1c7e2b4d8f", revision: 3,
+        open_at: "2026-08-10T06:00:00", close_at: "2026-08-10T08:00:00",
+        duration_minutes: 90, late_start_policy: "truncate", attempt_limit: 1, score_policy: "best",
+        penalty_minutes: 0, feedback_mode: "realtime", show_analysis: "after_submit", show_score: "immediate",
+        shuffle_questions: true, shuffle_options: false,
+        notice: "# 考前须知\n诚信应考，独立完成。", notice_ack_required: true,
+        entry_open_minutes: 15, remind_minutes: "30,10,5", warn_unanswered: true,
+        paper: PAPERS[0], owner: { id: 1, display_name: "root" },
+        allowed_actions: ["view", "copy", "edit", "reset_token", "disable", "delete"],
+      };
+      const LINKS = [
+        { ...LINK_BASE, id: 12, name: "三班期中考", status: "active", phase: "running" },
+        { ...LINK_BASE, id: 13, name: "四班补考", status: "disabled", phase: "running",
+          allowed_actions: ["view", "copy", "edit", "reset_token", "enable", "delete"] },
+        { ...LINK_BASE, id: 14, name: "暑期摸底（未开始）", status: "active", phase: "not_started",
+          open_at: "2026-08-20T06:00:00", close_at: "2026-08-20T08:00:00" },
+        { ...LINK_BASE, id: 15, name: "旧卷遗留链接（归档卷，只能删）", status: "disabled", phase: "ended",
+          paper: PAPERS[2], open_at: "2026-05-10T06:00:00", close_at: "2026-05-10T08:00:00",
+          allowed_actions: ["view", "copy", "delete"] },
+        { ...LINK_BASE, id: 16, name: "课后自测（不限时不限次）", status: "active", phase: "running",
+          open_at: null, close_at: null, duration_minutes: null, attempt_limit: 0,
+          entry_open_minutes: 0, remind_minutes: "", notice_ack_required: false, notice: "" },
+      ];
+      const json = (body, status = 200) =>
+        new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+      const realFetch = window.fetch.bind(window);
+      window.fetch = async (url, options = {}) => {
+        const path = String(url);
+        if (!path.startsWith("/api/admin")) return realFetch(url, options);
+        if (path.startsWith("/api/admin/me")) return json({ id: 1, display_name: "演示账号", role: "super_admin" });
+        if (path.startsWith("/api/admin/csrf")) return json({ ok: true });
+        if (path.startsWith("/api/admin/exam-link-counts")) return json({ counts: { all: 5, active: 3, disabled: 2 } });
+        if (path.startsWith("/api/admin/exam-links")) {
+          const params = new URLSearchParams(path.split("?")[1] || "");
+          let items = LINKS;
+          const status = params.get("status");
+          const phase = params.get("phase");
+          const keyword = params.get("keyword");
+          const paperId = params.get("paper_id");
+          if (status) items = items.filter((l) => l.status === status);
+          if (phase) items = items.filter((l) => l.phase === phase);
+          if (paperId) items = items.filter((l) => String(l.paper_id) === paperId);
+          if (keyword) items = items.filter((l) => l.name.includes(keyword) || l.paper.title.includes(keyword) || (l.paper.paper_id_no || "").includes(keyword));
+          return json({ items, total: items.length, page: 1, size: 20 });
+        }
+        if (path.startsWith("/api/admin/paper-owners")) return json({ items: [{ id: 1, display_name: "root" }, { id: 2, display_name: "writer" }] });
+        if (path.startsWith("/api/admin/papers")) {
+          const p = new URLSearchParams(path.split("?")[1] || "");
+          let items = PAPERS;
+          if (p.get("status")) items = items.filter((x) => x.status === p.get("status"));
+          if (p.get("keyword")) items = items.filter((x) => x.title.includes(p.get("keyword")) || (x.paper_id_no || "").includes(p.get("keyword")));
+          return json({ items, total: items.length, page: 1, size: 100 });
+        }
+        if (/^\/api\/admin\/links\/\d+/.test(path)) return json({ ...LINK_BASE, revision: LINK_BASE.revision + 1 });
+        return json({}, 200);
+      };
+    })();
+  </script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <!-- ==================== 页面标题 + 检索栏 ==================== -->
+      <div class="page-head">
+        <div>
+          <h1>考试链接</h1>
+          <p>一张卷可以有多条链接，每条是一次独立的考试安排——时间、次数、呈现与提醒规则各自独立，互不影响。</p>
+        </div>
+        <button class="btn primary" id="newLinkBtn" type="button">＋ 新建链接</button>
+      </div>
+
+      <!-- 从试卷页带 ?paper_id= 跳入时的筛选芯片 -->
+      <div class="filter-chip" id="paperChip" hidden>
+        当前只看：<b id="paperChipText"></b>
+        <button class="chip-close" id="paperChipClose" type="button" aria-label="清除试卷筛选">✕</button>
+      </div>
+
+      <div class="card search-card">
+        <div class="search-form">
+          <div class="field">
+            <label>关键词</label><input id="sKeyword" placeholder="链接名 / 试卷名 / 编号" />
+          </div>
+          <div class="field">
+            <label for="sPaperInput">所属试卷</label>
+            <!-- 与新建 Modal 同一个远程搜索组合框（admin-combobox.js），
+                 不再吃前 100 条缓存；不选 = 全部。 -->
+            <div class="paper-picker">
+              <input
+                id="sPaperInput"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="sPaperList"
+                autocomplete="off"
+                placeholder="全部（输入编号 / 标题筛选）"
+              />
+              <input type="hidden" id="sPaper" />
+              <button class="chip-close picker-clear" id="sPaperClear" type="button" aria-label="清除试卷筛选" hidden>✕</button>
+              <div class="paper-list" id="sPaperList" role="listbox" aria-label="试卷搜索结果" hidden></div>
+            </div>
+          </div>
+          <div class="field">
+            <label>运行态</label
+            ><select id="sPhase">
+              <option value="">全部</option>
+              <option value="not_started">未开始</option>
+              <option value="running">进行中</option>
+              <option value="ended">已结束</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>负责人</label
+            ><select id="sOwner">
+              <option value="">全部</option>
+            </select>
+          </div>
+          <div class="search-actions">
+            <button class="btn primary" id="searchBtn" type="button">查询</button>
+            <button class="btn" id="resetBtn" type="button">重置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 全部 / 启用中 / 已停用 ==================== -->
+      <div class="card" style="margin-top: 20px">
+        <div class="zone-tabs">
+          <button class="active" data-zone="">全部 <span class="count" id="allCount">0</span></button>
+          <button data-zone="active">启用中 <span class="count" id="activeCount">0</span></button>
+          <button data-zone="disabled">已停用 <span class="count" id="disabledCount">0</span></button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>链接名称</th>
+                <th style="width: 170px">所属试卷</th>
+                <th style="width: 150px">时间窗口</th>
+                <th style="width: 56px">时长</th>
+                <th style="width: 52px">次数</th>
+                <th style="width: 60px">启停</th>
+                <th style="width: 72px">运行态</th>
+                <th style="width: 270px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="linkRows"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="emptyTip" hidden>没有符合条件的考试链接</div>
+        <div class="list-error" id="errorTip" hidden>
+          <span id="errorText">列表加载失败。</span>
+          <button class="btn" id="retryBtn" type="button">重新加载</button>
+        </div>
+        <div class="pager">
+          <span id="totalTip">共 0 条</span>
+          <label class="muted">
+            每页最多展示
+            <select id="pageSize" aria-label="每页条数">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            条
+          </label>
+          <span class="spacer"></span
+          ><button class="btn" id="prevPageBtn" type="button">‹ 上一页</button
+          ><button class="btn" id="nextPageBtn" type="button">下一页 ›</button>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ==================== 新建 / 编辑链接 Modal ====================
+     双栏：左侧可滚动配置区（四张分组卡片）+ 右侧固定「学员实际体验」预览。
+     时间/时长一律用显式模式单选（立即开放/定时开放、长期有效/指定关闭、不限时/限时），
+     不再用「留空代表某种状态」；右栏随表单实时重算，冲突直接亮警告，不等保存。
+     mask 初始 hidden + inert：关掉的 Modal 不得留在可访问性树里（openMask/closeMask 负责切换）。 -->
+<div class="modal-mask" id="linkMask" hidden inert>
+  <div class="modal link-modal" id="linkModal" role="dialog" aria-modal="true" aria-labelledby="linkModalTitle">
+    <header class="modal-head">
+      <h2 id="linkModalTitle">新建考试链接</h2>
+      <button class="icon-btn" id="linkClose" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body">
+      <!-- 左：可滚动配置区 -->
+      <div class="link-config">
+        <section class="link-card" aria-labelledby="lcBasic">
+          <h4 class="sec-title" id="lcBasic">基本信息</h4>
+          <div class="field-pair">
+            <div class="link-field">
+              <label for="lPaperInput">所属试卷</label>
+              <!-- 远程搜索组合框：卷会越来越多，绝不把全量卷塞进下拉。
+                   输入编号/标题关键词 → 防抖请求后端（status=published、每次 20 条）；
+                   必须点选结果才生效，重新输入即清除已选。 -->
+              <div class="paper-picker" id="lPaperPicker">
+                <input
+                  id="lPaperInput"
+                  role="combobox"
+                  aria-expanded="false"
+                  aria-controls="lPaperList"
+                  autocomplete="off"
+                  placeholder="输入编号或标题关键词搜索，从结果中点选"
+                />
+                <input type="hidden" id="lPaper" />
+                <div class="paper-list" id="lPaperList" role="listbox" aria-label="试卷搜索结果" hidden></div>
+              </div>
+              <!-- 编辑时不给禁用下拉框：禁用的控件像「能改但没权限」，纯文本只读信息更准确 -->
+              <div class="paper-static" id="lPaperStatic" hidden></div>
+              <small class="muted" id="lPaperHint"></small>
+            </div>
+            <div class="link-field">
+              <label for="lName">链接名称</label>
+              <input id="lName" maxlength="100" placeholder="如：三班期中考" />
+              <small class="muted">同卷内不可重名</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="link-card" aria-labelledby="lcTime">
+          <h4 class="sec-title" id="lcTime">考试时间与入场</h4>
+          <div class="attr-row">
+            <span class="attr-label">开放</span>
+            <span class="pill-group" id="lOpenModeGroup"></span>
+            <span class="mode-extra" id="lOpenAtWrap" hidden>
+              <label class="attr-label" for="lOpenAt">开放时间</label>
+              <input id="lOpenAt" type="datetime-local" />
+            </span>
+          </div>
+          <div class="attr-row">
+            <span class="attr-label">关闭</span>
+            <span class="pill-group" id="lCloseModeGroup"></span>
+            <span class="mode-extra" id="lCloseAtWrap" hidden>
+              <label class="attr-label" for="lCloseAt">关闭时间</label>
+              <input id="lCloseAt" type="datetime-local" />
+            </span>
+          </div>
+          <div class="attr-row">
+            <span class="attr-label">时长</span>
+            <span class="pill-group" id="lDurationModeGroup"></span>
+            <span class="mode-extra" id="lDurationWrap" hidden>
+              <label class="attr-label" for="lDuration">限时</label>
+              <input id="lDuration" type="number" min="1" style="width: 90px" />
+              <span class="muted">分钟</span>
+            </span>
+          </div>
+          <div class="attr-row">
+            <span class="attr-label">迟到策略</span>
+            <span class="pill-group" id="lLateGroup"></span>
+          </div>
+          <div class="attr-row">
+            <label class="attr-label" for="lEntryOpen">候考页</label>
+            <span class="muted">开考前</span>
+            <input id="lEntryOpen" type="number" min="0" max="1440" style="width: 90px" />
+            <span class="muted">分钟可进入（0 = 到点才可进）</span>
+          </div>
+          <div class="attr-row">
+            <label class="attr-label" for="lRemind">考中提醒</label>
+            <span class="muted">剩余</span>
+            <input id="lRemind" placeholder="30,10,5" maxlength="64" style="width: 140px" />
+            <span class="muted">分钟时提示（逗号分隔，最多 5 个）</span>
+          </div>
+        </section>
+
+        <section class="link-card" aria-labelledby="lcResult">
+          <h4 class="sec-title" id="lcResult">作答与结果</h4>
+          <div class="attr-row">
+            <label class="attr-label" for="lAttempt">作答次数</label>
+            <input id="lAttempt" type="number" min="0" max="100" style="width: 90px" />
+            <span class="muted">0 = 不限</span>
+          </div>
+          <!-- 只允许作答一次时整行隐藏：取最高/最新/首次无从谈起 -->
+          <div class="attr-row" id="lPolicyRow">
+            <span class="attr-label">取分方式</span>
+            <span class="pill-group" id="lPolicyGroup"></span>
+          </div>
+          <fieldset class="result-group">
+            <legend>结果公布规则</legend>
+            <div class="attr-row">
+              <span class="attr-label">判题反馈</span>
+              <span class="pill-group" id="lFeedbackGroup"></span>
+            </div>
+            <div class="attr-row">
+              <span class="attr-label">分数</span>
+              <span class="pill-group" id="lShowScoreGroup"></span>
+            </div>
+            <div class="attr-row">
+              <span class="attr-label">解析</span>
+              <span class="pill-group" id="lAnalysisGroup"></span>
+            </div>
+          </fieldset>
+        </section>
+
+        <section class="link-card" aria-labelledby="lcNotice">
+          <h4 class="sec-title" id="lcNotice">考前须知与其他规则</h4>
+          <div class="attr-row" style="align-items: flex-start">
+            <label class="attr-label" for="lNotice">考试须知</label>
+            <textarea id="lNotice" rows="4" maxlength="5000" placeholder="支持 Markdown；留空 = 不展示须知页" style="flex: 1"></textarea>
+          </div>
+          <div class="attr-row">
+            <span class="attr-label"></span>
+            <label class="check-line"><input type="checkbox" id="lNoticeAck" /> 必须勾选「我已阅读」才能开始作答</label>
+          </div>
+          <details class="more-settings">
+            <summary>更多设置</summary>
+            <div class="attr-row">
+              <span class="attr-label">打乱</span>
+              <label class="check-line"><input type="checkbox" id="lShuffleQ" /> 题目顺序</label>
+              <label class="check-line"><input type="checkbox" id="lShuffleO" /> 选项顺序（仅选择 / 多选）</label>
+            </div>
+            <div class="attr-row">
+              <span class="attr-label"></span>
+              <label class="check-line"><input type="checkbox" id="lWarnUnanswered" /> 交卷前提示还有未作答的题目</label>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <!-- 右：学员实际体验。固定栏，不随左侧表单滚动；
+           aria-live 只在内容真正变化时更新文本，避免每次击键都整段播报。 -->
+      <aside class="link-preview" aria-labelledby="lpTitle">
+        <h4 class="sec-title" id="lpTitle">学员实际体验</h4>
+        <ol class="preview-lines" id="previewLines" aria-live="polite"></ol>
+        <div class="preview-issues" id="previewIssues" hidden></div>
+      </aside>
+    </div>
+    <footer class="modal-foot">
+      <span class="muted" id="linkState"></span>
+      <span class="grow"></span>
+      <button class="btn" id="linkCancel" type="button">取消</button>
+      <button class="btn primary" id="linkSaveBtn" type="button">保存链接</button>
+    </footer>
+  </div>
+</div>
+
+<script type="module" src="admin-api.js"></script>
+<script type="module" src="admin-layout.js"></script>
+<script type="module" src="exam-links.js"></script>
+</body>
+</html>

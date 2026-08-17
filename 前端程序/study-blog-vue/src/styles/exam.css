@@ -1,0 +1,1287 @@
+/* 学员端考试页样式：博客主题（纸面墨绿）的企业级紧凑风。
+ *
+ * 令牌与全站 src/styles.css 同源，这里只补考试场景独有的几个（--surface / --line-strong /
+ * --warn / --re-color / --accent-deep）。**不要在这个文件里发明新颜色**——考场和博客
+ * 是同一套纸面，配色一旦分叉，以后改主题就得改两遍。
+ *
+ * 全部作用域在 .exam-root 之内，弹窗也不例外——ExamModal 的 Portal 指向
+ * .exam-root 内专用的 .exam-modal-layer 而不是 body，正是为了让弹窗里的
+ * 判定横幅、测试点卡片、代码块共用这里的令牌。
+ *
+ * 两套强度由 paper_type 决定（见 ExamView 的 rootClass）：
+ *   .is-playful  练习卷 / 作业卷——保留鼓励语
+ *   .is-formal   测试卷 / 模拟卷 / 竞赛卷——去鼓励，倒计时更重
+ *
+ * 字号基调：作答页 13px、题干 15px、辅助信息 11–12px。作答页内一律用 px 而非 rem——
+ * .exam-runner 把基准压到 13px，但 rem 认的是 html 的 16px，混用必然对不上。
+ */
+
+@import "./question.css";
+
+.exam-root {
+  --paper: #f8f8f0;
+  --ink: #222b28;
+  --accent: #2f806e;
+  --accent-deep: #256355;
+  --mint: #dcebe1;
+  --muted: #68716d;
+  --line: rgba(34, 43, 40, 0.14);
+  --line-strong: rgba(34, 43, 40, 0.28);
+  --cream: #f2ead9;
+  --danger: #b95c50;
+  --warn: #b9852f;
+  --re-color: #8a5a9e;
+  --surface: #fffefb;
+  --editor-bg: #20292a;
+  --editor-fg: #d8e2dc;
+
+  --font-display: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "DM Mono", "JetBrains Mono", Consolas, monospace;
+
+  --radius: 8px;
+  --control-radius: 4px;
+  --shadow: 0 10px 24px rgba(34, 43, 40, 0.08);
+  --shadow-sm: 0 2px 8px rgba(34, 43, 40, 0.06);
+
+  --topbar-h: 50px;
+  --return-bar-h: 50px; /* 课时作业页的「返回课时」栏，考试链接进来时不存在 */
+  --rail-w: 236px;
+  /* 工作区可用高度：视口 − 顶栏 −（外边距 20×2 + 题头条 42 + 导航条 42 + 余量 46）。 */
+  --work-h: calc(100vh - var(--topbar-h) - 190px);
+
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root.dark .exam-root {
+  --paper: #1d2823;
+  --ink: #edf4ee;
+  --accent: #67b49c;
+  --accent-deep: #8fcbb6;
+  --mint: #355e4e;
+  --muted: #b4bdb7;
+  --line: rgba(237, 244, 238, 0.16);
+  --line-strong: rgba(237, 244, 238, 0.32);
+  --cream: #3f4a3a;
+  --danger: #e08a7c;
+  --warn: #d9a94e;
+  --re-color: #b28fc4;
+  --surface: #232f29;
+  --shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+
+.exam-root .mono,
+.exam-root code,
+.exam-root pre {
+  font-family: var(--font-mono);
+}
+.exam-root ::selection {
+  background: var(--mint);
+}
+.exam-root button {
+  font-family: inherit;
+  cursor: pointer;
+}
+.exam-root button:disabled {
+  cursor: default;
+}
+.exam-root .lesson-exam-bar {
+  height: var(--return-bar-h);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+/* 课时作业页比考试页多这一条返回栏，工作区可用高度要把它减掉。
+   --work-h 的公式里原本只有沉浸顶栏，于是作业卷里的编程题工作区会超出视口 50px：
+   页面被迫整体滚动，而 .exam-topbar 是 sticky，滚起来两条栏互相错位。 */
+.exam-root.has-return-bar {
+  --work-h: calc(100vh - var(--topbar-h) - var(--return-bar-h) - 190px);
+}
+/* 交卷/成绩失败的横幅与页面主体之间留一口气，不要顶着上一块。 */
+.exam-root .exam-alert {
+  padding-bottom: 0;
+}
+.exam-root .lesson-return {
+  color: var(--accent-deep);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.exam-root .lesson-return:hover {
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exam-root *,
+  .exam-root *::before,
+  .exam-root *::after {
+    animation-duration: 0.001s !important;
+    transition-duration: 0.001s !important;
+  }
+}
+
+/* ---------- 按钮 ----------
+ * .btn / .btn-chunky 家族已整体搬到 question.css，作用域从 `.exam-root` 换成 `.qz`。
+ *
+ * 为什么必须搬：`QuestionCoding` 的操作条用的就是 `.btn`（「▶ 运行」「提交判题」），
+ * 而这个组件是两个壳共用的。定义只挂在 `.exam-root` 下时，课时页里的它是一颗
+ * **浏览器默认灰按钮**——"看起来没有运行功能"的观感有一半来自这里。
+ *
+ * ExamView 的根节点同时带 `.exam-root` 和 `.qz`，两个选择器特异度也一样（0,2,0），
+ * 所以考试页的表现一字不变。 */
+
+/* ---------- 作答页外壳 ---------- */
+
+.exam-runner {
+  font-size: 13px;
+}
+
+/* 交卷失败横幅：钉在顶栏正下方，跟着页面滚。用告警色而不是危险红——
+   卷还在、答案还在，只是这一次没交上去，说成"出错了"会把人吓到。
+   与判题失败的 .verdict-banner.v-failed 同一套观感，不新增颜色。 */
+.exam-root .submit-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: 1240px;
+  margin: 12px auto 0;
+  padding: 10px 16px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--cream);
+  color: #7a5a1e;
+  font-size: 12px;
+}
+:root.dark .exam-root .submit-error {
+  color: var(--warn);
+}
+.exam-root .submit-error .v-name {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.exam-root .submit-error .spacer {
+  flex: 1;
+}
+
+.exam-topbar {
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.exam-topbar .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.exam-topbar .brand .logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.exam-topbar .paper-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.exam-topbar .paper-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exam-topbar .spacer {
+  flex: 1;
+}
+
+.exam-root .paper-tag {
+  font-size: 10px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.exam-root .save-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.exam-root .save-state .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  transition: background 0.3s;
+}
+.exam-root .save-state.is-saving .dot {
+  background: var(--warn);
+  animation: exam-pulse 1s infinite;
+}
+.exam-root .save-state.is-error {
+  color: var(--danger);
+}
+.exam-root .save-state.is-error .dot {
+  background: var(--danger);
+}
+@keyframes exam-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.exam-root .countdown {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 3px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--control-radius);
+  background: var(--paper);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.exam-root .countdown .label {
+  font-family: var(--font-body);
+  font-size: 10px;
+  color: var(--muted);
+}
+.exam-root .countdown.is-urgent {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.exam-root .countdown.is-urgent .label {
+  color: var(--danger);
+}
+.exam-root .progress-pill {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.exam-root .progress-pill b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.exam-layout {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  gap: 20px;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 20px;
+  align-items: start;
+}
+
+/* ---------- 左栏：进度 + 答题卡 ---------- */
+
+.exam-rail {
+  position: sticky;
+  top: calc(var(--topbar-h) + 20px);
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.exam-root .panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+.exam-root .panel-head {
+  padding: 10px 14px 8px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.exam-root .panel-head h2 {
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+}
+.exam-root .panel-head .sub {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.exam-root .panel-body {
+  padding: 12px 14px;
+}
+
+.exam-root .progress-track {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--mint);
+  overflow: hidden;
+}
+/* 用 scaleX 而不是动画 width：改 width 每帧都要重排（与 lesson.css 的 .load-bar /
+   .lin-bar 同一条结论，那两处已经这么写了，这里是最后一个漏网的）。
+   圆角在父级 .progress-track + overflow:hidden，所以横向缩放不会把圆角拉成椭圆。 */
+.exam-root .progress-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform 0.35s ease;
+}
+.exam-root .legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+}
+.exam-root .legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.exam-root .legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+  border: 1px solid var(--line-strong);
+}
+.exam-root .legend .l-done {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.exam-root .legend .l-mark {
+  background: var(--cream);
+  border-color: var(--warn);
+}
+.exam-root .legend .l-cur {
+  background: var(--surface);
+  border: 2px solid var(--accent);
+}
+
+.exam-root .filter-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 0;
+}
+.exam-root .filter-btn {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: var(--control-radius);
+  font-size: 10px;
+  padding: 3px 0;
+  color: var(--muted);
+}
+.exam-root .filter-btn:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.exam-root .filter-btn.is-on {
+  background: var(--mint);
+  border-color: var(--accent);
+  color: var(--accent-deep);
+  font-weight: 500;
+}
+.exam-root .filter-btn .cnt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  margin-left: 2px;
+}
+
+/* 答题卡容器：>20 题时限高内滚，否则整张卡摊开——20 题以内摊开只有两三行，
+ * 强行给个滚动条反而多一道操作。 */
+.exam-root .card-scroll {
+  overflow-y: auto;
+}
+.exam-root .card-scroll.is-compact {
+  max-height: calc(100vh - var(--topbar-h) - 250px);
+}
+.exam-root .card-group + .card-group {
+  margin-top: 12px;
+}
+.exam-root .card-group .group-name {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  position: sticky;
+  top: -12px;
+  background: var(--surface);
+  padding: 4px 0;
+  width: 100%;
+  border: 0;
+  text-align: left;
+}
+.exam-root .card-group .group-name .fold {
+  font-size: 9px;
+}
+.exam-root .card-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+.exam-root .card-scroll.is-compact .card-grid {
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.exam-root .qchip {
+  aspect-ratio: 1;
+  border-radius: var(--control-radius);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  position: relative;
+  transition: all 0.12s;
+}
+.exam-root .card-scroll.is-compact .qchip {
+  font-size: 10px;
+  aspect-ratio: auto;
+  height: 26px;
+}
+.exam-root .qchip:hover {
+  border-color: var(--ink);
+}
+.exam-root .qchip.is-done {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.exam-root .qchip.is-current {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* 标记是「回头再看」，不是「已答」——所以是角上一个点，不改底色。 */
+.exam-root .qchip.is-marked::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+.exam-root .qchip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.exam-root .card-empty {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* ---------- 题卡：题头条 / 工作区 / 导航条 ----------
+ *
+ * 三段拼在同一张卡里而不是三张浮卡：切题时题头条与卡片上沿不动，视觉锚点稳。
+ * 工作区高度分两种：
+ *   客观题 .is-objective —— 高度跟着内容走，只用 max-height 封顶后内部滚动。
+ *     曾经按 DEMO 写成固定 height，四个选项的单选题下面会空掉三四百像素。
+ *   编程题 .is-workspace —— 锁死视口高度，左右分栏各自内部滚动。 */
+
+.exam-stage {
+  min-width: 0;
+}
+.exam-root .qcard {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.exam-root .qcard-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.exam-root .qnum {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent);
+}
+.exam-root .qtype {
+  font-size: 10px;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: var(--mint);
+  color: var(--accent-deep);
+  font-weight: 500;
+}
+.exam-root .qscore {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.exam-root .mark-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: var(--control-radius);
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.exam-root .mark-btn:hover {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.exam-root .mark-btn.is-on {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--cream);
+}
+
+.exam-root .qcard-body {
+  overflow-y: auto;
+}
+.exam-root .qcard-body.is-objective {
+  padding: 16px 20px 18px;
+  min-height: 200px;
+  max-height: var(--work-h);
+}
+.exam-root .qcard-body.is-workspace {
+  padding: 0;
+  overflow: hidden;
+  height: var(--work-h);
+  min-height: 420px;
+}
+.exam-root .obj-inner {
+  max-width: 880px;
+}
+/* 题干与选项/空位之间的唯一一处间距，别在组件里再各加一份。 */
+.exam-root .obj-inner > .md-body {
+  margin-bottom: 16px;
+}
+
+.exam-root .qcard-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--line);
+}
+.exam-root .qcard-foot .pos {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+/* .hint-line 与 .muted 已搬到 question.css（作用域 .exam-root → .qz）：
+   前者是 QuestionChoice / QuestionFill 的题型提示条，后者两处都在用，
+   而这两个组件是课时页也要挂的——留在 .exam-root 下时，课时页的多选提示
+   会变成一行正文字号的黑字，连 ⓘ 都不出。与 .btn 同一类漏网。 */
+
+/* ---------- 提示条 ---------- */
+
+.exam-root .toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 40;
+}
+.exam-root .toast {
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  padding: 9px 18px;
+  border-radius: 99px;
+  box-shadow: var(--shadow);
+}
+
+/* ---------- 候考 / 须知 / 成绩页沿用的旧类名 ----------
+ * 这三页本次不重构（结构照旧），但令牌换了皮，跟着一起变纸面墨绿，
+ * 免得同一场考试点进去像两个系统。 */
+
+.exam-root .exam-narrow {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+.exam-root .sticker,
+.exam-root .sticker-flat {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.exam-root .sticker {
+  box-shadow: var(--shadow);
+}
+.exam-root .sticker-flat {
+  box-shadow: var(--shadow-sm);
+}
+.exam-root .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 2px 10px;
+  background: var(--paper);
+  font-size: 12px;
+  color: var(--muted);
+}
+.exam-root .stat-row {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.exam-root .stat {
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  padding: 10px 16px;
+  background: var(--paper);
+  min-width: 96px;
+}
+.exam-root .stat b {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 500;
+}
+.exam-root .notice-box {
+  border: 1px solid var(--line-strong);
+  border-left: 1px solid var(--accent);
+  border-radius: var(--control-radius);
+  background: var(--paper);
+  padding: 12px 16px;
+}
+.exam-root .error-box {
+  border: 1px solid var(--danger);
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  color: var(--danger);
+  padding: 12px 16px;
+}
+.exam-root .question-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.exam-root .q-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.exam-root .q-badge.is-wrong {
+  background: var(--danger);
+}
+.exam-root .q-type {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: var(--mint);
+  color: var(--accent-deep);
+}
+.exam-root .q-score {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.exam-root .case-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.exam-root .case-row:last-child {
+  border-bottom: 0;
+}
+.exam-root .case-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--muted);
+}
+.exam-root .case-dot.ok {
+  background: var(--accent);
+}
+.exam-root .case-dot.bad {
+  background: var(--danger);
+}
+
+/* ---------- 候考页的历史作答 ----------
+   一百次记录不能平铺：摘要（最好/最近/次数）先行，列表只留最近几条 + 算数的那次，
+   其余点开分页看。行内用 grid 而不是 flex + space-between，是为了各列纵向对齐——
+   十几行长短不一的时间与分数挤在一起，不对齐就没法扫。 */
+
+.exam-root .history-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 0 0 0.5rem;
+}
+.exam-root .history-policy {
+  margin: 0 0 0.75rem;
+  font-size: 12px;
+}
+.exam-root .history-row {
+  display: grid;
+  grid-template-columns: 5.5em auto 1fr auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  font-size: 13px;
+}
+.exam-root .history-row:last-of-type {
+  border-bottom: 0;
+}
+.exam-root .history-row.is-counted {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.exam-root .history-row.is-ongoing {
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+}
+.exam-root .history-no {
+  font-weight: 600;
+}
+.exam-root .history-flag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--mint);
+  color: var(--accent-deep);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.exam-root .history-when,
+.exam-root .history-duration {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.exam-root .history-score {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.exam-root .history-more {
+  margin-top: 0.75rem;
+}
+.exam-root .history-all {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--line);
+}
+.exam-root .history-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 0.75rem;
+  font-size: 12px;
+}
+/* 窄屏一行塞不下六列：折成两行，第一行身份、第二行结果 */
+@media (max-width: 560px) {
+  .exam-root .history-row {
+    grid-template-columns: auto auto 1fr auto;
+  }
+  .exam-root .history-when {
+    grid-column: 1 / -1;
+  }
+  .exam-root .history-duration {
+    display: none;
+  }
+}
+
+/* ---------- 结果页的「我的答案 / 参考答案」 ----------
+   两行同构：左边一个定宽标签，右边内容。定宽是为了两行的内容左边缘对齐——
+   错在哪一眼就能比出来，这正是学员看结果页唯一想做的事。 */
+
+.exam-root .answer-box {
+  margin-top: 1rem;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+.exam-root .answer-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.exam-root .answer-tag {
+  flex: none;
+  width: 4.5em;
+  padding: 1px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.exam-root .answer-tag.is-key {
+  color: var(--accent-deep);
+}
+.exam-root .answer-wrong {
+  color: var(--danger);
+  font-weight: 600;
+}
+.exam-root .blank-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* 每个空一个 chip：多空题里"第几个空错了"必须一眼看见，糊成一行 a / b 就白填了 */
+.exam-root .blank-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.exam-root .blank-chip i {
+  font-style: normal;
+  color: var(--muted);
+  font-family: var(--font-body);
+}
+.exam-root .blank-chip em {
+  font-style: normal;
+  color: var(--muted);
+}
+.exam-root .blank-chip.is-right {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--mint);
+}
+.exam-root .blank-chip.is-wrong {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  color: var(--danger);
+}
+
+/* ---------- 结果页排行榜 ---------- */
+
+.exam-root .board-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  font-size: 13px;
+}
+.exam-root .board-row:last-of-type {
+  border-bottom: 0;
+}
+.exam-root .board-row.is-me {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.exam-root .board-rank {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+/* 前三名的牌子给点辨识度，其余保持朴素 */
+.exam-root .board-rank[data-rank="1"] {
+  background: #e8c96a;
+  border-color: #e8c96a;
+  color: #4a3a10;
+  font-weight: 700;
+}
+.exam-root .board-rank[data-rank="2"] {
+  background: #d3d8dc;
+  border-color: #d3d8dc;
+  color: #3d4449;
+  font-weight: 700;
+}
+.exam-root .board-rank[data-rank="3"] {
+  background: #d9a877;
+  border-color: #d9a877;
+  color: #4a2f16;
+  font-weight: 700;
+}
+.exam-root .board-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exam-root .board-score {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.exam-root .board-duration {
+  flex: none;
+  min-width: 72px;
+  text-align: right;
+}
+
+/* 复制成功等瞬时反馈：固定在视口底部，考试页布局不被顶动 */
+.exam-root .result-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 99px;
+  padding: 8px 18px;
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  z-index: 60;
+}
+
+/* ---------- 结果页页签与打印成绩单 ---------- */
+
+.exam-root .result-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+.exam-root .result-tabs button {
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--control-radius) var(--control-radius) 0 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  top: 1px;
+}
+.exam-root .result-tabs button:hover {
+  color: var(--ink);
+}
+.exam-root .result-tabs button.is-active {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+/* 页签卡的底边与内容卡之间留一条缝，视觉上分两层 */
+.exam-root .result-tabs + div {
+  margin-top: 0;
+}
+.exam-root .detail-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+}
+.exam-root .transcript-actions {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+}
+.exam-root .transcript-actions p {
+  margin: 3px 0 0;
+  font-size: 12px;
+}
+.exam-root .transcript-actions > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 560px) {
+  .exam-root .transcript-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .exam-root .transcript-actions > div:last-child .btn-chunky {
+    flex: 1;
+  }
+}
+.exam-root .result-release-note p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+}
+.exam-root .result-review-summary,
+.exam-root .result-completion {
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.exam-root .result-review-summary h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.exam-root .result-review-summary p {
+  margin: 0.35rem 0 0;
+}
+.exam-root .result-filter-group,
+.exam-root .result-question-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 1rem;
+}
+.exam-root .result-filter-group button,
+.exam-root .result-question-nav button {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--control-radius);
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 36px;
+  padding: 6px 10px;
+}
+.exam-root .result-filter-group button.is-active {
+  background: var(--mint);
+  border-color: var(--accent);
+  color: var(--accent-deep);
+  font-weight: 700;
+}
+.exam-root .result-question-nav button {
+  min-width: 36px;
+  padding: 6px;
+  font-family: var(--font-mono);
+}
+.exam-root .result-question-nav button.is-review {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.exam-root .result-question-nav button.is-pending {
+  border-style: dashed;
+}
+.exam-root .result-question-status {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  font-size: 11px;
+  color: var(--accent-deep);
+}
+.exam-root .result-question-status.is-review {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.exam-root .result-completion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.exam-root .result-completion p {
+  margin: 0;
+  color: var(--muted);
+}
+.exam-root .result-question-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 520px;
+}
+@media (max-width: 560px) {
+  .exam-root .result-completion {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .exam-root .result-completion .btn-chunky {
+    width: 100%;
+  }
+}
+
+/* 打印切换：屏上看 .screen-only，打印时只出 .print-only 成绩单 */
+.exam-root .print-only {
+  display: none;
+}
+@media print {
+  .exam-root .screen-only {
+    display: none !important;
+  }
+  .exam-root .print-only {
+    display: block !important;
+  }
+  .exam-root .exam-narrow {
+    max-width: none;
+    padding: 0;
+  }
+  /* 纸面米色是屏上的皮肤。打印对话框勾了「背景图形」它会把整张 A4 刷成米色，
+     min-height:100vh 还会把这块底色一路铺到纸底——成绩单要的是白纸。
+     body 也得一起洗白：.exam-root 收成内容高度之后，纸的下半张露的是 body 的底色。
+     这是本文件里唯一一条越出 .exam-root 的规则，只在打印时生效。 */
+  body {
+    background: #fff;
+  }
+  .exam-root {
+    min-height: 0;
+    background: #fff;
+  }
+  /* 题目多到跨页时：表头每页重印，行不被腰斩，末尾那句说明不单独占一页。 */
+  .exam-root .transcript thead {
+    display: table-header-group;
+  }
+  .exam-root .transcript tr,
+  .exam-root .transcript-foot {
+    break-inside: avoid;
+  }
+  /* 出血模式（点「导出成绩单」进入，见 ExamResult 的 exportTranscript）：
+     @page 边距归零挤掉了浏览器的页眉页脚，纸张白边由这里补回来。 */
+  .exam-root .transcript.is-bleed {
+    padding: 18mm 16mm;
+  }
+}
+
+/* 成绩单本身是黑白凭证，不跟主题色——打印出来要像一张正式的纸 */
+.exam-root .transcript {
+  color: #1a1a1a;
+  background: #fff;
+  font-family: var(--font-body);
+  padding: 8px 4px;
+}
+.exam-root .transcript h1 {
+  font-size: 22px;
+  text-align: center;
+  margin: 0 0 18px;
+  letter-spacing: 4px;
+}
+.exam-root .transcript table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.exam-root .transcript th,
+.exam-root .transcript td {
+  border: 1px solid #999;
+  padding: 8px 12px;
+  text-align: left;
+}
+.exam-root .transcript th {
+  background: #f0f0ea;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.exam-root .transcript-meta {
+  margin-bottom: 18px;
+}
+.exam-root .transcript-detail thead th {
+  text-align: center;
+}
+.exam-root .transcript-detail td:first-child,
+.exam-root .transcript-detail td:last-child {
+  text-align: center;
+}
+.exam-root .transcript-foot {
+  margin-top: 18px;
+  font-size: 11px;
+  color: #666;
+  text-align: center;
+}
+
+/* ---------- 正式考场 / 练习卷 ---------- */
+
+.exam-root.is-formal .cheer {
+  display: none;
+}
+.exam-root.is-formal .countdown {
+  font-size: 15px;
+}
+.exam-root .side-note {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--control-radius);
+  background: var(--cream);
+  padding: 10px 12px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* ---------- 窄屏：只保证不错位，抽屉式答题卡不在本次范围 ---------- */
+
+@media (max-width: 960px) {
+  .exam-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .exam-rail {
+    position: static;
+    order: 2;
+  }
+  .exam-root .qcard-body.is-objective {
+    max-height: none;
+  }
+  .exam-root .qcard-body.is-workspace {
+    height: auto;
+  }
+  /* 编程题工作区的窄屏回退规则**已搬到 question.css**（作用域 .exam-root → .qz）。
+     留在这里时课时页一条都命中不了：它的根是 .lesson-root，于是 375px 的手机上
+     三列（240+7+320）照排不误，溢出的部分被 overflow:hidden 静默裁掉，
+     编辑器右半边连同「▶ 运行」按钮一起够不到。 */
+}

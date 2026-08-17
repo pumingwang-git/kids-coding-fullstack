@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>知识点三级树 · Demo v2（C++ 竞赛体系）</title>
+<style>
+  :root { --accent: #2f806e; --mint: #dcebe1; --line: #d8e0dc; --muted: #6b7a73; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #24332e; background: #f4f7f5; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .layout { display: grid; grid-template-columns: 500px 1fr; gap: 18px; align-items: start; }
+  .panel { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+  .panel h3 { margin: 0 0 10px; font-size: 14px; }
+  #filter { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; margin-bottom: 10px; }
+
+  /* ===== 树 ===== */
+  .tree { list-style: none; margin: 0; padding: 0; max-height: 600px; overflow: auto; }
+  .tree ul { list-style: none; margin: 2px 0 4px 16px; padding-left: 10px; border-left: 1px dashed var(--line); display: none; }
+  .tree li.open > ul { display: block; }
+  .tree li { font-size: 13px; }
+
+  /* 一级：阶段区头 */
+  .stage {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; margin: 6px 0 2px; border-radius: 8px;
+    background: color-mix(in srgb, var(--mint) 55%, white);
+    border-left: 4px solid var(--accent); cursor: pointer; user-select: none;
+  }
+  .stage:hover { filter: brightness(.98); }
+  .stage .arrow { font-size: 10px; color: var(--muted); transition: transform .15s; }
+  .tree li.open > .stage .arrow { transform: rotate(90deg); }
+  .stage .badge { font-size: 11px; font-weight: 700; color: var(--accent); background: #fff; border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; }
+  .stage .count { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+  /* 二级：主题行 */
+  .head {
+    display: flex; align-items: center; gap: 7px; padding: 5px 8px;
+    border-radius: 6px; cursor: pointer; user-select: none;
+  }
+  .head:hover { background: rgba(47,128,110,.06); }
+  .head .arrow { font-size: 10px; color: var(--muted); transition: transform .15s; }
+  .tree li.open > .head .arrow { transform: rotate(90deg); }
+  .head b { font-weight: 700; }
+  .head .hint { color: var(--muted); font-size: 11px; font-weight: 400; }
+  .head .count { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+  /* 三级：叶子（编号 + 名称，超长省略，悬浮看全名） */
+  .leaf { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 6px; cursor: pointer; user-select: none; }
+  .leaf:hover { background: rgba(47,128,110,.06); }
+  .leaf.active { color: var(--accent); font-weight: 800; }
+  .leaf .num { font-family: Consolas, monospace; font-size: 11px; color: var(--muted); min-width: 34px; }
+  .leaf .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .summary { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 30px; margin-bottom: 14px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--mint); color: var(--accent); padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .chip button { border: 0; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; }
+  .chip small { font-weight: 400; opacity: .75; }
+  pre { background: #f7faf8; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px; overflow: auto; max-height: 460px; margin: 0; }
+  .note { margin-top: 18px; padding: 12px 14px; background: #fdf9ef; border: 1px solid #eadfc4; border-radius: 8px; font-size: 13px; line-height: 1.7; }
+  .note b { color: #8a6d1a; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; font-size: 12px; color: var(--accent); }
+</style>
+</head>
+<body>
+  <h1>知识点三级树 · Demo v2（按竞赛阶段递进）</h1>
+  <div class="sub">一级 = 学习阶段（带难度徽标）→ 二级 = 主题（带占比/定位标注）→ 三级 = 细知识点（编号 + 长名省略，悬浮看全名）。只勾选三级叶子；一二级复选框为级联全选/半选。</div>
+
+  <div class="layout">
+    <div class="panel">
+      <h3>知识点树（4 阶段 / 28 主题 / 138 细点）</h3>
+      <input id="filter" placeholder="搜索知识点…（如：背包、线段树、KMP）" />
+      <ul class="tree" id="tree"></ul>
+      <div class="summary">已选 <b id="selCount">0</b> 项</div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h3>已选叶子（点击 × 移除）</h3>
+        <div class="chips" id="chips"></div>
+        <h3 style="margin-top:14px">提交 payload（扁平叶子 id + 完整路径）</h3>
+        <pre id="payload">{}</pre>
+      </div>
+
+      <div class="note">
+        <b>展示方案说明（针对本体系特点）：</b><br />
+        ① 一级是「阶段」而非主题 → 用区块头 + 难度徽标（前置基础 / 1~5 / 5~8 / 5~10）呈现递进关系；<br />
+        ② 三级名称很长（如 "0.1.1 程序框架（#include / using namespace std / main函数 / return 0）"）→ 编号单独小字号显示，名称单行省略号，<b>悬浮显示全名</b>；<br />
+        ③ 二级保留占比/定位标注（如 "占比约 30%"），并显示 <code>已选/总数</code> 统计；<br />
+        ④ 一二级复选框级联半选，搜索时父级只操作可见叶子（沿用现有逻辑）；<br />
+        ⑤ <b>可选增强</b>：阶段视图 / 主题视图切换（同一批三级，按难度轴或按算法轴归类）；每节点可加题量角标（需后端统计接口）。<br />
+        <b>落地改动</b>：KNOWLEDGE_TREE 换三级数据；ALL_LEAVES/ktName/ktId/normalizeKnowledge 改递归；renderKtTree 改递归渲染；后端 /tags 返回 parent_id、create_tag 收 parent_id（Tag 表已支持）。
+      </div>
+
+      <details>
+        <summary>查看/复制内嵌的三级数据（KNOWLEDGE_TREE 格式，已去除 [reference] 标注）</summary>
+        <pre id="treeJson"></pre>
+      </details>
+    </div>
+  </div>
+
+<script>
+// ============ 三级知识点数据：C++ 竞赛体系（阶段递进） ============
+// num: 原文档编号；id: 自动由 num 生成（如 0-1-1），叶子 id 入 payload；
+// badge: 一级阶段徽标；hint: 二级定位/占比标注。已剔除 [reference:N]。
+const RAW = [
+  { num: "0", name: "C++ 编程语言基础", badge: "前置基础", children: [
+    { num: "0.1", name: "程序结构与基本语法", children: [
+      { num: "0.1.1", name: "程序框架（#include / using namespace std / main函数 / return 0）" },
+      { num: "0.1.2", name: "注释规范（单行// / 多行/* */）" },
+      { num: "0.1.3", name: "基本输入输出（cin / cout / scanf / printf / 格式化输出）" },
+    ]},
+    { num: "0.2", name: "变量、常量与数据类型", children: [
+      { num: "0.2.1", name: "整型（int / long long / 范围与溢出 / unsigned）" },
+      { num: "0.2.2", name: "浮点型（float / double / 精度问题 / 科学计数法）" },
+      { num: "0.2.3", name: "字符与布尔（char / ASCII码 / bool / 逻辑值）" },
+      { num: "0.2.4", name: "常量（const / #define / 字面量）" },
+      { num: "0.2.5", name: "类型转换（隐式转换 / 强制转换 / 精度丢失）" },
+    ]},
+    { num: "0.3", name: "运算符与表达式", children: [
+      { num: "0.3.1", name: "算术运算符（+ - * / % / 自增自减++ --）" },
+      { num: "0.3.2", name: "关系运算符（== != > < >= <=）" },
+      { num: "0.3.3", name: "逻辑运算符（&& || ! / 短路求值）" },
+      { num: "0.3.4", name: "赋值运算符（= / += -= *= /= %=）" },
+      { num: "0.3.5", name: "运算符优先级与结合性" },
+      { num: "0.3.6", name: "条件运算符（? : 三目运算符）" },
+    ]},
+    { num: "0.4", name: "控制结构", children: [
+      { num: "0.4.1", name: "顺序结构（语句逐条执行）" },
+      { num: "0.4.2", name: "分支结构（if / if-else / if-else if-else / switch-case）" },
+      { num: "0.4.3", name: "循环结构（for / while / do-while / 循环嵌套 / break / continue）" },
+    ]},
+    { num: "0.5", name: "数组与字符串", children: [
+      { num: "0.5.1", name: "一维数组（定义 / 初始化 / 遍历 / 边界检查）" },
+      { num: "0.5.2", name: "二维数组与多维数组（定义 / 遍历 / 矩阵操作）" },
+      { num: "0.5.3", name: "字符数组与C风格字符串（char[] / gets/puts / str系列函数）" },
+      { num: "0.5.4", name: "string类（定义 / 输入输出 / 拼接 / 查找 / 截取 / 比较）" },
+      { num: "0.5.5", name: "数组与字符串的常用操作（排序 / 去重 / 反转）" },
+    ]},
+    { num: "0.6", name: "函数", children: [
+      { num: "0.6.1", name: "函数定义与调用（返回值 / 参数列表 / 函数原型）" },
+      { num: "0.6.2", name: "参数传递（值传递 / 引用传递 & / 指针传递）" },
+      { num: "0.6.3", name: "作用域与生命周期（局部变量 / 全局变量 / 静态变量）" },
+      { num: "0.6.4", name: "函数重载（同名不同参）" },
+      { num: "0.6.5", name: "内联函数（inline / 宏函数对比）" },
+    ]},
+    { num: "0.7", name: "指针与引用", children: [
+      { num: "0.7.1", name: "指针基础（定义 / 取地址& / 解引用* / 空指针NULL/nullptr）" },
+      { num: "0.7.2", name: "指针与数组（数组名即指针 / 指针算术）" },
+      { num: "0.7.3", name: "动态内存分配（new / delete / new[] / delete[]）" },
+      { num: "0.7.4", name: "引用（定义 / 与指针的区别 / 作为函数参数）" },
+    ]},
+    { num: "0.8", name: "结构体与联合体", children: [
+      { num: "0.8.1", name: "结构体定义与使用（struct / 成员访问 . / 嵌套结构体）" },
+      { num: "0.8.2", name: "结构体数组与指针" },
+      { num: "0.8.3", name: "联合体（union / 共用内存）" },
+    ]},
+    { num: "0.9", name: "文件操作", children: [
+      { num: "0.9.1", name: "文件重定向（freopen / 标准输入输出重定向）" },
+      { num: "0.9.2", name: "文件流（ifstream / ofstream / fstream / 读写操作）" },
+      { num: "0.9.3", name: "输入输出优化（ios::sync_with_stdio(false) / cin.tie(nullptr)）" },
+    ]},
+  ]},
+  { num: "1", name: "CSP-J 入门级", badge: "难度 1~5 · 普及组", children: [
+    { num: "1.1", name: "计算机基础知识", hint: "初赛重点，占比约 20%", children: [
+      { num: "1.1.1", name: "计算机组成（CPU / 存储器RAM/ROM/Cache / 输入输出设备）" },
+      { num: "1.1.2", name: "存储单位与换算（bit / Byte / KB / MB / GB / TB）" },
+      { num: "1.1.3", name: "数制与编码（二进制 / 八进制 / 十进制 / 十六进制 / 相互转换）" },
+      { num: "1.1.4", name: "原码 / 反码 / 补码（表示范围 / 补码加减法）" },
+      { num: "1.1.5", name: "位运算基础（& | ^ ~ << >> / 优先级 / 常用技巧）" },
+      { num: "1.1.6", name: "计算机网络基础（OSI模型 / TCP/IP / 域名 / URL）" },
+      { num: "1.1.7", name: "操作系统基础（进程管理 / 文件管理 / 常用Linux命令）" },
+      { num: "1.1.8", name: "计算机历史与人物（冯·诺依曼 / 图灵 / 计算机发展史）" },
+    ]},
+    { num: "1.2", name: "C++ 竞赛语法进阶", hint: "复赛编程基础", children: [
+      { num: "1.2.1", name: "万能头文件（#include <bits/stdc++.h>）" },
+      { num: "1.2.2", name: "STL 入门容器（vector / stack / queue / pair）" },
+      { num: "1.2.3", name: "STL 常用算法（sort / reverse / max/min / swap）" },
+      { num: "1.2.4", name: "范围for循环（for (auto x : vec)）" },
+    ]},
+    { num: "1.3", name: "基础数据结构", hint: "占比约 20%", children: [
+      { num: "1.3.1", name: "线性表（数组 / 链表（单链表/双链表） / 增删改查操作）" },
+      { num: "1.3.2", name: "栈（LIFO / 压栈弹栈 / 括号匹配 / 表达式求值）" },
+      { num: "1.3.3", name: "队列（FIFO / 入队出队 / BFS应用 / 双端队列）" },
+      { num: "1.3.4", name: "二叉树（定义 / 度 / 深度 / 叶子节点 / 满二叉树与完全二叉树）" },
+      { num: "1.3.5", name: "二叉树的遍历（前序 / 中序 / 后序 / 层序 —— 递归与迭代）" },
+      { num: "1.3.6", name: "哈夫曼树（带权路径长度 / 哈夫曼编码）" },
+      { num: "1.3.7", name: "图的存储（邻接矩阵 / 邻接表）" },
+      { num: "1.3.8", name: "图的遍历（DFS深度优先 / BFS广度优先 / 连通分量）" },
+    ]},
+    { num: "1.4", name: "基础算法", hint: "占比约 30%", children: [
+      { num: "1.4.1", name: "枚举（穷举法 / 枚举优化 / 状态枚举）" },
+      { num: "1.4.2", name: "模拟（过程模拟 / 场景还原 / 日期推算）" },
+      { num: "1.4.3", name: "排序算法（选择 / 冒泡 / 插入 / 计数排序 / sort自定义比较）" },
+      { num: "1.4.4", name: "二分查找（有序序列 / 二分答案 / lower_bound/upper_bound）" },
+      { num: "1.4.5", name: "递推（斐波那契 / 递推公式 / 递推与递归的转换）" },
+      { num: "1.4.6", name: "递归（递归三要素 / 递归终止条件 / 递归与栈）" },
+      { num: "1.4.7", name: "贪心（局部最优→全局最优 / 活动安排 / 找零钱 / 正确性证明）" },
+      { num: "1.4.8", name: "高精度计算（大整数加减乘除 / 竖式模拟）" },
+      { num: "1.4.9", name: "前缀和与差分（一维/二维前缀和 / 区间加差分）" },
+    ]},
+    { num: "1.5", name: "基础数学", children: [
+      { num: "1.5.1", name: "质数与合数（判断质数 / 质因数分解）" },
+      { num: "1.5.2", name: "质数筛法（埃氏筛 / 欧拉筛/线性筛）" },
+      { num: "1.5.3", name: "最大公约数与最小公倍数（GCD / LCM / 欧几里得算法/辗转相除法）" },
+      { num: "1.5.4", name: "排列与组合（排列数A / 组合数C / 加法原理与乘法原理）" },
+      { num: "1.5.5", name: "概率与期望基础（古典概型 / 期望定义与计算）" },
+      { num: "1.5.6", name: "集合运算（交/并/补 / 容斥原理初步）" },
+    ]},
+    { num: "1.6", name: "初赛专项", hint: "CSP-J 第一轮笔试", children: [
+      { num: "1.6.1", name: "单项选择题（计算机基础 / C++语法 / 数据结构与算法 / 数学）" },
+      { num: "1.6.2", name: "程序阅读题（阅读代码写输出 / 跟踪变量变化 / 时间复杂度分析）" },
+      { num: "1.6.3", name: "完善程序题（补全代码 / 边界条件 / 算法逻辑填空）" },
+    ]},
+  ]},
+  { num: "2", name: "CSP-S 提高级", badge: "难度 5~8 · 提高组", children: [
+    { num: "2.1", name: "进阶数据结构", children: [
+      { num: "2.1.1", name: "二叉搜索树 BST（查找 / 插入 / 删除 / 中序有序性）" },
+      { num: "2.1.2", name: "堆与优先队列（大根堆/小根堆 / priority_queue / 堆排序）" },
+      { num: "2.1.3", name: "并查集（路径压缩 / 按秩合并 / 连通性与环检测）" },
+      { num: "2.1.4", name: "树状数组（单点修改 / 区间查询 / 离散化）" },
+      { num: "2.1.5", name: "线段树（区间修改 / 区间查询 / lazy标记 / 动态开点）" },
+      { num: "2.1.6", name: "哈希表（unordered_map / unordered_set / 哈希冲突 / 自定义哈希）" },
+      { num: "2.1.7", name: "单调栈与单调队列（维护极值 / 滑动窗口）" },
+      { num: "2.1.8", name: "bitset（位集合 / 复杂度O(n/w) / 01背包优化）" },
+    ]},
+    { num: "2.2", name: "进阶算法", children: [
+      { num: "2.2.1", name: "排序进阶（快速排序 / 归并排序 / 基数排序 / 排序稳定性）" },
+      { num: "2.2.2", name: "二分进阶（二分答案 / 二分查找变体 / 实数二分）" },
+      { num: "2.2.3", name: "倍增法（LCA最近公共祖先 / RMQ区间最值 / 快速幂）" },
+      { num: "2.2.4", name: "分治（归并 / 快速排序 / 最大子段和 / CDQ分治）" },
+    ]},
+    { num: "2.3", name: "动态规划 DP", hint: "核心考点，几乎必考", children: [
+      { num: "2.3.1", name: "线性DP（最长上升子序列LIS / 最长公共子序列LCS / 最大子段和）" },
+      { num: "2.3.2", name: "背包DP（0/1背包 / 完全背包 / 多重背包 / 分组背包 / 依赖背包）" },
+      { num: "2.3.3", name: "区间DP（矩阵连乘 / 石子合并 / 括号匹配DP）" },
+      { num: "2.3.4", name: "树形DP（树上最大独立集 / 树上背包 / 换根DP）" },
+      { num: "2.3.5", name: "状压DP（状态压缩 / 集合DP / 旅行商问题TSP）" },
+      { num: "2.3.6", name: "数位DP（数字统计 / 不含某数字的个数 / 按位DP）" },
+      { num: "2.3.7", name: "DP优化（滚动数组 / 单调队列优化 / 斜率优化 / 四边形不等式）" },
+    ]},
+    { num: "2.4", name: "图论", hint: "高频考点", children: [
+      { num: "2.4.1", name: "图的遍历进阶（DFS/BFS / 连通分量 / 二分图判定）" },
+      { num: "2.4.2", name: "拓扑排序（DAG / Kahn算法 / 判环）" },
+      { num: "2.4.3", name: "最短路径（Dijkstra / SPFA / Floyd / 负环检测）" },
+      { num: "2.4.4", name: "最小生成树（Prim / Kruskal）" },
+      { num: "2.4.5", name: "强连通分量（Tarjan / Kosaraju / 缩点）" },
+      { num: "2.4.6", name: "差分约束（不等式转最短路）" },
+      { num: "2.4.7", name: "最近公共祖先 LCA（倍增 / 树链剖分 / Tarjan离线）" },
+    ]},
+    { num: "2.5", name: "搜索与回溯", children: [
+      { num: "2.5.1", name: "DFS深度优先搜索（剪枝优化 / 记忆化搜索）" },
+      { num: "2.5.2", name: "BFS广度优先搜索（最短路 / 状态搜索 / 双向BFS）" },
+      { num: "2.5.3", name: "回溯法（全排列 / 组合 / 子集 / N皇后）" },
+      { num: "2.5.4", name: "迭代加深与A*（IDA* / A*估价函数）" },
+    ]},
+    { num: "2.6", name: "进阶数学", children: [
+      { num: "2.6.1", name: "快速幂（模幂运算 / 矩阵快速幂）" },
+      { num: "2.6.2", name: "扩展欧几里得（exGCD / 不定方程 / 模逆元）" },
+      { num: "2.6.3", name: "组合数学（排列组合计数 / 组合数取模 / 卢卡斯定理Lucas）" },
+      { num: "2.6.4", name: "同余与模运算（同余方程 / 中国剩余定理CRT）" },
+      { num: "2.6.5", name: "欧拉函数与欧拉定理" },
+      { num: "2.6.6", name: "矩阵与行列式（矩阵乘法 / 矩阵快速幂 / 高斯消元）" },
+    ]},
+    { num: "2.7", name: "初赛专项（提高级）", hint: "CSP-S 第一轮笔试", children: [
+      { num: "2.7.1", name: "单项选择题（覆盖入门级+提高级全部理论考点）" },
+      { num: "2.7.2", name: "程序阅读题（复杂代码 / 递归 / 指针 / 复杂度分析）" },
+      { num: "2.7.3", name: "完善程序题（进阶算法填空 / DP/图论/数据结构代码补全）" },
+    ]},
+  ]},
+  { num: "3", name: "NOIP 全国青少年信息学奥林匹克联赛", badge: "难度 5~10 · 深化", children: [
+    { num: "3.1", name: "高级数据结构", children: [
+      { num: "3.1.1", name: "平衡树（Treap / Splay / 伸展树）" },
+      { num: "3.1.2", name: "树链剖分（轻重链剖分 / 路径操作 / 子树操作）" },
+      { num: "3.1.3", name: "可持久化数据结构（主席树 / 可持久化线段树 / 可持久化并查集）" },
+      { num: "3.1.4", name: "分块与莫队（分块思想 / 普通莫队 / 带修莫队）" },
+      { num: "3.1.5", name: "字符串数据结构（Trie树 / AC自动机 / 后缀数组 / SAM后缀自动机）" },
+    ]},
+    { num: "3.2", name: "高级算法", children: [
+      { num: "3.2.1", name: "网络流（最大流Dinic / 最小割 / 费用流）" },
+      { num: "3.2.2", name: "二分图匹配（匈牙利算法 / KM算法）" },
+      { num: "3.2.3", name: "计算几何基础（点/线/多边形 / 凸包 / 半平面交）" },
+      { num: "3.2.4", name: "字符串匹配（KMP / 扩展KMP / Manacher回文算法）" },
+      { num: "3.2.5", name: "随机化算法（模拟退火 / 爬山算法 / 随机贪心）" },
+    ]},
+    { num: "3.3", name: "动态规划进阶", hint: "T3/T4 核心", children: [
+      { num: "3.3.1", name: "多维状态DP（三维/四维状态设计）" },
+      { num: "3.3.2", name: "DP与数据结构优化（线段树优化DP / 树状数组优化DP）" },
+      { num: "3.3.3", name: "插头DP / 轮廓线DP（棋盘覆盖 / 连通性DP）" },
+    ]},
+    { num: "3.4", name: "高级图论", children: [
+      { num: "3.4.1", name: "割点与桥（Tarjan / 点双连通 / 边双连通）" },
+      { num: "3.4.2", name: "2-SAT（布尔方程求解 / 强连通分量应用）" },
+      { num: "3.4.3", name: "树上问题进阶（树的直径 / 树的重心 / 虚树）" },
+    ]},
+    { num: "3.5", name: "高级数学", children: [
+      { num: "3.5.1", name: "生成函数与多项式（FFT快速傅里叶变换 / NTT）" },
+      { num: "3.5.2", name: "博弈论（SG函数 / Nim游戏 / 组合博弈）" },
+      { num: "3.5.3", name: "概率与期望DP（期望递推 / 高斯消元解期望）" },
+      { num: "3.5.4", name: "线性基（异或空间 / 最大异或和）" },
+    ]},
+    { num: "3.6", name: "综合应用能力", hint: "区别于 CSP 的核心", children: [
+      { num: "3.6.1", name: "多知识点融合（“数学+图论”“数据结构+DP”缝合题型）" },
+      { num: "3.6.2", name: "复杂问题建模（将实际问题抽象为算法模型）" },
+      { num: "3.6.3", name: "部分分策略（针对数据范围设计不同复杂度解法）" },
+      { num: "3.6.4", name: "代码调试与对拍（构造数据 / 暴力对拍 / 边界测试）" },
+    ]},
+  ]},
+];
+
+// 自动生成 id（叶子 id 入 payload）：num 中的 "." → "-"（如 0.1.1 → 0-1-1，全树唯一）
+function assignIds(nodes) {
+  nodes.forEach((n) => {
+    n.id = n.num.replace(/\./g, "-");
+    if (n.children) assignIds(n.children);
+  });
+}
+assignIds(RAW);
+const KNOWLEDGE_TREE = RAW;
+
+// ============ 级联选择逻辑 ============
+const selected = new Set();
+const PATH = new Map();
+function isLeaf(n) { return !(n.children && n.children.length); }
+function leafList(nodes, acc = []) { nodes.forEach((n) => (isLeaf(n) ? acc.push(n) : leafList(n.children, acc))); return acc; }
+function buildPaths(nodes, prefix = []) {
+  nodes.forEach((n) => {
+    const path = [...prefix, n.num + " " + n.name];
+    if (isLeaf(n)) PATH.set(n.id, path); else buildPaths(n.children, path);
+  });
+}
+function nodeMatch(n, filter) {
+  return (n.name + " " + n.num).includes(filter) || (n.children || []).some((c) => nodeMatch(c, filter));
+}
+function stateOf(node, filter) {
+  const leaves = leafList([node]);
+  const visible = leaves.filter((l) => !filter || nodeMatch(l, filter));
+  const hit = visible.filter((l) => selected.has(l.id)).length;
+  return { hit, total: visible.length };
+}
+
+function renderTree(filter = "") {
+  const root = document.getElementById("tree");
+  root.innerHTML = "";
+  root.append(renderList(KNOWLEDGE_TREE, filter, 0));
+  refresh();
+}
+
+function renderList(nodes, filter, depth) {
+  const ul = document.createElement("ul");
+  if (depth === 0) ul.style.display = "block";
+  nodes.forEach((n) => {
+    const li = document.createElement("li");
+    if (filter && !nodeMatch(n, filter)) { li.style.display = "none"; ul.append(li); return; }
+    if (isLeaf(n)) {
+      const div = document.createElement("div");
+      div.className = "leaf" + (selected.has(n.id) ? " active" : "");
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = selected.has(n.id);
+      const num = document.createElement("span"); num.className = "num"; num.textContent = n.num;
+      const name = document.createElement("span"); name.className = "name";
+      name.textContent = n.name; name.title = n.num + " " + n.name;
+      div.append(cb, num, name);
+      cb.addEventListener("change", () => {
+        if (cb.checked) selected.add(n.id); else selected.delete(n.id);
+        renderTree(filter);
+      });
+      li.append(div);
+    } else {
+      const { hit, total } = stateOf(n, filter);
+      const st = hit === 0 ? "none" : hit === total ? "all" : "partial";
+      li.className = st !== "none" || filter ? "open" : "";
+      if (depth === 0) {
+        // 一级 = 阶段区块头：无复选框（避免误全选整阶段），只折叠 + 徽标 + 统计
+        const head = document.createElement("div");
+        head.className = "stage";
+        const arrow = document.createElement("span"); arrow.className = "arrow"; arrow.textContent = "▶";
+        const badge = document.createElement("span"); badge.className = "badge"; badge.textContent = n.badge || "";
+        const span = document.createElement("b"); span.textContent = n.num + " " + n.name;
+        const count = document.createElement("span"); count.className = "count"; count.textContent = `${hit}/${total}`;
+        head.append(arrow, badge, span, count);
+        head.addEventListener("click", () => li.classList.toggle("open"));
+        li.append(head, renderList(n.children, filter, depth + 1));
+      } else {
+        // 二级 = 主题行：级联复选框（半选态）
+        const head = document.createElement("div");
+        head.className = "head";
+        const arrow = document.createElement("span"); arrow.className = "arrow"; arrow.textContent = "▶";
+        const cb = document.createElement("input"); cb.type = "checkbox";
+        cb.checked = st === "all"; cb.indeterminate = st === "partial";
+        const span = document.createElement("b"); span.textContent = n.num + " " + n.name;
+        const hint = document.createElement("span"); hint.className = "hint"; hint.textContent = n.hint || "";
+        const count = document.createElement("span"); count.className = "count"; count.textContent = `${hit}/${total}`;
+        head.append(arrow, cb, span, hint, count);
+        cb.addEventListener("change", () => {
+          leafList([n]).filter((l) => !filter || nodeMatch(l, filter))
+            .forEach((l) => (cb.checked ? selected.add(l.id) : selected.delete(l.id)));
+          renderTree(filter);
+        });
+        head.addEventListener("click", (e) => { if (e.target.tagName === "INPUT") return; li.classList.toggle("open"); });
+        li.append(head, renderList(n.children, filter, depth + 1));
+      }
+    }
+    ul.append(li);
+  });
+  return ul;
+}
+
+function refresh() {
+  document.getElementById("selCount").textContent = selected.size;
+  const chips = document.getElementById("chips");
+  chips.innerHTML = "";
+  [...selected].forEach((id) => {
+    const leaf = PATH.get(id);
+    const chip = document.createElement("span"); chip.className = "chip";
+    const name = document.createElement("span"); name.textContent = leaf?.at(-1) || id;
+    const path = document.createElement("small"); path.textContent = " " + (leaf?.slice(0, 2).join(" / ") || "");
+    const btn = document.createElement("button"); btn.type = "button"; btn.textContent = "×"; btn.setAttribute("aria-label", "移除");
+    btn.addEventListener("click", () => { selected.delete(id); renderTree(document.getElementById("filter").value); });
+    chip.append(name, path, btn); chips.append(chip);
+  });
+  document.getElementById("payload").textContent = JSON.stringify(
+    { knowledge: [...selected], labels: [...selected].map((id) => (PATH.get(id) || []).join(" / ")) },
+    null, 2,
+  );
+}
+
+document.getElementById("filter").addEventListener("input", (e) => renderTree(e.target.value.trim()));
+document.getElementById("treeJson").textContent = JSON.stringify(KNOWLEDGE_TREE, null, 2);
+buildPaths(KNOWLEDGE_TREE);
+renderTree("");
+</script>
+</body>
+</html>

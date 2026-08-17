@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>后台管理 · 登录</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <p class="eyebrow">STUDY ADMIN</p>
+      <h1>后台管理</h1>
+      <p class="muted">管理员登录 · 请先完成滑块验证</p>
+      <form id="loginForm">
+        <label>用户名<input id="username" autocomplete="username" minlength="3" maxlength="50" required /></label>
+        <label>密码<input id="password" type="password" autocomplete="current-password" maxlength="128" required /></label>
+        <label>滑块验证<div id="sliderBox"></div></label>
+        <p id="error" class="form-error" hidden></p>
+        <button class="button button-primary full" id="submitBtn" type="submit">登 录 →</button>
+      </form>
+    </section>
+  </main>
+  <script type="module" src="admin-api.js"></script>
+  <script type="module" src="slider-captcha.js"></script>
+  <script type="module">
+    import { adminLogin, adminSliderCaptcha, adminVerifySlider } from "./admin-api.js";
+    import { createSliderCaptcha } from "./slider-captcha.js";
+
+    const errorEl = document.getElementById("error");
+    const form = document.getElementById("loginForm");
+    const submitBtn = document.getElementById("submitBtn");
+    const slider = createSliderCaptcha(
+      document.getElementById("sliderBox"),
+      adminSliderCaptcha,
+      adminVerifySlider
+    );
+
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.hidden = false;
+    }
+
+    async function init() {
+      try {
+        await slider.refresh();
+      } catch (reason) {
+        showError(reason.message);
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorEl.hidden = true;
+      const value = slider.value();
+      if (!value || value.slider_x <= 0) {
+        showError("请先拖动滑块完成验证。");
+        return;
+      }
+      submitBtn.disabled = true;
+      try {
+        await adminLogin({
+          username: document.getElementById("username").value,
+          password: document.getElementById("password").value,
+          slider_id: value.slider_id,
+          slider_x: value.slider_x,
+        });
+        const next = new URLSearchParams(location.search).get("next");
+        location.href = next || "index.html";
+      } catch (reason) {
+        showError(reason.message);
+        if (reason.message.includes("失效")) await slider.refresh();
+        else if (reason.message.includes("滑块")) slider.reset();
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

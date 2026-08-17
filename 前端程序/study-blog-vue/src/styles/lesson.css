@@ -1,0 +1,1072 @@
+/* 学员端单课时学习页样式：博客主题（纸面墨绿）的沉浸式学习壳。
+ *
+ * 令牌与全站 src/styles.css 同源，这里只补学习场景独有的几个（--surface / --line-strong /
+ * --warn / --accent-deep / --editor-bg），全部与 src/styles/exam.css 逐字一致。
+ * **不要在这个文件里发明新颜色**——考场、学习页和博客是同一套纸面，配色一旦分叉，
+ * 以后改主题就得改三遍。
+ *
+ * 全部作用域在 .lesson-root 之内。结构参考 Stitch 设计稿的四屏（视频 / 单选题 /
+ * 编程练习 / 题目列表），配色一律换成本项目主题（映射表见交接文档 14 §9）。
+ *
+ * 字号基调：学习壳 13px、正文/题干 15px、辅助信息 10–12px。一律用 px 而非 rem——
+ * .lesson-root 把基准压到 13px，但 rem 认的是 html 的 16px，混用必然对不上。
+ */
+
+/* 题目渲染 + 作答交互样式与考试页共用同一份（交接文档 15 §6.2）。
+ *
+ * question.css 全部作用域在 .qz 之内，课时页的课中练习块（BlockPractice 根节点
+ * 挂 `block-practice qz`）靠它拿到选项、填空、题干 Markdown 的样式。
+ * 这里 @import 而不是让块组件自己 import，是为了和 exam.css 对称：
+ * **谁引了学习壳样式，谁就自动拿到题目样式**，以后新增题目类的块不用再想这件事。
+ *
+ * ⚠️ @import 必须在所有规则之前。挪到文件中间会被浏览器整条丢弃且不报错，
+ *    症状是选项退化成裸按钮（badge 和文字挤成「A123」）——极难查。 */
+@import "./question.css";
+
+.lesson-root {
+  --accent-deep: #256355;
+  --line-strong: rgba(34, 43, 40, 0.28);
+  --warn: #b9852f;
+  --surface: #fffefb;
+  --editor-bg: #20292a;
+  --editor-fg: #d8e2dc;
+  /* 下面四个是 question.css 依赖的令牌，值逐字抄 exam.css:33-45（.exam-root）。
+     题目样式两个壳共用一份，令牌当然也得两个壳都有——缺了的表现不是报错，
+     而是选项圆角塌成直角、hover 阴影不出现。不要在这里改数值。 */
+  --re-color: #8a5a9e;
+  --radius: 8px;
+  --shadow: 0 10px 24px rgba(34, 43, 40, 0.08);
+  --shadow-sm: 0 2px 8px rgba(34, 43, 40, 0.06);
+
+  --topbar-h: 50px;
+  --drawer-w: 300px;
+
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root.dark .lesson-root {
+  /* 这两个曾经漏抄，而它们是 question.css 里引用最多的两个令牌
+     （--accent 26 处、--danger 17 处）。全局 :root.dark 也没有覆盖它们，于是暗色
+     模式下课时页的题目区拿的是**亮色**的深绿/深红：选中项的圆形徽标是深绿底 + 白字
+     压在深色卡片上，判错的红字也暗得几乎看不见。考试页没这毛病，就是因为
+     exam.css:64/71 抄全了。数值继续与 exam.css 逐字一致，不要在这里改。 */
+  --accent: #67b49c;
+  --danger: #e08a7c;
+  --accent-deep: #8fcbb6;
+  --line-strong: rgba(237, 244, 238, 0.32);
+  --warn: #d9a94e;
+  --surface: #232f29;
+  /* 同上，抄 exam.css:64-75。--radius 明暗一致，不用在这里重复。 */
+  --re-color: #b28fc4;
+  --shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+
+.lesson-root button {
+  font-family: inherit;
+  cursor: pointer;
+}
+.lesson-root button:disabled {
+  cursor: default;
+}
+.lesson-root code,
+.lesson-root pre {
+  font-family: var(--font-mono);
+}
+.lesson-root ::selection {
+  background: var(--mint);
+}
+
+/* ---------- 通用件：按钮 / 标签（规格同 exam.css .btn / .paper-tag） ---------- */
+
+.lesson-root .lbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 5px 14px;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.lesson-root .lbtn-chunky {
+  font-size: 14px;
+  padding: 7px 18px;
+}
+.lesson-root .lbtn:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.lesson-root .lbtn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.lesson-root .lbtn:disabled {
+  opacity: 0.45;
+}
+.lesson-root .lbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.lesson-root .lbtn-accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+.lesson-root .lbtn-accent:hover:not(:disabled) {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+}
+.lesson-root .ltag {
+  font-size: 10px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.lesson-root .ltag.on-accent {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
+  background: var(--mint);
+}
+.lesson-root .ltag.on-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 46%, var(--line));
+  background: var(--cream);
+}
+.lesson-root .lspacer {
+  flex: 1;
+}
+.lesson-root .leyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font: 11px var(--font-mono);
+  letter-spacing: 0.6px;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+/* ---------- 加载页 ---------- */
+
+.lesson-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: var(--paper);
+  transition:
+    opacity 0.4s ease,
+    visibility 0.4s;
+}
+.lesson-loading.is-gone {
+  opacity: 0;
+  visibility: hidden;
+}
+.lesson-loading .ring-spin {
+  width: 56px;
+  height: 56px;
+  animation: lesson-spin 1.15s linear infinite;
+}
+@keyframes lesson-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.lesson-loading .load-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 26px;
+  letter-spacing: -1px;
+  margin-top: 4px;
+  text-align: center;
+}
+.lesson-loading .load-sub {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+  text-align: center;
+}
+.lesson-loading .load-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 250px;
+}
+.lesson-loading .load-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--muted);
+  transition: color 0.3s;
+}
+.lesson-loading .load-step.is-active {
+  color: var(--ink);
+}
+.lesson-loading .load-dot {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  display: grid;
+  place-items: center;
+  transition: all 0.3s;
+}
+.lesson-loading .load-step.is-active .load-dot {
+  border-color: var(--warn);
+  background: var(--cream);
+}
+.lesson-loading .load-step.is-done .load-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.lesson-loading .load-dot svg {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.lesson-loading .load-step.is-done .load-dot svg {
+  opacity: 1;
+}
+.lesson-loading .load-bar {
+  width: 250px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+/* 用 scaleX 而不是动画 width：改 width 每帧都要重排。圆角在父级 + overflow:hidden，
+   所以横向缩放不会把圆角拉成椭圆。 */
+.lesson-loading .load-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.45s ease;
+}
+.lesson-loading .load-error {
+  color: var(--danger);
+}
+
+/* ---------- 顶栏（规格同 exam.css .exam-topbar） ---------- */
+
+.lesson-topbar {
+  height: var(--topbar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  z-index: 30;
+}
+.lesson-topbar .tb-logo {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font: 10px var(--font-mono);
+}
+.lesson-topbar .tb-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lesson-topbar .tb-crumb {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.lesson-topbar .tb-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+}
+.lesson-root .icon-btn {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  transition: all 0.15s;
+}
+.lesson-root .icon-btn:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+/* 「返回到 xx」锚点胶囊：从抽屉跨块跳转后出现 */
+.lesson-topbar .return-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--warn) 46%, var(--line));
+  background: var(--cream);
+  color: var(--warn);
+  border-radius: 99px;
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+}
+.lesson-topbar .return-pill:hover {
+  border-color: var(--warn);
+}
+
+/* ---------- 主区 + 抽屉 ---------- */
+
+.lesson-body {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+.lesson-viewport {
+  position: absolute;
+  inset: 0;
+  right: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--paper);
+  transition: right 0.26s ease;
+}
+.lesson-root.drawer-open .lesson-viewport {
+  right: var(--drawer-w);
+}
+.lesson-viewport.is-full-bleed {
+  background: var(--editor-bg);
+}
+.lesson-viewport:focus {
+  outline: none;
+}
+.lesson-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  border: 0;
+  background: rgba(34, 43, 40, 0.38);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.26s,
+    visibility 0.26s;
+}
+@media (max-width: 1024px) {
+  .lesson-root.drawer-open .lesson-viewport {
+    right: 0;
+  }
+  .lesson-root.drawer-open .lesson-scrim {
+    opacity: 1;
+    visibility: visible;
+  }
+  .lesson-drawer {
+    box-shadow: var(--shadow);
+  }
+}
+
+/* ---------- 抽屉（课程导航） ---------- */
+
+.lesson-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  width: var(--drawer-w);
+  max-width: 90vw;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.26s ease;
+}
+.lesson-root.drawer-open .lesson-drawer {
+  transform: none;
+}
+.lesson-drawer .drawer-head {
+  flex: none;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.lesson-drawer .dh-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.lesson-drawer .dh-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lesson-drawer .style-toggle {
+  border: 0;
+  background: none;
+  font-size: 10px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-strong);
+  padding: 0 0 1px;
+  white-space: nowrap;
+}
+.lesson-drawer .style-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.lesson-drawer .dh-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.lesson-drawer .dh-meta b {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  color: var(--ink);
+}
+.lesson-drawer .lin-bar {
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+  margin-top: 8px;
+}
+/* 同 .load-bar：scaleX 不触发重排 */
+.lesson-drawer .lin-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.4s ease;
+}
+.lesson-drawer .drawer-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px 14px;
+}
+.lesson-drawer .drawer-foot {
+  flex: none;
+  border-top: 1px solid var(--line);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.lesson-drawer .foot-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 7px 10px;
+  border-radius: var(--control-radius);
+  font-size: 12px;
+  color: var(--ink);
+}
+.lesson-drawer .foot-link:hover:not(:disabled) {
+  background: var(--paper);
+}
+.lesson-drawer .foot-link:disabled {
+  opacity: 0.45;
+}
+.lesson-drawer .foot-link svg {
+  color: var(--muted);
+}
+
+/* 形态 A：清单 */
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nav-list .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: none;
+  padding: 8px 10px;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.nav-list .nav-item:hover:not(:disabled) {
+  background: var(--paper);
+}
+.nav-list .nav-item.is-current {
+  background: var(--cream);
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
+}
+.nav-list .nav-item.is-current .nav-name {
+  font-weight: 700;
+}
+.nav-list .nav-item.is-locked {
+  opacity: 0.5;
+}
+
+/* 形态 B：时间轴 */
+.nav-timeline {
+  position: relative;
+  padding-left: 26px;
+}
+.nav-timeline .nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: none;
+  padding: 9px 10px;
+  margin-bottom: 10px;
+  transition: background 0.15s;
+}
+.nav-timeline .nav-item:hover:not(:disabled) {
+  background: var(--paper);
+}
+.nav-timeline .nav-item.is-current {
+  background: var(--cream);
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
+}
+.nav-timeline .nav-item.is-current .nav-name {
+  font-weight: 700;
+}
+.nav-timeline .nav-item.is-locked {
+  opacity: 0.5;
+}
+.nav-timeline .nav-item::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  width: 1px;
+  height: calc(100% + 10px);
+  background: var(--line);
+}
+.nav-timeline .nav-item:last-child::before {
+  display: none;
+}
+.nav-timeline .axis-dot {
+  position: absolute;
+  left: -26px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  display: grid;
+  place-items: center;
+  color: transparent;
+}
+.nav-timeline .axis-dot.is-done {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.nav-timeline .axis-dot.is-current {
+  border-color: var(--warn);
+  background: var(--cream);
+}
+.nav-timeline .axis-dot.is-current::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+.nav-timeline .axis-dot.is-lock {
+  color: var(--muted);
+}
+
+.lesson-drawer .nav-no {
+  font: 10px var(--font-mono);
+  color: var(--muted);
+  flex: none;
+  width: 14px;
+}
+.lesson-drawer .nav-ico {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.lesson-drawer .nav-item.is-current .nav-ico {
+  color: var(--warn);
+}
+.lesson-drawer .nav-item.is-done .nav-ico {
+  color: var(--accent);
+}
+.lesson-drawer .nav-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lesson-drawer .nav-state {
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.lesson-drawer .nav-state .st-done {
+  color: var(--accent);
+}
+.lesson-drawer .nav-state .st-lock {
+  color: var(--muted);
+}
+
+/* ---------- 块容器与底部行动条 ---------- */
+
+.block-wrap {
+  width: min(880px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 30px 0 90px;
+}
+@media (max-width: 720px) {
+  .block-wrap {
+    width: calc(100% - 32px);
+    padding: 20px 0 90px;
+  }
+}
+/* 编程题工作区：主区从「居中 880px 文档流」展开为铺满可用区的双栏（交接文档 15 §4.1）。
+   顶栏与抽屉不动——只有主区变。CodeMirror 需要一个有确定高度的父容器，
+   给不了高度它会塌成一条缝。 */
+.block-wrap.is-workspace {
+  width: 100%;
+  max-width: none;
+  padding: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.block-wrap.is-workspace > .block-practice {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.block-wrap.is-workspace .leyebrow {
+  padding: 12px 20px 0;
+  margin-bottom: 8px;
+}
+.block-wrap.is-workspace .block-foot {
+  padding: 10px 20px;
+  margin-top: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+/* QuestionCoding 的根容器 .prog-wrap 自带 height:100%，它需要的是一个
+   有确定高度的父级：这里把它和它外面那层异步组件包装一起撑成 flex 项。 */
+.block-wrap.is-workspace .prog-wrap {
+  height: 100%;
+}
+.block-wrap.is-workspace .block-practice > *:not(.leyebrow):not(.block-foot) {
+  flex: 1;
+  min-height: 0;
+}
+/* 窄屏：工作区在 question.css 里已经改成上下堆叠，块容器必须跟着放开高度，
+   由 .lesson-viewport 统一滚动。还锁着 height:100% 的话，堆叠后的题面 + 编辑器 +
+   控制台会被压回一屏里，超出的部分照样被裁掉——等于白改。
+   这条的特异度（0,3,0）必须压过上面的 .block-wrap.is-workspace，所以写在后面。 */
+@media (max-width: 960px) {
+  .block-wrap.is-workspace {
+    height: auto;
+    min-height: 100%;
+  }
+  .block-wrap.is-workspace .prog-wrap,
+  .block-wrap.is-workspace .block-practice > *:not(.leyebrow):not(.block-foot) {
+    flex: none;
+    height: auto;
+  }
+}
+
+/* 资料阅读器：和编程题工作区同款撑满机制（交接文档 17 §5 S3-1）。
+   880px 窄栏 + 260px 清单 = 预览区只剩 ~580px，A4 正文缩到 7~8px 不可读。
+   撑满后清单收成顶部 chips（≤4 份）或可折叠左栏（>4 份），预览区吃剩余空间。
+   顶栏与抽屉不动——理由同 is-workspace。 */
+.block-wrap.is-reader {
+  width: 100%;
+  max-width: none;
+  padding: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.block-wrap.is-reader > .block-materials {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.block-wrap.is-reader .leyebrow {
+  padding: 12px 20px 0;
+  margin-bottom: 8px;
+  flex: none;
+}
+.block-wrap.is-reader .block-foot {
+  padding: 10px 20px;
+  margin-top: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  flex: none;
+}
+
+.lesson-root .lcard {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-sm, 0 2px 8px rgba(34, 43, 40, 0.06));
+}
+.block-foot {
+  position: sticky;
+  bottom: 0;
+  margin-top: 26px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0 4px;
+  background: linear-gradient(to top, var(--paper) 58%, transparent);
+}
+.block-foot .hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---------- 课程内试卷入口：先说明它属于当前学习路径，再进入独立作答视图 ---------- */
+
+.homework-bridge {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  padding: clamp(24px, 4vw, 36px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-sm, 0 2px 8px rgba(34, 43, 40, 0.06));
+}
+.homework-bridge-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: var(--accent-deep);
+  background: var(--mint);
+  border-radius: 50%;
+}
+.homework-bridge-copy h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(21px, 2.5vw, 28px);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+.homework-bridge-copy p {
+  max-width: 56ch;
+  margin: 8px 0 18px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+@media (max-width: 560px) {
+  .homework-bridge {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 14px 12px;
+    padding: 24px 20px;
+  }
+}
+
+/* 块标题：换块后焦点移到这里，键盘用户不会卡在抽屉 */
+.block-anchor:focus {
+  outline: none;
+}
+
+/* ---------- 锁定态（两种 lock_reason 两套皮） ---------- */
+
+.locked-state {
+  width: min(460px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 90px 0;
+  text-align: center;
+}
+.locked-state .lk-ico {
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+}
+.locked-state h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 22px;
+  letter-spacing: -0.8px;
+  margin: 0 0 8px;
+}
+.locked-state p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 20px;
+  line-height: 1.85;
+}
+.locked-state .leyebrow {
+  justify-content: center;
+}
+
+/* ---------- 图文块 ---------- */
+
+.block-article {
+  padding: 30px 34px;
+  font-size: 15px;
+  line-height: 1.85;
+}
+@media (max-width: 720px) {
+  .block-article {
+    padding: 22px 18px;
+  }
+}
+.block-article :deep(h1),
+.block-article h1,
+.block-article h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -1px;
+  line-height: 1.3;
+}
+
+/* ---------- 视频块 ---------- */
+
+.block-video {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--editor-bg);
+}
+.block-video .v-stage {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.block-video .v-stage > .video-player,
+.block-video .v-stage > .direct-video,
+.block-video .v-stage > .v-external {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(100%, var(--video-frame-width));
+  height: auto;
+  aspect-ratio: 16 / 9;
+  max-width: 1600px;
+  max-height: 100%;
+}
+.block-video .v-note {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  color: rgba(216, 226, 220, 0.7);
+  font-size: 12px;
+  border-top: 1px solid rgba(216, 226, 220, 0.12);
+}
+.block-video .v-note .lbtn {
+  background: transparent;
+  color: var(--editor-fg);
+  border-color: rgba(216, 226, 220, 0.3);
+}
+.block-video .v-note .lbtn:hover:not(:disabled) {
+  border-color: var(--editor-fg);
+}
+.block-video .v-note .lbtn-accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.block-video .v-external {
+  border: 0;
+  border-radius: var(--card-radius);
+  background: #000;
+}
+
+.video-block-shell {
+  --video-frame-width: min(80vw, 1600px);
+
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: clamp(12px, 1.8vh, 20px);
+  padding: clamp(12px, 2vw, 28px);
+  background: var(--editor-bg);
+}
+.video-actions {
+  width: min(100%, var(--video-frame-width));
+  max-width: 1600px;
+  margin: 0 auto;
+  flex: none;
+}
+.video-actions .block-foot {
+  position: static;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(216, 226, 220, 0.16);
+  border-radius: var(--card-radius);
+  background: rgba(15, 18, 22, 0.78);
+  backdrop-filter: blur(10px);
+}
+.video-actions .block-foot .hint {
+  color: rgba(216, 226, 220, 0.72);
+}
+.video-actions .block-foot .lbtn:not(.lbtn-accent) {
+  border-color: rgba(216, 226, 220, 0.28);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--editor-fg);
+}
+
+@media (max-width: 720px) {
+  .video-block-shell {
+    height: auto;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .block-video,
+  .block-video .v-stage {
+    height: auto;
+    overflow: visible;
+  }
+  .video-actions .block-foot {
+    flex-wrap: wrap;
+  }
+  .video-actions .block-foot .hint {
+    width: 100%;
+  }
+  .block-video .v-stage > .video-player,
+  .block-video .v-stage > .direct-video,
+  .block-video .v-stage > .v-external,
+  .video-actions {
+    position: static;
+    margin: 0;
+    width: 100%;
+    height: auto;
+  }
+}
+
+/* ---------- 单题练习块 ----------
+ * 选项样式统一在 question.css（.qz .option / .badge / .opt-text），见交接文档 17。 */
+
+/* ---------- 资料块 ----------
+ * 资料清单/预览区的样式全在 BlockMaterials.vue 的 scoped 块里（它是唯一的使用方）。
+ * 这里原本还留着一版 .mat-row / .mat-name 的全局规则，是资料块早期形态的残留——
+ * .mat-name 已经没有任何组件在用，而 .mat-row 与组件内同名类**同特异度冲突**，
+ * 谁生效取决于打包后的先后顺序（表现为行内 padding 双份）。已删除。 */
+
+/* ---------- 占位（作答链路 X2 落地前） ---------- */
+
+.block-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--card-radius);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- toast ---------- */
+
+.lesson-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%) translateY(10px);
+  z-index: 90;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 8px 18px;
+  border-radius: var(--control-radius);
+  font-size: 12px;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.24s;
+  max-width: 84vw;
+  text-align: center;
+}
+.lesson-toast.is-shown {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}

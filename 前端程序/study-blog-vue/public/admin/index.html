@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>管理总览 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div><h1>管理总览</h1><p>关键数据一览（接入统计接口后生效）</p></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><b id="statCourses">-</b><span>课程（课包）</span></div>
+        <div class="stat"><b id="statQuestions">-</b><span>题目</span></div>
+        <div class="stat"><b id="statPapers">-</b><span>试卷 / 作业</span></div>
+        <div class="stat"><b id="statStudents">-</b><span>学员</span></div>
+        <div class="stat"><b id="statRate">-</b><span>作业完成率</span></div>
+      </div>
+
+      <div class="card" style="margin-top: 20px">
+        <h3>开发进度</h3>
+        <table>
+          <tr><th>模块</th><th>状态</th><th>入口</th></tr>
+          <tr><td>配题 · 题库管理</td><td><span class="tag">框架已建</span></td><td><a class="btn-text" href="questions.html">进入</a></td></tr>
+          <tr><td>配题 · 试卷管理</td><td><span class="tag">已上线</span></td><td><a class="btn-text" href="papers.html">进入</a></td></tr>
+          <tr><td>配题 · 试卷管理</td><td><span class="tag">框架已建</span></td><td><a class="btn-text" href="papers.html">进入</a></td></tr>
+          <tr><td>配课 · 课包/节点</td><td><span class="tag gray">建设中</span></td><td><a class="btn-text" href="courses.html">进入</a></td></tr>
+          <tr><td>运营 · 学员/兑换码/成绩</td><td><span class="tag gray">建设中</span></td><td><a class="btn-text" href="students.html">进入</a></td></tr>
+        </table>
+        <!-- TODO(接 API)：GET /api/admin/stats 填充统计卡片 -->
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module" src="admin-api.js"></script>
+<script type="module" src="admin-layout.js"></script>
+<script type="module">
+  import { initLayout } from "./admin-layout.js";
+  initLayout();
+  // TODO：接入统计接口后填充 id=stat* 的统计卡片
+</script>
+</body>
+</html>

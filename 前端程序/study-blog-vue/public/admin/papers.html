@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>试卷管理 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+  <!-- 整卷预览的 Markdown 渲染管线和题库页共用（admin-markdown.js 单源），vendor 引用保持一致。 -->
+  <link rel="stylesheet" href="vendor/vditor/dist/index.css" />
+  <script src="vendor/dompurify/purify.min.js"></script>
+  <script src="vendor/vditor/dist/index.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <!-- ==================== 页面标题 + 标准检索栏 ==================== -->
+      <div class="page-head">
+        <div>
+          <h1>试卷管理</h1>
+          <p>组卷、发布 / 归档、考试链接生命周期——都在这一页完成</p>
+        </div>
+        <button class="btn primary" id="newPaperBtn" type="button">＋ 组卷</button>
+      </div>
+
+      <div class="card search-card">
+        <div class="search-form">
+          <div class="field">
+            <label>关键词</label><input id="sKeyword" placeholder="试卷名 / 编号" />
+          </div>
+          <div class="field">
+            <label>类型</label
+            ><select id="sType">
+              <option value="">全部</option>
+              <option>练习卷</option>
+              <option>测试卷</option>
+              <option>模拟卷</option>
+              <option>竞赛卷</option>
+              <option>作业卷</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>学科</label
+            ><select id="sSubject">
+              <option value="">全部</option>
+              <option value="cpp">C++</option>
+              <option value="python">Python</option>
+              <option value="scratch">Scratch</option>
+              <option value="general">通用</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>负责人</label
+            ><select id="sOwner">
+              <option value="">全部</option>
+            </select>
+          </div>
+          <div class="search-actions">
+            <button class="btn primary" id="searchBtn" type="button">查询</button>
+            <button class="btn" id="resetBtn" type="button">重置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 草稿 / 已发布 / 已归档 ==================== -->
+      <div class="card" style="margin-top: 20px">
+        <div class="zone-tabs">
+          <button data-zone="draft">草稿 <span class="count" id="draftCount">0</span></button>
+          <button class="active" data-zone="published">已发布 <span class="count" id="publishedCount">0</span></button>
+          <button data-zone="archived">已归档 <span class="count" id="archivedCount">0</span></button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 90px">编号</th>
+                <th>试卷名</th>
+                <th style="width: 76px">类型</th>
+                <th style="width: 70px">学科</th>
+                <th style="width: 64px">赛制</th>
+                <th style="width: 170px">题型构成</th>
+                <th style="width: 62px">总分</th>
+                <th style="width: 90px">链接</th>
+                <th style="width: 78px">状态</th>
+                <th style="width: 300px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="paperRows"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="emptyTip" hidden>没有符合条件的试卷</div>
+        <div class="list-error" id="errorTip" hidden>
+          <span id="errorText">列表加载失败。</span>
+          <button class="btn" id="retryBtn" type="button">重新加载</button>
+        </div>
+        <div class="pager">
+          <span id="totalTip">共 0 条</span>
+          <label class="muted">
+            每页最多展示
+            <select id="pageSize" aria-label="每页条数">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            条
+          </label>
+          <span class="spacer"></span
+          ><button class="btn" id="prevPageBtn" type="button">‹ 上一页</button
+          ><button class="btn" id="nextPageBtn" type="button">下一页 ›</button>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ==================== 组卷 Modal ====================
+     与「新增试题」同构：左栏 modal-left 放低频的试卷属性（rdot 小圆圈单选）。
+     右栏：已选题目是主工作区（工具条 + 主表格 + 汇总/校验条）；
+     题目来源（从题库添加 / 批量导入题号）收进右侧滑入抽屉，按需打开。
+     布局基准见《开发文档/组卷布局DEMO.html》。 -->
+<div class="modal-mask" id="composeMask">
+  <div class="modal" id="composeModal" role="dialog" aria-modal="true" aria-labelledby="composeTitle">
+    <header class="modal-head">
+      <h2 id="composeTitle">组卷</h2>
+      <button class="icon-btn" id="composeClose" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body">
+      <!-- 左栏：试卷属性（设置一次，低频） -->
+      <div class="modal-left">
+        <div class="left-block">
+          <h4 class="sec-title">试卷名称</h4>
+          <input id="pTitle" type="text" maxlength="200" placeholder="如：C++ 入门测试卷" />
+        </div>
+        <div class="left-block">
+          <h4 class="sec-title">说明</h4>
+          <input id="pDesc" type="text" maxlength="500" placeholder="选填" />
+        </div>
+        <div class="left-block">
+          <h4 class="sec-title">试卷类型 <span class="muted" id="presetHint"></span></h4>
+          <div class="rdot-group" id="pTypeGroup"></div>
+        </div>
+        <div class="left-block">
+          <h4 class="sec-title">学科 <span class="muted">（软标签：限制编程题提交语言，不拦选题）</span></h4>
+          <div class="rdot-group" id="pSubjectGroup"></div>
+        </div>
+        <div class="left-block">
+          <h4 class="sec-title">赛制 <span class="muted">（仅记录预设来源，不参与判分）</span></h4>
+          <div class="rdot-group" id="pRulesetGroup"></div>
+        </div>
+        <div class="left-block">
+          <h4 class="sec-title">计分</h4>
+          <div class="rdot-group col" id="pScoreModeGroup"></div>
+          <label class="check-line" style="margin-top: 10px"><input type="checkbox" id="pPartialMulti" /> 多选少选且无错选给半分</label>
+        </div>
+        <div class="left-block">
+          <h4 class="sec-title">及格分</h4>
+          <input id="pPassScore" type="number" min="0" style="width: 110px" placeholder="不设" />
+          <p class="field-error" id="passScoreWarn" hidden></p>
+        </div>
+      </div>
+
+      <!-- 右栏：已选题目是主工作区，题目来源按需打开抽屉 -->
+      <div class="modal-right" id="composeRight">
+        <div class="workspace-toolbar">
+          <div>
+            <h3 class="workspace-title">已选题目 <span class="count-badge" data-question-count>0</span></h3>
+            <p class="workspace-hint">按住 ⠿ 拖拽排序、↑↓ 单格微调、直接改分值；需要时再打开题库，不挤占编辑空间。</p>
+          </div>
+          <div class="workspace-actions">
+            <button class="btn" id="openPreviewBtn" type="button">预览整卷</button>
+            <button class="btn" id="openImport" type="button" aria-controls="sourceDrawer" aria-expanded="false">批量导入题号</button>
+            <button class="btn primary" id="openLibrary" type="button" aria-controls="sourceDrawer" aria-expanded="false">＋ 从题库添加</button>
+          </div>
+        </div>
+
+        <!-- 已选题目（表格滚，汇总条钉底） -->
+        <div class="pick-basket">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th style="width: 42px">序</th><th style="width: 92px">题号</th><th>题干摘要</th><th style="width: 70px">题型</th><th style="width: 82px">分值</th><th style="width: 118px">排序 / 删除</th></tr>
+              </thead>
+              <tbody id="selectedRows"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="selectedEmpty">还没有选题——点上方「＋ 从题库添加」或「批量导入题号」</div>
+          <div class="basket-sum" aria-live="polite">
+            <span>共 <strong data-question-count>0</strong> 题</span>
+            <span>总分 <strong id="totalScore">0</strong></span>
+            <span class="grow"></span>
+            <span class="validation-chip ok" id="validationChip">题目状态正常</span>
+          </div>
+        </div>
+
+        <!-- 题目来源抽屉：从题库添加 / 批量导入题号 -->
+        <div class="drawer-mask" data-close-drawer></div>
+        <aside class="source-drawer" id="sourceDrawer" aria-hidden="true" aria-labelledby="drawerTitle" inert>
+          <header class="drawer-head">
+            <h3 id="drawerTitle">添加题目</h3>
+            <span class="grow"></span>
+            <button class="icon-btn" id="drawerClose" type="button" data-close-drawer aria-label="关闭添加题目面板">✕</button>
+          </header>
+
+          <div class="drawer-tabs" role="tablist" aria-label="添加题目方式">
+            <button class="drawer-tab active" id="libraryTab" type="button" role="tab" aria-selected="true" aria-controls="libraryPanel" data-panel="libraryPanel">从题库添加</button>
+            <button class="drawer-tab" id="importTab" type="button" role="tab" aria-selected="false" aria-controls="importPanel" data-panel="importPanel">批量导入题号</button>
+          </div>
+
+          <section class="drawer-panel" id="libraryPanel" role="tabpanel" aria-labelledby="libraryTab">
+            <h4 class="sec-title">筛选题库</h4>
+            <div class="search-form">
+              <div class="field" style="flex: 1; min-width: 140px"><input id="bKeyword" placeholder="题干 / 编号" aria-label="搜索题干或编号" /></div>
+              <div class="field"><select id="bType" aria-label="题型"></select></div>
+              <div class="field"><select id="bDifficulty" aria-label="难度"></select></div>
+              <button class="btn" id="bSearchBtn" type="button">查询</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th style="width: 54px"></th><th style="width: 88px">编号</th><th>题干</th><th style="width: 68px">题型</th><th style="width: 78px">难度</th></tr></thead>
+                <tbody id="bankRows"></tbody>
+              </table>
+            </div>
+            <div class="empty" id="bEmptyTip" hidden>没有符合条件的题目</div>
+            <div class="list-error" id="bErrorTip" hidden>
+              <span id="bErrorText">选题加载失败。</span>
+              <button class="btn" id="bRetryBtn" type="button">重新加载</button>
+            </div>
+            <div class="pager">
+              <span id="bTotalTip">共 0 条</span>
+              <span class="grow"></span>
+              <button class="btn" id="bPrevBtn" type="button">‹ 上一页</button>
+              <button class="btn" id="bNextBtn" type="button">下一页 ›</button>
+            </div>
+          </section>
+
+          <section class="drawer-panel" id="importPanel" role="tabpanel" aria-labelledby="importTab" hidden>
+            <h4 class="sec-title">粘贴题号</h4>
+            <p class="muted">格式「题号:分值」，如 Q000004:20；分值可省，默认 10 分。支持换行、空格、逗号或顿号分隔；重复题号会自动跳过。</p>
+            <textarea class="id-paste" id="idInput" rows="7" placeholder="Q000004:20&#10;Q000005 Q000006:15&#10;粘贴老师手里的清单即可"></textarea>
+            <div class="row-actions" style="margin-top: 10px">
+              <button class="btn primary" id="parseIdsBtn" type="button">解析并加入</button>
+              <span class="muted" id="importFeedback" aria-live="polite"></span>
+            </div>
+          </section>
+
+          <footer class="drawer-foot">
+            <span class="muted">加入后可在主列表调整顺序和分值</span>
+            <button class="btn primary" id="drawerDone" type="button" data-close-drawer>完成</button>
+          </footer>
+        </aside>
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <span class="muted" id="composeState"></span>
+      <span class="muted" id="composeHint"></span>
+      <span class="grow"></span>
+      <button class="btn" id="composeCancel" type="button">取消</button>
+      <!-- 两个按钮的显隐由 renderComposeFooter() 按试卷状态决定：已发布卷没有「发布」这个动作。 -->
+      <button class="btn" id="saveBtn" type="button">保存草稿</button>
+      <button class="btn primary" id="publishBtn" type="button">保存并发布</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 考试链接管理已独立成页：exam-links.html（配题 / 考试链接）。
+     这里曾经内嵌一个链接 Modal；规则开始长分支后同一套逻辑不能存两份，整块迁走。 -->
+
+<!-- ==================== 整卷预览 Modal ====================
+     与题库页「整题预览」共用 preview-mask/dialog 骨架（z-index 110，可压在组卷 Modal 上）。
+     卷别切换 = 重新请求 ?with_answers=0|1（不是 CSS 切换）；答题留白只在学生卷生效。 -->
+<div class="preview-mask" id="paperPreviewMask" hidden>
+  <section class="preview-dialog paper-preview" role="dialog" aria-modal="true" aria-labelledby="paperPreviewTitle">
+    <header class="preview-head">
+      <h2 id="paperPreviewTitle">整卷预览</h2>
+      <div class="paper-preview-tools" id="paperPreviewTools">
+        <span class="pill-group" id="pvVariantGroup" role="group" aria-label="卷别"></span>
+        <label class="check-line" id="pvSpaceLine"><input type="checkbox" id="pvAnswerSpace" /> 答题留白</label>
+        <button class="btn" id="pvPrintBtn" type="button">打印</button>
+      </div>
+      <button class="modal-close" id="paperPreviewClose" type="button" aria-label="关闭预览">×</button>
+    </header>
+    <div class="preview-body sheet-wrap" id="paperPreviewBody">
+      <div class="sheet" id="paperPreviewSheet"></div>
+    </div>
+  </section>
+</div>
+
+<script type="module" src="admin-api.js"></script>
+<script type="module" src="admin-layout.js"></script>
+<script type="module" src="papers.js"></script>
+</body>
+</html>

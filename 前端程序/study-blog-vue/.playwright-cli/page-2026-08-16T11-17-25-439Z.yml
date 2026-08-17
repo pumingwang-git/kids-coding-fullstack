@@ -1,0 +1,66 @@
+- generic [ref=f3e3]:
+  - generic [ref=f3e4]:
+    - generic [ref=f3e5]:
+      - generic [ref=f3e6]: 少儿编程学习空间
+      - link "预览同学" [ref=f3e10] [cursor=pointer]:
+        - /url: /profile?area=kids
+    - main [ref=f3e11]:
+      - link "返回工具箱" [ref=f3e12] [cursor=pointer]:
+        - /url: /areas/kids/toolbox
+      - generic [ref=f3e16]:
+        - generic [ref=f3e17]: "24"
+        - heading "24 点挑战" [level=1] [ref=f3e19]
+      - region [ref=f3e20]:
+        - generic [ref=f3e21]:
+          - generic "游戏模式" [ref=f3e22]:
+            - button "自由练习" [pressed] [ref=f3e23] [cursor=pointer]
+            - button "60 秒挑战" [ref=f3e24] [cursor=pointer]
+          - generic "题目难度" [ref=f3e25]:
+            - button "简单" [pressed] [ref=f3e26] [cursor=pointer]
+            - button "进阶" [ref=f3e27] [cursor=pointer]
+            - button "高手" [ref=f3e28] [cursor=pointer]
+        - generic [ref=f3e29]:
+          - generic [ref=f3e30]:
+            - generic [ref=f3e31]:
+              - generic [ref=f3e32]:
+                - heading "拼出你的算式" [level=2] [ref=f3e33]
+                - paragraph [ref=f3e34]: 1–9 · 整数解
+              - generic [ref=f3e35]:
+                - text: 目标
+                - strong [ref=f3e36]: "24"
+            - generic [ref=f3e37]:
+              - generic [ref=f3e38]: 从下面选择一个数字
+              - strong [ref=f3e39]: = 24
+            - generic "本题数字" [ref=f3e40]:
+              - button "使用数字 2" [ref=f3e41] [cursor=pointer]: "2"
+              - button "使用数字 5" [ref=f3e42] [cursor=pointer]: "5"
+              - button "使用数字 5" [ref=f3e43] [cursor=pointer]: "5"
+              - button "使用数字 1" [ref=f3e44] [cursor=pointer]: "1"
+            - generic "运算符" [ref=f3e45]:
+              - button "添加+号" [disabled] [ref=f3e46]: +
+              - button "添加−号" [disabled] [ref=f3e47]: −
+              - button "添加×号" [disabled] [ref=f3e48]: ×
+              - button "添加÷号" [disabled] [ref=f3e49]: ÷
+              - button "(" [ref=f3e50] [cursor=pointer]
+              - button ")" [disabled] [ref=f3e51]
+              - button "撤销一步" [disabled] [ref=f3e52]
+              - button "清空算式" [disabled] [ref=f3e55]
+            - generic [ref=f3e58]:
+              - button "验证算式" [disabled] [ref=f3e59]
+              - button "查看答案" [ref=f3e62] [cursor=pointer]
+              - button "换一题" [ref=f3e65] [cursor=pointer]
+          - complementary "玩法提示" [ref=f3e69]:
+            - img "为你加油的水獭" [ref=f3e70]
+            - heading "卡住时，换个组合顺序" [level=3] [ref=f3e71]
+            - paragraph [ref=f3e72]: 先找能凑成 6、8 或 12 的两个数，再用剩下的数字继续组合。
+            - list [ref=f3e73]:
+              - listitem [ref=f3e74]: 四个数字都要用
+              - listitem [ref=f3e78]: 每个数字只用一次
+              - listitem [ref=f3e82]: 可以添加括号
+  - navigation "少儿编程移动导航" [ref=f3e86]:
+    - link "首页" [ref=f3e87] [cursor=pointer]:
+      - /url: /areas/kids
+    - link "工具箱" [ref=f3e92] [cursor=pointer]:
+      - /url: /areas/kids/toolbox
+    - link "题库" [ref=f3e97] [cursor=pointer]:
+      - /url: /areas/kids/tasks/mistakes

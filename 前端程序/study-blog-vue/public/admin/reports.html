@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>成绩统计 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+  <!-- 答卷回看要把题干按 Markdown 渲染（含配图、填空标记），与整卷预览同一套管线。
+       papers.html 也是这么引的；不引的话题干会以 `**加粗**`、`\placeholder[k]{}` 的
+       源码形态显示给老师看，而学员看到的是渲染后的样子，两边对不上。 -->
+  <link rel="stylesheet" href="vendor/vditor/dist/index.css" />
+  <script src="vendor/dompurify/purify.min.js"></script>
+  <script src="vendor/vditor/dist/index.min.js"></script>
+  <style>
+    /* 本页私有小件：答卷回看块。四个分析视图的样式在 admin.css 的「成绩分析图表」一节，
+       因为 admin-charts.js 是公共模块，样式跟着模块走而不是跟着页面走。 */
+    .back-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .back-row h2 { margin: 0; font: 600 18px var(--font-display); }
+    .score-num { font-weight: 700; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <!-- ==================== 第一层：场次成绩总览 ==================== -->
+      <section id="overviewView">
+        <div class="page-head">
+          <div>
+            <h1>成绩统计</h1>
+            <p>按「考试链接」组织成绩——每条链接是一场独立的考试/作业，点开看单场明细与每份答卷。</p>
+          </div>
+        </div>
+
+        <div class="card search-card">
+          <div class="search-form">
+            <div class="field">
+              <label>关键词</label><input id="sKeyword" placeholder="链接名 / 试卷名 / 编号" />
+            </div>
+            <div class="field">
+              <label>卷型</label>
+              <select id="sType">
+                <option value="">全部</option>
+                <option>练习卷</option><option>测试卷</option><option>模拟卷</option>
+                <option>竞赛卷</option><option>作业卷</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>课程</label>
+              <select id="sSubject">
+                <option value="">全部</option>
+                <option value="cpp">C++</option>
+                <option value="python">Python</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>来源</label>
+              <select id="sSource">
+                <option value="">全部</option>
+                <option value="exam_link">考试链接</option>
+                <option value="lesson" disabled title="课后练习成绩收集器落地后并入">课后练习（建设中）</option>
+                <option value="practice" disabled title="课中练习成绩记录落地后并入">课中练习（建设中）</option>
+              </select>
+            </div>
+            <div class="search-actions">
+              <button class="btn primary" id="searchBtn" type="button">查询</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats" id="overviewStats"></div>
+
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>链接 / 场次</th><th>试卷</th><th>卷型</th><th>课程</th><th>来源</th><th>状态</th>
+                  <th>参考人数</th><th>已交人数</th><th>平均分</th><th>分数区间</th><th>及格率</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="overviewRows"></tbody>
+            </table>
+          </div>
+          <div class="pager" id="overviewFoot"></div>
+        </div>
+      </section>
+
+      <!-- ==================== 第二层：单场明细 ==================== -->
+      <section id="detailView" hidden>
+        <div class="back-row">
+          <button class="btn" id="backBtn" type="button">← 返回总览</button>
+          <h2 id="detailTitle"></h2>
+          <span id="detailTags"></span>
+          <span style="flex:1"></span>
+          <button class="btn primary" id="exportBtn" type="button">导出 CSV</button>
+        </div>
+
+        <div class="stats" id="detailStats"></div>
+
+        <!-- 四个分析视图共用一块面板。视图 1、4 用 /results 已经拿到的数据（切换零延迟）；
+             视图 2、3 走 /links/{id}/item-analysis，**点进去才发请求**——那份聚合要把
+             一场所有 attempt_answers 按题分组，挂在首屏等于每次打开成绩页都为多数人
+             不看的东西付钱。 -->
+        <div class="card" style="margin-bottom:14px" id="analysisCard">
+          <div class="view-tabs" id="viewTabs" role="tablist">
+            <button type="button" data-view="dist" class="is-active" role="tab">分数分布</button>
+            <button type="button" data-view="items" role="tab">逐题得分率</button>
+            <button type="button" data-view="disc" role="tab">题目诊断</button>
+            <button type="button" data-view="time" role="tab">用时 × 分数</button>
+          </div>
+          <p class="view-note" id="viewNote"></p>
+          <div id="viewBody"></div>
+        </div>
+
+        <div class="card">
+          <!-- 计分口径必须显式写出来：链接可配 最好/最后/首次，不标的话老师无从判断
+               这里的分数与学员端候考页、排行榜显示的是不是同一个 -->
+          <p class="muted" style="margin:0 0 8px" id="countedPolicyTip"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>学员</th><th>作答次数</th><th>状态</th><th>计分成绩</th><th>用时</th>
+                  <th>交卷方式</th><th>开考时间</th><th>交卷时间</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="attemptRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 第三层：单份答卷回看 ==================== -->
+      <div class="modal-mask" id="attemptMask" hidden inert>
+        <div class="modal review-modal" role="dialog" aria-modal="true" aria-labelledby="attemptTitle">
+          <div class="modal-head">
+            <h3 id="attemptTitle"></h3>
+            <button class="modal-close" id="attemptClose" type="button" aria-label="关闭答卷回看" data-attempt-review-close>✕</button>
+          </div>
+          <!-- 不能直接用 .modal-body：它是 display:flex（给 questions.html 的左右两栏用的），
+               题目塞进去会一道一道横着排成窄栏。这里要的是纵向列表 + 自己滚动。 -->
+          <div class="review-body" id="attemptBody"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module" src="exam-results.js"></script>
+</body>
+</html>

@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>课时作业成绩 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+  <link rel="stylesheet" href="vendor/vditor/dist/index.css" />
+  <script src="vendor/dompurify/purify.min.js"></script>
+  <script src="vendor/vditor/dist/index.min.js"></script>
+  <style>
+    /* 本页只写布局，不发明颜色：色值一律取 admin.css :root 的令牌。
+       语义色 tone-* 是服务端下发的语义（ok/warn/danger/muted）到本主题的唯一映射处。 */
+    .homework-layout { display: grid; grid-template-columns: minmax(244px, 278px) minmax(0, 1fr); gap: 24px; align-items: start; }
+    .homework-tree { position: sticky; top: 18px; max-height: calc(100vh - 96px); padding: 18px; overflow: hidden; display: flex; flex-direction: column; }
+    .homework-tree h2 { margin: 0; font: 700 17px var(--font-display); }
+    .homework-tree > p { margin: 5px 0 12px; font-size: 13px; line-height: 1.55; }
+    .tree-course { display: grid; gap: 10px; flex: none; }
+    .tree-course select { width: 100%; }
+    .tree-list, .tree-lessons { margin: 0; padding: 0; list-style: none; }
+    .tree-list { display: grid; gap: 6px; min-height: 0; margin-top: 14px; overflow-y: auto; overscroll-behavior: contain; padding-right: 3px; }
+    .tree-section { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); }
+    .tree-section > button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 9px 10px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
+    .tree-section > button:hover, .tree-section.is-active > button { background: color-mix(in srgb, var(--mint) 52%, var(--paper)); color: var(--accent); }
+    .tree-section small { margin-left: auto; color: var(--muted); font-weight: 500; }
+    .tree-lessons { display: grid; gap: 3px; padding: 5px; border-top: 1px solid var(--line); }
+    .tree-lesson { display: flex; width: 100%; align-items: center; gap: 7px; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+    .tree-lesson:hover, .tree-lesson.is-active { background: color-mix(in srgb, var(--mint) 52%, var(--paper)); color: var(--accent); }
+    .tree-lesson .homework-count { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .homework-main { display: grid; gap: 18px; min-width: 0; }
+    .page-head .page-path { margin-top: 8px; color: var(--accent); font-size: 13px; font-weight: 700; }
+
+    /* 筛选区由服务端的 filters 描述生成，列数不定 —— 用 auto-fit 让它自己排。 */
+    .homework-toolbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 14px; align-items: end; }
+    .homework-toolbar .field { min-width: 0; }
+    .homework-toolbar .field.grow { grid-column: span 2; }
+    .homework-toolbar .field label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .homework-toolbar input, .homework-toolbar select { width: 100%; background: var(--paper); }
+    .homework-toolbar .search-actions { margin-left: 0; }
+    .homework-toolbar .btn { min-height: 40px; width: 100%; }
+    .homework-stats { margin: 2px 0; }
+    .homework-stats .stat { padding: 15px 16px; }
+    .homework-list-card { min-height: 360px; }
+    .homework-table-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .homework-table-title h2 { margin: 0; font: 700 17px var(--font-display); }
+
+    /* 通用单元格：主文本 + 次要行 + 类型徽标。所有列共用一套，表头是数据不是模板。 */
+    .cell { display: grid; gap: 3px; min-width: 0; }
+    .cell .cell-main { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .cell b { overflow-wrap: anywhere; }
+    .cell small { color: var(--muted); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+    .cell-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+    .cell-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; }
+    .col-right { text-align: right; }
+    .tone-ok { color: var(--accent); }
+    .tone-warn { color: var(--warn); }
+    .tone-danger { color: var(--danger); }
+    .tone-muted { color: var(--muted); }
+
+    .detail-workspace { display: grid; gap: 18px; }
+    .detail-actions { display: flex; align-items: center; gap: 12px; }
+    .detail-actions .spacer { flex: 1; }
+    .homework-detail-head { display: grid; gap: 8px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .homework-detail-head h2 { margin: 0; font: 700 20px var(--font-display); }
+    .homework-detail-path { color: var(--muted); font-size: 13px; }
+    .homework-detail-meta { display: flex; flex-wrap: wrap; gap: 7px; }
+    .homework-insight { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 15px 16px; border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--mint) 42%, var(--paper)); }
+    .homework-insight p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .history-host td { padding: 0 !important; background: color-mix(in srgb, var(--mint) 30%, var(--paper)); }
+    .history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .history-table th, .history-table td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+    .history-table th { color: var(--muted); font-weight: 700; }
+    .history-table tr:last-child td { border-bottom: 0; }
+    .history-wrap { max-height: 280px; }
+    #detailFoot { margin-top: 14px; }
+    .homework-list-card .expander { min-width: 36px; min-height: 28px; margin-right: 6px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--accent); font-size: 12px; font-weight: 800; line-height: 1; }
+    .homework-list-card .expander:hover { border-color: var(--accent); background: color-mix(in srgb, var(--mint) 52%, var(--paper)); }
+    .homework-list-card .expander:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 26%, transparent); outline-offset: 2px; }
+
+    /* 记录详情弹窗：字段成对下发，这里只排版。 */
+    .record-fields { display: grid; gap: 14px; }
+    .record-field { display: grid; grid-template-columns: minmax(88px, 118px) minmax(0, 1fr); gap: 14px; align-items: baseline; }
+    .record-field dt { color: var(--muted); font-size: 12px; font-weight: 800; }
+    .record-field dd { margin: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+
+    @media (max-width: 980px) { .homework-layout { grid-template-columns: 1fr; } .homework-tree { position: static; max-height: none; } .tree-list { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 360px; } }
+    @media (max-width: 700px) { .content { padding: 20px 16px 44px; } .page-head { margin-bottom: 18px; } .homework-layout { gap: 18px; } .homework-tree { padding: 16px; } .homework-toolbar { grid-template-columns: 1fr; gap: 12px; } .homework-toolbar .field.grow { grid-column: auto; } .detail-actions { align-items: stretch; flex-wrap: wrap; } .detail-actions .spacer { display: none; } .detail-actions .btn { flex: 1; justify-content: center; } }
+    @media (max-width: 620px) { .tree-list { grid-template-columns: 1fr; max-height: 330px; } .homework-insight { grid-template-columns: 1fr; gap: 10px; } .homework-detail-meta { gap: 6px; } .homework-list-card > .table-wrap { max-height: none; overflow: visible; } .homework-list-card > .table-wrap > table, .homework-list-card > .table-wrap > table tbody, .data-row, .data-row td { display: block; width: 100%; } .homework-list-card > .table-wrap > table thead { display: none; } .data-row { padding: 13px 0; border-bottom: 1px solid var(--line); } .data-row td { display: grid; grid-template-columns: minmax(92px, .78fr) minmax(0, 1.22fr); gap: 12px; padding: 5px 0; border: 0; text-align: left; } .data-row td::before { content: attr(data-label); color: var(--muted); font-size: 12px; font-weight: 700; } .data-row td:first-child { padding-top: 0; } .data-row td:last-child { padding-bottom: 0; } .cell-actions { justify-content: flex-start; } .history-host, .history-host td { display: block; } .history-host td { padding: 0 !important; } .history-wrap { max-height: 320px; overflow: auto; } #detailFoot { flex-wrap: wrap; } #detailFoot .spacer { display: none; } #detailFoot .muted { flex: 0 0 100%; } #detailFoot .btn { flex: 1; justify-content: center; min-height: 40px; } .record-field { grid-template-columns: 1fr; gap: 4px; } }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <section id="overviewView">
+        <div class="page-head">
+          <div>
+            <h1>课时作业成绩</h1>
+            <p>沿课包内容结构查看课后作业表现，整卷作业与 Scratch 作业同表；考试链接成绩仍在“成绩统计”页独立管理。</p>
+            <div class="page-path" id="activePath">全部章节</div>
+          </div>
+        </div>
+        <div class="homework-layout">
+          <aside class="card homework-tree" aria-label="课包章节目录">
+            <h2>课包目录</h2>
+            <p class="muted">只显示当前筛选范围内含作业的课时，按章节展开定位。</p>
+            <div class="tree-course"><select id="courseSelect" aria-label="选择课包"></select></div>
+            <ul class="tree-list" id="courseTree"></ul>
+          </aside>
+          <div class="homework-main">
+            <div class="card search-card">
+              <!-- 筛选控件由 /lesson-homework-results 的 filters 描述生成，
+                   页面不持有任何作业类型或状态的取值表。 -->
+              <form class="homework-toolbar" id="filterForm">
+                <div class="field grow"><label for="keywordInput">搜索作业</label><input id="keywordInput" name="keyword" placeholder="作业名称、课时、试卷或挑战名称" /></div>
+                <div class="search-actions"><button class="btn primary" id="searchBtn" type="submit">筛选</button></div>
+              </form>
+            </div>
+            <div class="stats homework-stats" id="overviewStats"></div>
+            <div class="card homework-list-card">
+              <div class="homework-table-title"><h2>作业列表</h2><span class="muted" id="listHint">按课包章节定位真实作业记录</span></div>
+              <div class="table-wrap"><table><thead id="overviewHead"></thead><tbody id="overviewRows"></tbody></table></div>
+              <div class="list-error" id="overviewError" hidden>
+                <span id="overviewErrorText">列表加载失败。</span>
+                <button class="btn" id="overviewRetry" type="button">重新加载</button>
+              </div>
+              <div class="pager" id="overviewFoot"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="detailView" hidden>
+        <div class="detail-workspace">
+          <div class="detail-actions"><button class="btn" id="backBtn" type="button">返回作业列表</button><span class="spacer"></span><button class="btn primary" id="exportBtn" type="button">导出 CSV</button></div>
+          <div class="homework-detail-head"><div class="homework-detail-path" id="detailPath"></div><h2 id="detailTitle"></h2><div class="homework-detail-meta" id="detailTags"></div></div>
+          <div class="homework-insight"><p id="detailInsight"></p><span class="tag" id="detailKind">课时作业</span></div>
+          <div class="stats homework-stats" id="detailStats"></div>
+          <div class="card homework-list-card">
+            <p class="muted" style="margin: 0 0 10px" id="detailHint">展开学员行可查看全部作答历史；标记“计分”的记录进入平均分与达标率统计。</p>
+            <div class="table-wrap"><table><thead id="detailHead"></thead><tbody id="attemptRows"></tbody></table></div>
+            <div class="pager" id="detailFoot" aria-label="学员成绩分页"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 整卷作业的答卷回看（富文本逐题） -->
+      <div class="modal-mask" id="attemptMask" hidden inert>
+        <div class="modal review-modal" role="dialog" aria-modal="true" aria-labelledby="attemptTitle">
+          <div class="modal-head">
+            <h3 id="attemptTitle">答卷回看</h3>
+            <button class="modal-close" id="attemptClose" type="button" aria-label="关闭答卷回看" data-attempt-review-close>✕</button>
+          </div>
+          <div class="review-body" id="attemptBody"></div>
+        </div>
+      </div>
+
+      <!-- 通用记录详情：服务端给 { title, note, fields[] }，这里只排版 -->
+      <div class="modal-mask" id="recordMask" hidden>
+        <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="recordTitle">
+          <header class="modal-head">
+            <h2 id="recordTitle">记录详情</h2>
+            <button class="icon-btn" id="recordClose" type="button" aria-label="关闭">✕</button>
+          </header>
+          <div class="modal-body form-only"><dl class="record-fields" id="recordFields"></dl></div>
+          <footer class="modal-foot">
+            <span class="muted" id="recordNote"></span>
+            <span class="spacer"></span>
+            <button class="btn" id="recordOk" type="button">关闭</button>
+          </footer>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module" src="homework-results.js"></script>
+</body>
+</html>

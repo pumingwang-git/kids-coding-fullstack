@@ -1,0 +1,64 @@
+- generic [ref=e3]:
+  - complementary "少儿编程专区导航" [ref=e4]:
+    - link "少儿编程 学习空间" [ref=e5] [cursor=pointer]:
+      - /url: /areas/kids
+      - generic [ref=e6]:
+        - generic [ref=e7]: 少儿编程
+        - generic [ref=e8]: 学习空间
+    - navigation [ref=e9]:
+      - link "学习首页" [ref=e11] [cursor=pointer]:
+        - /url: /areas/kids
+      - link "工具箱" [ref=e17] [cursor=pointer]:
+        - /url: /areas/kids/toolbox
+      - generic [ref=e22]:
+        - link "题库" [ref=e23] [cursor=pointer]:
+          - /url: /areas/kids/tasks/mistakes
+        - button "展开" [ref=e28] [cursor=pointer]
+    - generic [ref=e31]:
+      - link "返回网站首页" [ref=e32] [cursor=pointer]:
+        - /url: /
+      - link "设置" [ref=e35] [cursor=pointer]:
+        - /url: /settings?area=kids
+  - generic [ref=e39]:
+    - generic [ref=e40]:
+      - generic [ref=e41]: 少儿编程学习空间
+      - generic [ref=e44]:
+        - link "预览同学" [ref=e45] [cursor=pointer]:
+          - /url: /profile?area=kids
+        - button "退出" [ref=e46] [cursor=pointer]
+    - main [ref=e47]:
+      - generic [ref=e49]:
+        - heading "工具箱" [level=1] [ref=e50]
+        - generic [ref=e51]: 轻量学习工具集合：打字、口算、换算……即开即用，边玩边练。 第一个工具「打字星球」已经上线，去试试手速吧！
+      - generic [ref=e52]:
+        - article [ref=e53] [cursor=pointer]:
+          - generic [ref=e54]: ⌨️
+          - generic [ref=e55]:
+            - generic [ref=e56]:
+              - heading "打字星球" [level=2] [ref=e57]
+              - generic [ref=e58]: 已上线
+            - paragraph [ref=e59]: 3-6 岁字母乐园 · 单词打字 · 中文打字 · 编程词库。PEP 教材/中考/高考/CET 全词库，默写模式、错题本、数据统计
+            - generic [ref=e60]:
+              - generic [ref=e61]: 3-6 岁
+              - generic [ref=e62]: 7-12 岁
+              - generic [ref=e63]: 13+
+          - button "开始游戏 ›" [ref=e64]
+        - article [ref=e65] [cursor=pointer]:
+          - generic [ref=e66]: 🧮
+          - generic [ref=e67]:
+            - generic [ref=e68]:
+              - heading "口算挑战" [level=2] [ref=e69]
+              - generic [ref=e70]: 24 点已上线
+            - paragraph [ref=e71]: 加减乘除限时闯关，练口算像玩游戏
+          - button "开始游戏 ›" [ref=e72]
+        - article [ref=e73] [cursor=pointer]:
+          - generic [ref=e74]: 🍅
+          - generic [ref=e75]:
+            - generic [ref=e76]:
+              - heading "专注星球" [level=2] [ref=e77]
+              - generic [ref=e78]: 已上线
+            - paragraph [ref=e79]: 小番茄番茄钟：15 分钟专心学，任务清单 + 专注记录，劳逸结合更高效
+            - generic [ref=e80]:
+              - generic [ref=e81]: 7-12 岁
+              - generic [ref=e82]: 13+
+          - button "开始游戏 ›" [ref=e83]

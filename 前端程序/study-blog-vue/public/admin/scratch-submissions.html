@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scratch 学生作品 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <h1>Scratch 学生作品</h1>
+          <p>只读列表：看到的是「提交时刻的快照」，不是学生的当前工作副本</p>
+        </div>
+        <div class="head-actions">
+          <a class="btn" href="scratch-review.html" id="reviewBtn">进入批改台</a>
+          <a class="btn" href="questions.html" id="backBtn">返回题库管理</a>
+        </div>
+      </div>
+
+      <div class="card search-card">
+        <div class="search-form">
+          <div class="field">
+            <label>挑战</label><select id="sChallenge"><option value="">全部挑战</option></select>
+          </div>
+          <div class="field">
+            <label>通过状态</label
+            ><select id="sStatus">
+              <option value="">全部</option>
+              <option value="passed">已通过</option>
+              <option value="failed">未通过</option>
+              <option value="needs_review">待点评</option>
+              <option value="returned">已退回重做</option>
+            </select>
+          </div>
+          <div class="search-actions">
+            <button class="btn primary" id="searchBtn" type="button">查询</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 20px">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>学生</th>
+                <th>挑战</th>
+                <th style="width: 160px">最后提交</th>
+                <th style="width: 90px">通过状态</th>
+                <th style="width: 90px">提交次数</th>
+                <th style="width: 220px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="submissionRows"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="emptyTip" hidden>没有符合条件的提交记录</div>
+        <div class="list-error" id="errorTip" hidden>
+          <span id="errorText">列表加载失败。</span>
+          <button class="btn" id="retryBtn" type="button">重新加载</button>
+        </div>
+        <div class="pager">
+          <span id="totalTip">共 0 条</span>
+          <span class="spacer"></span>
+          <button class="btn" id="prevPageBtn" type="button">‹ 上一页</button>
+          <button class="btn" id="nextPageBtn" type="button">下一页 ›</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ==================== 快照 / 反馈 Modal（只读） ==================== -->
+<div class="modal-mask" id="snapshotMask" hidden>
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="snapshotTitle">
+    <header class="modal-head">
+      <h2 id="snapshotTitle">提交快照与反馈</h2>
+      <button class="icon-btn" id="snapshotClose" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body form-only" id="snapshotBody"></div>
+    <footer class="modal-foot">
+      <span class="muted">快照为提交时刻的不可变版本；此处不提供任何修改入口。</span>
+      <span class="spacer"></span>
+      <button class="btn" id="snapshotOk" type="button">关闭</button>
+    </footer>
+  </div>
+</div>
+
+<script type="module" src="scratch-submissions.js"></script>
+</body>
+</html>

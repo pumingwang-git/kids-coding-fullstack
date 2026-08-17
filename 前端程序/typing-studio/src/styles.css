@@ -1,0 +1,37 @@
+:root {
+  --font-sans: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
+  --font-mono: 'Consolas', 'Courier New', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background: #fbfaf6;
+  color: #2c2c2a;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* 触屏设备下虚拟键盘点按无延迟 */
+@media (pointer: coarse) {
+  .vk-key,
+  .mode-card,
+  .btn-back,
+  .btn-sound,
+  .age-btn {
+    touch-action: manipulation;
+  }
+}

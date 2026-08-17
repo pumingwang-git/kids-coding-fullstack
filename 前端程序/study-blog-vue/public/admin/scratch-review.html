@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scratch 教师批改台 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+  <style>
+    /* 三段式批改台：队列 / 作品 / 量规打分。只复用 admin.css 的令牌，不新增颜色变量。 */
+    .review-grid {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 360px;
+      gap: 16px;
+      height: calc(100vh - 200px);
+      min-height: 540px;
+    }
+    .review-pane {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+    }
+    .review-pane-head {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .review-pane-head h2 { font-size: 15px; margin: 0; }
+    .review-pane-body { flex: 1; overflow: auto; padding: 12px 16px; }
+    .review-pane-foot { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    /* 队列 */
+    .queue-list { list-style: none; margin: 0; padding: 0; }
+    .queue-item {
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .queue-item + .queue-item { margin-top: 6px; }
+    .queue-item:hover { background: var(--mint); }
+    .queue-item.active { border-color: var(--accent); background: var(--mint); }
+    .queue-item .q-title { font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+    .queue-item .q-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    /* 作品 */
+    .work-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 13px; }
+    .work-meta .kv { display: flex; gap: 6px; }
+    .work-meta .kv label { color: var(--muted); white-space: nowrap; }
+    .work-block { margin-top: 14px; }
+    .work-block h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); }
+    .snapshot-line { font-size: 12px; color: var(--muted); font-family: monospace; word-break: break-all; }
+    .eval-line { display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+    .eval-line.ok::before { content: "✓"; color: var(--accent); }
+    .eval-line.bad::before { content: "✗"; color: var(--danger); }
+    .scripts-empty { padding: 24px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; }
+
+    /* 打分 */
+    .rubric-criterion { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .rubric-criterion:last-child { border-bottom: none; }
+    .rubric-criterion-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .rubric-levels { display: flex; flex-direction: column; gap: 4px; }
+    .rubric-level { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+    .rubric-level:hover { background: var(--mint); }
+    .rubric-level input { margin: 0; }
+    .rubric-level em { margin-left: auto; font-style: normal; color: var(--muted); font-size: 12px; }
+    .rubric-note { width: 100%; margin-top: 6px; box-sizing: border-box; }
+    .score-total { font-size: 20px; font-weight: 700; }
+    .score-total .max { color: var(--muted); font-size: 13px; font-weight: 400; }
+    .hint-kbd { font-size: 12px; color: var(--muted); }
+    .hint-kbd kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-family: inherit; }
+
+    @media (max-width: 960px) {
+      .review-grid { grid-template-columns: 1fr; height: auto; }
+      .review-pane { min-height: 260px; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <h1>Scratch 教师批改台</h1>
+          <p>队列只排「待点评」，每人每块只出现最新一次提交。评语与逐项打分会同步给学生。</p>
+        </div>
+        <div class="head-actions">
+          <a class="btn" href="scratch-submissions.html">返回作品档案</a>
+          <button class="btn" id="refreshBtn" type="button">刷新队列</button>
+        </div>
+      </div>
+
+      <div class="card search-card">
+        <div class="search-form">
+          <div class="field">
+            <label>挑战</label><select id="sChallenge"><option value="">全部挑战</option></select>
+          </div>
+          <div class="search-actions">
+            <button class="btn primary" id="searchBtn" type="button">查询</button>
+          </div>
+          <span class="hint-kbd">快捷键：<kbd>J</kbd>/<kbd>K</kbd> 切换，<kbd>Ctrl</kbd>+<kbd>Enter</kbd> 通过当前这条</span>
+        </div>
+      </div>
+
+      <div class="review-grid" style="margin-top: 16px">
+        <section class="review-pane" id="queuePane" aria-label="批改队列">
+          <div class="review-pane-head"><h2>队列</h2><span class="muted" id="queueCount"></span></div>
+          <div class="review-pane-body">
+            <ul class="queue-list" id="queueList"></ul>
+            <div class="empty" id="queueEmpty" hidden>没有待点评的提交</div>
+            <div class="list-error" id="queueError" hidden><span id="queueErrorText">队列加载失败。</span></div>
+          </div>
+        </section>
+
+        <section class="review-pane" id="workPane" aria-label="学生作品">
+          <div class="review-pane-head"><h2>作品</h2></div>
+          <div class="review-pane-body" id="workBody"></div>
+          <div class="review-pane-foot">
+            <button class="btn" id="studioOpen" type="button">在 Studio 中打开</button>
+            <a class="btn" id="downloadSb3" download>下载 .sb3</a>
+          </div>
+        </section>
+
+        <section class="review-pane" id="scorePane" aria-label="量规打分">
+          <div class="review-pane-head">
+            <h2>打分</h2>
+            <span class="score-total" id="scoreTotal"></span>
+          </div>
+          <div class="review-pane-body">
+            <div id="rubricArea"></div>
+            <div class="form-field" style="margin-top: 12px">
+              <label>总评（学生会看到）</label>
+              <textarea id="comment" rows="4" placeholder="整段作品的评价，或退回时告诉学生要改什么"></textarea>
+            </div>
+          </div>
+          <div class="review-pane-foot">
+            <span class="muted" id="incompleteTip"></span>
+            <button class="btn primary" id="btnPass" type="button">通过</button>
+            <button class="btn" id="btnFail" type="button">不通过</button>
+            <button class="btn" id="btnReturn" type="button">退回重做</button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module" src="scratch-review.js"></script>
+</body>
+</html>

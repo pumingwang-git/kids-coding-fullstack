@@ -1,0 +1,4381 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>题库管理 · 后台</title>
+    <link rel="stylesheet" href="admin.css" />
+    <link rel="stylesheet" href="vendor/codemirror/codemirror.min.css" />
+    <link rel="stylesheet" href="vendor/vditor/dist/index.css" />
+    <link rel="stylesheet" href="vendor/uppy/dashboard.css" />
+    <link rel="stylesheet" href="vendor/videojs/video-js.css" />
+    <script src="vendor/dompurify/purify.min.js"></script>
+    <script src="vendor/vditor/dist/index.min.js"></script>
+    <script src="vendor/codemirror/codemirror.min.js"></script>
+    <script src="vendor/codemirror/clike.min.js"></script>
+    <script src="vendor/codemirror/python.min.js"></script>
+    <!-- video.js 官方 UMD 构建（含 VHS/HLS，暴露 window.videojs）：解析视频预览用它播放 HLS，
+         不要用 esbuild ESM bundle（其 VHS source handler 在浏览器里不注册）。 -->
+    <script src="vendor/videojs/video.min.js"></script>
+    <script src="vendor/videojs/extensions.js?v=20260809b"></script>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" id="sidebar"></aside>
+      <div class="main">
+        <header class="topbar" id="topbar"></header>
+        <main class="content">
+          <!-- ==================== 页面标题 + 标准检索栏 ==================== -->
+          <div class="page-head">
+            <div>
+              <h1>题库管理</h1>
+              <p>题目录入 / 标签管理 / 审核流转；通用标签与题型解耦</p>
+            </div>
+            <button class="btn primary" id="addBtn" type="button">＋ 新增试题</button>
+          </div>
+
+          <div class="card search-card">
+            <div class="search-form">
+              <div class="field">
+                <label>关键词</label><input id="sKeyword" placeholder="题干 / 题目编号" />
+              </div>
+              <div class="field">
+                <label>题型</label>
+                <select id="sType" hidden>
+                  <option value="">全部</option>
+                  <option value="choice">选择</option>
+                  <option value="multi_choice">多选</option>
+                  <option value="judge">判断</option>
+                  <option value="fill">填空</option>
+                  <option value="programming">操作题</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>难度</label
+                ><select id="sDifficulty" hidden>
+                  <option value="">全部</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>来源</label
+                ><select id="sSource" hidden></select>
+              </div>
+              <div class="field">
+                <label>知识点</label
+                ><select id="sTag" hidden></select>
+              </div>
+              <div class="field">
+                <label>负责人</label
+                ><select id="sOwner" hidden>
+                  <option value="">全部</option>
+                </select>
+              </div>
+              <div class="search-actions">
+                <button class="btn primary" id="searchBtn" type="button">查询</button>
+                <button class="btn" id="resetBtn" type="button">重置</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== 草稿 / 待审核 / 已通过 / 已下线 ==================== -->
+          <div class="card" style="margin-top: 20px">
+            <div class="zone-tabs">
+              <button data-zone="draft">
+                草稿 <span class="count" id="draftCount">0</span>
+              </button>
+              <button data-zone="pending">
+                待审核区 <span class="count" id="pendingCount">0</span>
+              </button>
+              <button class="active" data-zone="approved">
+                已通过（已发布） <span class="count" id="approvedCount">0</span>
+              </button>
+            </div>
+            <!-- 批量操作条：仅对当前勾选项中后端允许的动作放行 -->
+            <div class="batch-bar" id="batchBar" hidden>
+              已选 <b id="batchCount">0</b> 题<span class="spacer"></span>
+              <button class="btn" id="batchSubmitBtn" type="button" hidden>批量提交审核</button>
+              <button class="btn" id="batchApproveBtn" type="button" hidden>批量通过</button>
+              <button class="btn danger" id="batchRejectBtn" type="button" hidden>批量打回</button>
+              <button class="btn danger" id="batchDeleteBtn" type="button" hidden>批量删除</button>
+              <button class="btn" id="batchClearBtn" type="button">取消选择</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 34px">
+                      <input type="checkbox" class="check" id="checkAll" aria-label="全选本页" />
+                    </th>
+                    <th style="width: 90px">编号</th>
+                    <th style="width: 62px">题型</th>
+                    <th>题干</th>
+                    <th style="width: 96px">难度</th>
+                    <th style="width: 76px">来源</th>
+                    <th style="width: 88px">负责人</th>
+                    <th style="width: 150px">知识点</th>
+                    <th style="width: 78px">状态</th>
+                    <th style="width: 190px">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="problemRows"></tbody>
+              </table>
+            </div>
+            <div class="empty" id="emptyTip" hidden>没有符合条件的题目</div>
+            <div class="list-error" id="errorTip" hidden>
+              <span id="errorText">列表加载失败。</span>
+              <button class="btn" id="retryBtn" type="button">重新加载</button>
+            </div>
+            <div class="pager">
+              <span id="totalTip">共 0 条</span>
+              <label class="muted">
+                每页最多展示
+                <select id="pageSize" aria-label="每页条数">
+                  <option value="10">10</option>
+                  <option value="20" selected>20</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+                条
+              </label>
+              <span class="spacer"></span
+              ><button class="btn" id="prevPageBtn" type="button">‹ 上一页</button
+              ><button class="btn" id="nextPageBtn" type="button">下一页 ›</button>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ==================== 居中录入面板（受控 Modal） ==================== -->
+    <div class="modal-mask" id="modalMask">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <header class="modal-head">
+          <h2 id="modalTitle">新增试题</h2>
+          <button class="modal-close" id="modalClose" type="button" aria-label="关闭">×</button>
+        </header>
+
+        <div class="modal-body">
+          <!-- 左：题型 + 通用标签（跨题型不变，切换 type 不清空） -->
+          <div class="modal-left">
+            <div class="left-block">
+              <h4 class="sec-title">题型选择</h4>
+              <div class="pill-group" id="typeGroup">
+                <label class="pill"
+                  ><input type="radio" name="qType" value="choice" checked /><span
+                    >选择题</span
+                  ></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qType" value="multi_choice" /><span
+                    >多选题</span
+                  ></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qType" value="judge" /><span>判断题</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qType" value="fill" /><span>填空题</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qType" value="programming" /><span>操作题</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qType" value="scratch" /><span>Scratch 挑战</span></label
+                >
+              </div>
+              <!-- 操作题细类：仅影响参考代码高亮与测试点展示，单表枚举字段 -->
+              <div class="pill-group" id="langGroup" style="margin-top: 8px; display: none">
+                <label class="pill"
+                  ><input type="radio" name="qLang" value="cpp" checked /><span
+                    >C++操作题</span
+                  ></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qLang" value="python" /><span
+                    >Python操作题</span
+                  ></label
+                >
+              </div>
+            </div>
+
+            <div class="left-block">
+              <h4 class="sec-title">难度（洛谷分级）</h4>
+              <div class="pill-group" id="difficultyGroup"></div>
+            </div>
+
+            <div class="left-block">
+              <h4 class="sec-title">题目来源</h4>
+              <div class="pill-group">
+                <label class="pill"
+                  ><input type="radio" name="qSource" value="第三方" checked /><span
+                    >第三方</span
+                  ></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qSource" value="原创" /><span>原创</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qSource" value="自命题" /><span>自命题</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qSource" value="洛谷" /><span>洛谷</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qSource" value="NOIP" /><span>NOIP</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qSource" value="CSP-J" /><span>CSP-J</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qSource" value="CSP-S" /><span>CSP-S</span></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qSource" value="USACO" /><span>USACO</span></label
+                >
+              </div>
+            </div>
+
+            <div class="left-block">
+              <h4 class="sec-title">当前负责人</h4>
+              <p class="muted" id="ownerDisplay">正在读取当前登录用户…</p>
+              <p class="form-error" id="rejectionDisplay" hidden></p>
+            </div>
+
+            <div class="left-block">
+              <h4 class="sec-title">知识点结构</h4>
+              <div class="pill-group">
+                <label class="pill"
+                  ><input type="radio" name="qStructure" value="单项知识点" checked /><span
+                    >单项知识点</span
+                  ></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qStructure" value="多项知识点" /><span
+                    >多项知识点</span
+                  ></label
+                >
+                <label class="pill"
+                  ><input type="radio" name="qStructure" value="综合应用" /><span
+                    >综合应用</span
+                  ></label
+                >
+              </div>
+            </div>
+
+            <div class="left-block">
+              <h4 class="sec-title">知识点（可多选，点击弹出树形选择）</h4>
+              <div
+                class="kt-trigger"
+                id="ktTrigger"
+                title="点击选择知识点"
+                role="button"
+                tabindex="0"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+              >
+                <span class="kt-hint" id="ktHint">＋ 选择知识点</span>
+              </div>
+            </div>
+
+            <div class="left-block">
+              <h4 class="sec-title">适用阶段（可多选）</h4>
+              <div class="multi-cloud" data-multi="stage">
+                <button class="tk" type="button" data-v="C++基础">C++基础</button>
+                <button class="tk" type="button" data-v="Python基础">Python基础</button>
+                <button class="tk" type="button" data-v="CSP-J">CSP-J</button>
+                <button class="tk" type="button" data-v="CSP-S">CSP-S</button>
+                <button class="tk" type="button" data-v="信奥提高">信奥提高</button>
+              </div>
+            </div>
+
+            <div class="left-block">
+              <h4 class="sec-title">业务标签（可多选）</h4>
+              <div class="multi-cloud" data-multi="business">
+                <button class="tk" type="button" data-v="直播专用">直播专用</button>
+                <button class="tk" type="button" data-v="引流题">引流题</button>
+                <button class="tk" type="button" data-v="试机题">试机题</button>
+                <button class="tk" type="button" data-v="内部练习">内部练习</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右：由 formSchema 驱动的题型专属内容区（受控渲染） -->
+          <div class="modal-right" id="formFields"></div>
+        </div>
+
+        <footer class="modal-foot">
+          <span class="muted" id="readOnlyTip" hidden>当前题目不在可编辑状态，仅供查看。</span>
+          <span class="spacer"></span>
+          <button class="btn" id="previewProblemBtn" type="button">预览整题</button>
+          <button class="btn" id="modalCancel" type="button">取消</button>
+          <button class="btn" id="saveDraftBtn" type="button">保存草稿</button>
+          <button class="btn primary" id="submitAuditBtn" type="button">提交审核</button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="preview-mask" id="previewMask" hidden>
+      <section class="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+        <header class="preview-head">
+          <h2 id="previewTitle">整题预览</h2>
+          <button class="modal-close" id="previewClose" type="button" aria-label="关闭预览">×</button>
+        </header>
+        <div class="preview-body" id="previewBody"></div>
+      </section>
+    </div>
+
+    <!-- 知识点 · 悬浮树选择器 -->
+    <div class="kt-pop" id="ktPop" hidden>
+      <input class="kt-filter" id="ktFilter" placeholder="搜索知识点…" />
+      <ul class="kt-tree" id="ktTree"></ul>
+      <div class="kt-summary" id="ktSummary">已选 <b>0</b> 项</div>
+    </div>
+    <script type="module" src="admin-api.js"></script>
+    <script type="module" src="admin-layout.js"></script>
+    <script type="module">
+      import { initLayout } from "./admin-layout.js";
+      import { adminDownload, adminMe, adminRequest, adminUpload, ifMatch } from "./admin-api.js";
+      import { clearFieldErrors, closeMask, confirmDialog, escapeHtml, openMask, promptDialog, showFieldErrors, toast, trapFocus } from "./admin-ui.js";
+      import { createPagedList } from "./admin-list.js";
+      import { createKnowledgeTree } from "./admin-tagtree.js";
+      import { IMAGE_WIDTHS, renderMarkdown, rewriteImageWidth, sanitizeRenderedHtml, splitImageAlt } from "./admin-markdown.js";
+      import { scratchMockEnabled, scratchRequest } from "./admin-scratch-api.js";
+      import { EXTENSION_OPTIONS, RULE_TYPES, buildChallengePayload, publishChecks, ruleToForm, ruleTypeHelp, ruleTypeLabel, studioDemoUrl, studioStarterUrl, DEFAULT_RUBRIC, rubricPayload } from "./admin-scratch-core.js";
+      import { Uppy, Dashboard, AwsS3 } from "./vendor/uppy/uppy.esm.js";
+      initLayout();
+
+      // =====================================================================
+      // 一、formSchema：配置驱动，不为每个题型写独立组件树
+      // 字段渲染器挂在 RENDERERS 上，TYPE_SCHEMA 声明每个题型展示哪些字段。
+      // 通用字段（stem/analysis）所有题型共用；通用标签（左栏）与题型无关，
+      // 切换 type 时保留，只清空题型专属字段。
+      // =====================================================================
+      const TYPE_SCHEMA = {
+        choice: { label: "选择题", fields: ["stem", "options", "analysis", "analysisVideo"] },
+        multi_choice: { label: "多选题", fields: ["stem", "options", "analysis", "analysisVideo"] },
+        judge: { label: "判断题", fields: ["stem", "judgeAnswer", "analysis", "analysisVideo"] },
+        fill: { label: "填空题", fields: ["stem", "fillBlanks", "analysis", "analysisVideo"] },
+        programming: { label: "操作题", fields: ["stem", "programming", "analysis", "analysisVideo"] },
+        scratch: { label: "Scratch 挑战", fields: ["scratch"] },
+      };
+
+      // =====================================================================
+      // 二、表单状态（受控）：数据提升到页面，Modal 只负责展示与触发回调
+      // =====================================================================
+      function emptyForm() {
+        return {
+          type: "choice",
+          status: "draft",
+          revision: null,
+          owner: currentAdmin,
+          allowedActions: ["edit", "submit", "delete"],
+          rejection: null,
+          subType: "cpp", // 仅操作题有值；单表枚举字段，不拆表
+          common: {
+            difficulty: "入门",
+            source: "第三方",
+            structure: "单项知识点",
+            knowledge: [],
+            stage: [],
+            business: [],
+          },
+          stem: "",
+          analysis: "",
+          // 解析视频：大加号上传绑定（不筛选视频库）。uploadedVideoId 是本会话刚上传
+          // 还未保存到题目的 video_id（可彻底删除）；analysisVideoId 是保存进题目的绑定值。
+          analysisVideoId: null,
+          hasAnalysisVideo: false,
+          analysisVideoStatus: null,
+          uploadedVideoId: null,
+          uploadedVideoStatus: null,
+          // 客观题默认 A-D；单选固定四项，多选可在此基础上继续添加。
+          options: Array.from({ length: 4 }, () => ({ content: "", correct: false })),
+          judgeAnswer: "正确",
+          fillBlanks: [], // [{ blank_index, blank_key, answer }]，由 \placeholder[key]{} 的 key 自动生成
+          programming: {
+            title: "",
+            passCondition: "编译通过",
+            inputFormat: "",
+            outputFormat: "",
+            hints: "无",
+            timeLimitMs: 1000,
+            memoryLimitMb: 256,
+            samples: [], // [{ input, output, is_sample: true }]
+            refCode: { cpp: "", python: "" }, // 纯文本 + language（key）
+            manualTestCases: [], // Python 手工隐藏测试点
+            testDataPackage: null, // C++ ZIP 导入清单；文件内容仅留在服务端
+          },
+          scratch: {
+            id: null, version: null, edit_seq: null, status: "draft", title: "", instructions_md: "",
+            allowed_extensions: [], hints_text: "", rules: [], has_starter: false,
+            has_demo: false,             analysis_video_id: null, has_analysis_video: false,
+            analysis_video_status: null,
+            reviewed_by: null, reviewed_at: null, rejection: null,
+            starter_size_bytes: 0, bound_block_count: 0, submission_count: 0,
+            // 下载地址由后端下发（_serialize），前端不拼路径；无文件时为 null。
+            starter_url: null, demo_url: null,
+            rubric: null, // null = 不用量规；{ criteria: [...] } = 用量规
+          },
+        };
+      }
+
+      let formState = null; // 当前表单数据（父级持有）
+      let initialSnapshot = null; // 打开时的快照，用于取消时 dirty 判断
+      let currentAdmin = null;
+      let modalReadOnly = false;
+      let releaseModalFocus = null; // Modal 打开期间的 Tab 循环解绑函数
+      let saving = false; // 保存/提交进行中：阻止重复提交
+      // 新增 C++ 题在未取得题目 ID 前暂存于浏览器内存；保存草稿成功后自动上传。
+      let pendingCppZipFile = null;
+
+      // 编辑器实例登记：重渲染时销毁实例，避免保留失效节点和事件。
+      let markdownInstances = [];
+      let cmInstances = [];
+      let redrawFillBlanks = null;
+      let stemMarkdownEditor = null;
+
+      // 插图按钮的图标。Vditor 内置 upload 项用的是一朵云 + 「上传图片或文件」，
+      // 在这里是误导——录题人要的是"插图"，不是"上传文件"。
+      const IMAGE_ICON_SVG =
+        '<svg viewBox="0 0 1024 1024" width="16" height="16"><path fill="currentColor" d="M896 128H128a64 64 0 0 0-64 64v640a64 64 0 0 0 64 64h768a64 64 0 0 0 64-64V192a64 64 0 0 0-64-64zm0 704H128V192h768v640zM352 448a64 64 0 1 0 0-128 64 64 0 0 0 0 128zm448 256L608 448 448 640l-96-96-160 160h608z"/></svg>';
+
+      const MARKDOWN_TOOLBAR = [
+        "headings",
+        "bold",
+        "italic",
+        "strike",
+        "inline-code",
+        "code",
+        "table",
+        "list",
+        "ordered-list",
+        "quote",
+        "link",
+        // 插图紧挨 link：两个都是"往正文里插入外部东西"，放一起找得到。
+        { name: "upload", tip: "插入图片", icon: IMAGE_ICON_SVG },
+        "undo",
+        "redo",
+        "fullscreen",
+        "edit-mode",
+      ];
+
+      // 渲染（预览 + IR 即时渲染）时的空位标记与净化管线已抽到 admin-markdown.js（单源），
+      // ___ / {{blank}} / \placeholder[key]{} 统一转为 .blank-mark；跳过 <pre>/<code>。
+
+      /**
+       * 插图：走 adminUpload() 而不是 Vditor 自带的 upload.url。
+       *
+       * 理由是会话。adminUpload 里已经有 CSRF 令牌轮换重试和 401 自动 refresh 后重试，
+       * Vditor 的内置 XHR 两样都没有——会话一过期，录题人点插图拿到的是一句 Vditor 的
+       * 英文报错，而页面其它部分还好好的，查起来很费劲。
+       *
+       * handler 模式下 Vditor 不会自己往正文里插，必须显式 insertValue。
+       * 返回 null = 成功，返回字符串 = 失败（Vditor 会把它显示出来）。
+       */
+      async function uploadInlineImage(editor, files) {
+        const file = (files || [])[0];
+        if (!file) return null;
+        try {
+          const form = new FormData();
+          form.append("file", file);
+          const asset = await adminUpload("/media/images", form);
+          // alt 留空：它会原样进 markdownToText 之外的地方（整卷预览的纯文本摘要），
+          // 填个无意义的 "image" 是污染。要无障碍文本的自己在方括号里补。
+          editor.insertValue(`![](${asset.url})`);
+          return null;
+        } catch (error) {
+          const message = error?.message || "图片上传失败。";
+          toast(message, "error");
+          return message;
+        }
+      }
+
+      // ==================== 题干配图的尺寸档位 ====================
+      // IMAGE_WIDTHS / rewriteImageWidth 在 admin-markdown.js（渲染与源码改写的单源），
+      // 那边有对应的护栏测试；这里只负责交互。
+      let imageSizePopover = null;
+
+      function closeImageSizePopover() {
+        imageSizePopover?.remove();
+        imageSizePopover = null;
+      }
+      document.addEventListener("click", (event) => {
+        if (imageSizePopover && !imageSizePopover.contains(event.target)) closeImageSizePopover();
+      });
+
+      function openImageSizePopover(image, editor, onChange) {
+        closeImageSizePopover();
+        const src = image.getAttribute("src") || "";
+        if (!src.startsWith("/media/")) return;   // 外链图不归我们管，也改不动
+        // 当前档位从 alt 后缀读，不是 width 属性：IR 编辑区里的 <img> 是 lute 直接渲染的，
+        // 没走渲染出口那道 alt→width 的钩子，width 属性在这里永远是空的。
+        const current = splitImageAlt(image.getAttribute("alt") || "").width;
+        const popover = document.createElement("div");
+        popover.className = "image-size-pop";
+        popover.innerHTML =
+          `<span class="image-size-title">图片尺寸</span>` +
+          IMAGE_WIDTHS.map(
+            (item) =>
+              `<button type="button" data-width="${item.value}"${item.value === current ? ' class="is-active"' : ""}>${item.label}</button>`,
+          ).join("");
+        const rect = image.getBoundingClientRect();
+        popover.style.top = `${window.scrollY + rect.bottom + 6}px`;
+        popover.style.left = `${window.scrollX + rect.left}px`;
+        popover.addEventListener("click", (event) => {
+          const button = event.target.closest("button[data-width]");
+          if (!button) return;
+          const next = rewriteImageWidth(editor.getValue(), src, button.dataset.width);
+          // setValue 不会触发 input 回调，必须手动同步 formState，否则改了尺寸
+          // 却不算"脏"，关 Modal 时不提示、保存时也存不进去。
+          editor.setValue(next);
+          onChange(next);
+          closeImageSizePopover();
+        });
+        document.body.appendChild(popover);
+        imageSizePopover = popover;
+      }
+
+      function mountMarkdownEditor(container, initialMarkdown, onChange, placeholder = "输入 Markdown 内容…", onBlur = null) {
+        if (!window.Vditor) throw new Error("Vditor 未加载，请检查本地 vendor 资源。");
+        const readOnly = modalReadOnly;
+        const options = {
+          value: initialMarkdown || "",
+          mode: "ir",
+          height: 220,
+          cdn: "/admin/vendor/vditor",
+          placeholder,
+          cache: { enable: false },
+          toolbar: MARKDOWN_TOOLBAR,
+          // accept 只管住文件选择框，真正的类型校验在服务端（只信 Pillow 解码结果）。
+          // handler 一接管，点按钮、粘贴截图、拖文件进来三条路径就都走它了。
+          upload: {
+            accept: "image/png,image/jpeg,image/gif,image/webp",
+            multiple: false,
+            handler: (files) => uploadInlineImage(editor, files),
+          },
+          preview: { transform: sanitizeRenderedHtml },
+          input: (value) => onChange(value),
+          // Vditor 的 toolbar 在 after 之前尚未创建；此时调用 disabled/enable 会直接抛错。
+          after: () => {
+            if (readOnly) editor.disabled();
+          },
+        };
+        if (onBlur) options.blur = () => onBlur(editor);
+        const editor = new window.Vditor(container, options);
+        // 点正文里的图片 → 弹尺寸档位。事件挂在容器上做委托，不去碰 Vditor 内部的
+        // contenteditable 节点：那些节点每次重渲染都会换，直接绑事件迟早绑到失效节点上。
+        if (!readOnly) {
+          container.addEventListener("click", (event) => {
+            const image = event.target.closest?.("img");
+            if (!image) return;
+            event.preventDefault();
+            event.stopPropagation();   // 否则 document 上那个"点外面就关"会立刻把它关掉
+            openImageSizePopover(image, editor, onChange);
+          });
+        }
+        return editor;
+      }
+
+      // ==================== 参考代码试跑 ====================
+      // 用题目自己的参考代码跑一遍自己的测试数据。在这之前没有任何一步会去编译参考代码，
+      // 一份粘贴时丢了半行的 C++ 可以一路通过审核、进卷、发给学员。
+      let dryRunPolling = null;   // 轮询定时器，关 Modal 时必须清掉
+
+      function stopDryRunPolling() {
+        if (dryRunPolling) clearTimeout(dryRunPolling);
+        dryRunPolling = null;
+      }
+
+      function buildDryRunControls() {
+        const wrap = document.createElement("div");
+        wrap.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:8px";
+        wrap.innerHTML = `
+          <select id="dryRunScope" class="mini-select" aria-label="试跑范围">
+            <option value="all">全部测试点</option>
+            <option value="samples">仅样例</option>
+          </select>
+          <button type="button" class="btn" id="dryRunBtn">试跑</button>`;
+        wrap.querySelector("#dryRunBtn").addEventListener("click", startDryRun);
+        return wrap;
+      }
+
+      function buildDryRunPanel() {
+        const panel = document.createElement("div");
+        panel.id = "dryRunPanel";
+        panel.className = "dry-run-panel";
+        panel.hidden = true;
+        return panel;
+      }
+
+      function dryRunPanel() {
+        return document.getElementById("dryRunPanel");
+      }
+
+      function setDryRunBusy(busy, label = "试跑中…") {
+        const button = document.getElementById("dryRunBtn");
+        if (!button) return;
+        button.disabled = busy;
+        button.textContent = busy ? label : "试跑";
+      }
+
+      async function startDryRun() {
+        // 试跑读的是库里的 reference_solutions，看不见编辑器里没保存的改动。不拦的话，
+        // 录题人会对着"我明明改了怎么还报同样的错"怀疑人生。
+        if (!editingId) {
+          toast("请先保存草稿，再试跑参考代码。", "error");
+          return;
+        }
+        if (isDirty()) {
+          toast("有未保存的修改，请先保存草稿再试跑。", "error");
+          return;
+        }
+        const scope = document.getElementById("dryRunScope")?.value || "all";
+        setDryRunBusy(true, "排队中…");
+        try {
+          const queued = await adminRequest(`/problems/${editingId}/dry-run`, {
+            method: "POST",
+            body: JSON.stringify({ scope }),
+          });
+          renderDryRun({ ...queued, done: false });
+          pollDryRun(queued.id, 250);
+        } catch (error) {
+          setDryRunBusy(false);
+          toast(error.message, "error");
+        }
+      }
+
+      function pollDryRun(dryRunId, delay) {
+        stopDryRunPolling();
+        dryRunPolling = setTimeout(async () => {
+          try {
+            const body = await adminRequest(`/dry-runs/${dryRunId}`);
+            renderDryRun(body);
+            if (body.done) {
+              setDryRunBusy(false);
+              return;
+            }
+            // 指数退避到 2s：判题通常一两秒出结果，但排队时不该每 250ms 打一次。
+            pollDryRun(dryRunId, Math.min(delay * 1.6, 2000));
+          } catch (error) {
+            setDryRunBusy(false);
+            toast(error.message, "error");
+          }
+        }, delay);
+      }
+
+      async function loadLatestDryRun() {
+        if (!editingId) return;
+        try {
+          const body = await adminRequest(`/problems/${editingId}/dry-runs/latest`);
+          if (!body.dry_run) return;
+          // 试跑之后题目又改过的，结果不能当成"现在也通过"来显示。
+          const stale = body.dry_run.problem_revision !== body.problem_revision;
+          renderDryRun({ ...body.dry_run, stale });
+          if (!body.dry_run.done) pollDryRun(body.dry_run.id, 500);
+        } catch {
+          // 打开题目时顺带拉一次，失败就不显示，不打扰录题
+        }
+      }
+
+      const DRY_RUN_STATUS_TEXT = {
+        accepted: "全部通过",
+        wrong_answer: "答案错误",
+        compile_error: "编译错误",
+        runtime_error: "运行时错误",
+        time_limit: "超出时间限制",
+        memory_limit: "超出内存限制",
+        judge_failed: "判题失败",
+        queued: "排队中",
+        judging: "判题中",
+      };
+
+      function renderDryRun(result) {
+        const panel = dryRunPanel();
+        if (!panel) return;
+        panel.hidden = false;
+        const label = DRY_RUN_STATUS_TEXT[result.status] || result.status;
+        if (!result.done) {
+          const queue = result.queue_position ? `（前面还有 ${result.queue_position} 个）` : "";
+          panel.className = "dry-run-panel is-pending";
+          panel.innerHTML = `<div class="dry-run-head">⏳ ${escapeHtml(label)}${escapeHtml(queue)}</div>`;
+          return;
+        }
+        const passed = result.status === "accepted";
+        panel.className = `dry-run-panel ${passed ? "is-pass" : "is-fail"}`;
+        const cases = result.cases || [];
+        const staleTip = result.stale
+          ? '<div class="dry-run-stale">此结果对应旧版本，题目已改动，请重新试跑。</div>'
+          : "";
+        const summary = passed
+          ? `✅ ${cases.length} 个测试点全部通过` +
+            (result.time_ms != null ? `，用时 ${result.time_ms} ms / 内存 ${Math.round((result.memory_kb || 0) / 1024)} MB` : "")
+          : `❌ ${escapeHtml(label)}`;
+
+        // 编译错误没有逐点结果，给一条可复制的编译器原文即可。
+        if (result.status === "compile_error" || result.status === "judge_failed" || !cases.length) {
+          panel.innerHTML = `${staleTip}<div class="dry-run-head">${summary}</div>` +
+            (result.compile_message
+              ? `<pre class="dry-run-compile">${escapeHtml(result.compile_message)}</pre>`
+              : "");
+          return;
+        }
+        panel.innerHTML = `${staleTip}<div class="dry-run-head">${summary}</div>${renderDryRunCases(cases)}`;
+      }
+
+      function renderDryRunCases(cases) {
+        const rows = cases
+          .map((item) => {
+            const name = item.case_no != null ? `#${item.case_no}` : `第 ${item.index + 1} 个`;
+            const kind = item.is_sample ? "样例" : "隐藏";
+            const mark = item.passed ? '<span class="ok">通过</span>' : `<span class="bad">${escapeHtml(DRY_RUN_STATUS_TEXT[item.status] || item.status)}</span>`;
+            return `<tr><td>${escapeHtml(name)}</td><td>${kind}</td><td>${mark}</td>
+              <td>${item.time_ms ?? "-"} ms</td>
+              <td>${item.diff_line ? `第 ${item.diff_line} 行` : "-"}</td></tr>`;
+          })
+          .join("");
+        // 首个失败的点自动展开 diff——录题人要的就是"差在哪"，不该再点一次。
+        const failed = cases.find((item) => !item.passed);
+        const diff = failed
+          ? `<div class="dry-run-diff">
+               <div class="dry-run-diff-title">第一个未通过的测试点${failed.case_no != null ? ` #${failed.case_no}` : ""}</div>
+               <div class="dry-run-cols">
+                 <div><h5>输入</h5><pre>${escapeHtml(failed.input || "")}</pre></div>
+                 <div><h5>期望输出</h5><pre>${escapeHtml(failed.expected || "")}</pre></div>
+                 <div><h5>实际输出</h5><pre>${escapeHtml(failed.actual || "")}</pre></div>
+               </div>
+             </div>`
+          : "";
+        return `<table class="dry-run-table"><thead><tr>
+            <th>测试点</th><th>类型</th><th>结果</th><th>用时</th><th>首个差异</th>
+          </tr></thead><tbody>${rows}</tbody></table>${diff}`;
+      }
+
+      function mountCodeMirror(textarea, mode, onChange) {
+        if (!window.CodeMirror) throw new Error("CodeMirror 未加载，请检查本地 vendor 资源。");
+        const editor = window.CodeMirror.fromTextArea(textarea, {
+          mode,
+          lineNumbers: true,
+          lineWrapping: false, // 参考代码保持原始排版：长行横向滚动，不自动折行
+          indentUnit: 4,
+          tabSize: 4,
+          autofocus: false,
+          extraKeys: { Tab: "indentMore", "Shift-Tab": "indentLess" },
+        });
+        editor.on("change", (instance) => onChange(instance.getValue()));
+        return editor;
+      }
+
+      // CodeMirror 在挂载时测量行号栏宽度，并把它写成 .CodeMirror-sizer 的内联
+      // margin-left；渲染器是先在游离节点里建好编辑器再 append 到 #formFields 的，
+      // 挂载那一刻量不到宽度（得 0），代码就会顶在编辑框左边、被行号栏盖住。
+      // 入文档、以及 Modal 的缩放动画结束后各刷新一次，让它重新测量。
+      function refreshCodeEditors() {
+        cmInstances.forEach((cm) => cm.refresh());
+      }
+
+      function cleanupEditors() {
+        markdownInstances.forEach((editor) => {
+          try {
+            editor.destroy();
+          } catch {}
+        });
+        cmInstances.forEach((cm) => cm.toTextArea());
+        markdownInstances = [];
+        cmInstances = [];
+        redrawFillBlanks = null;
+        stemMarkdownEditor = null;
+        // 关 Modal 后轮询还在跑的话，它会对着已经不存在的面板 innerHTML，
+        // 而且每次都白打一个请求直到判题结束。
+        stopDryRunPolling();
+        // 解析视频上传区：Uppy Dashboard 绑定在 #formFields 的节点上，重渲染前必须销毁
+        destroyAnalysisVideoArea();
+      }
+
+      // subType 只影响语法高亮模式与 payload 枚举，不拆表不拆 schema
+      function subTypeOf() {
+        return formState.subType;
+      }
+      function codeModeFor(lang) {
+        return lang === "python" ? "text/x-python" : "text/x-c++src";
+      }
+      function optionLabel(index) {
+        return String.fromCharCode(65 + index);
+      }
+
+      function snapshot() {
+        return JSON.stringify(formState);
+      }
+      function isDirty() {
+        return formState && initialSnapshot !== null && snapshot() !== initialSnapshot;
+      }
+
+      // 打开 Modal：新增（null）或编辑（题目 id → 拉详情反填）
+      async function openModal(target = null, initialType = null) {
+        cleanupEditors();
+        pendingCppZipFile = null;
+        if (target) {
+          let data;
+          try {
+            data = await adminRequest(`/problems/${target}`);
+          } catch (error) {
+            toast(error.message || "题目详情加载失败。", "error");
+            return;
+          }
+          formState = hydrate(data);
+          modalReadOnly = !formState.allowedActions.includes("edit");
+        } else {
+          formState = emptyForm();
+          if (initialType) formState.type = initialType;
+          modalReadOnly = false;
+        }
+        initialSnapshot = snapshot();
+        editingId = typeof target === "number" ? target : null;
+        document.getElementById("modalTitle").textContent = editingId
+          ? `${modalReadOnly ? "查看" : "编辑"}试题 #${editingId}`
+          : formState.type === "scratch" ? "新增 Scratch 挑战" : "新增试题";
+        syncLeftPanel();
+        renderAll();
+        // 打开动画期间 .modal 带着 scale(0.98)，此时量出的字符宽度会小 2%，
+        // 光标会随行长逐渐偏移；等动画结束（缩放回 1）再测一次。
+        const modalBox = mask.querySelector(".modal");
+        modalBox.addEventListener("transitionend", refreshCodeEditors, { once: true });
+        releaseModalFocus = openMask(mask);
+        document.getElementById("modalClose").focus();
+      }
+
+      // Scratch 挑战不进普通 problems 表，但在「题库管理 → 草稿」里要和普通草稿
+      // 一起可见。这里复用同一份录题 Modal，只从挑战 API 反填，避免伪造 Problem。
+      async function openScratchChallenge(challengeId) {
+        cleanupEditors();
+        pendingCppZipFile = null;
+        try {
+          const loaded = await scratchRequest(`/scratch/challenges/${challengeId}`);
+          formState = emptyForm();
+          formState.type = "scratch";
+          formState.scratch = {
+            ...formState.scratch,
+            ...loaded,
+            hints_text: (loaded.hints || []).join("\n"),
+            rules: (loaded.rules || []).map(ruleToForm),
+          };
+          modalReadOnly = loaded.status !== "draft";
+          editingId = null;
+          initialSnapshot = snapshot();
+          document.getElementById("modalTitle").textContent = modalReadOnly
+            ? `查看 Scratch 挑战 #${challengeId}`
+            : `编辑 Scratch 挑战 #${challengeId}`;
+          syncLeftPanel();
+          renderAll();
+          const modalBox = mask.querySelector(".modal");
+          modalBox.addEventListener("transitionend", refreshCodeEditors, { once: true });
+          releaseModalFocus = openMask(mask);
+          document.getElementById("modalClose").focus();
+        } catch (error) {
+          toast(error.message || "Scratch 挑战加载失败。", "error");
+        }
+      }
+
+      // 反填：后端 payload → formState（结构一一对应）
+      function hydrate(data) {
+        const form = emptyForm();
+        form.type = data.type;
+        form.status = data.status || "draft";
+        form.revision = data.revision;
+        form.owner = data.owner || currentAdmin;
+        form.allowedActions = data.allowed_actions || ["view"];
+        form.rejection = data.rejection || null;
+        form.subType = data.sub_type || "cpp";
+        form.stem = data.stem || "";
+        form.analysis = data.analysis || "";
+        form.analysisVideoId = data.analysis_video_id ?? null;
+        form.hasAnalysisVideo = !!data.has_analysis_video;
+        form.analysisVideoStatus = data.analysis_video_status ?? null;
+        form.uploadedVideoId = null;
+        form.uploadedVideoStatus = null;
+        form.common.difficulty = data.common?.difficulty || "入门";
+        form.common.source = data.common?.source || "第三方";
+        form.common.structure = data.common?.structure || "单项知识点";
+        form.common.knowledge = kt.normalize(data.common?.knowledge);
+        form.common.stage = [...(data.common?.stage || [])];
+        form.common.business = [...(data.common?.business || [])];
+        form.options = (data.options || []).map((o) => ({
+          content: o.content,
+          correct: !!o.is_correct,
+        }));
+        const correct = (data.options || []).find((o) => o.is_correct);
+        if (correct) form.judgeAnswer = correct.content === "错" ? "错误" : "正确";
+        if (data.type === "fill") {
+          const answersByKey = new Map(
+            (data.blanks || []).map((blank) => [
+              blank.blank_key,
+              joinBlankAnswers(blank.answer, blank.alternatives),
+            ]),
+          );
+          syncFillBlanksFor(form, answersByKey);
+        }
+        if (data.type === "programming" && data.programming) {
+          const p = data.programming;
+          form.programming.title = p.title || "";
+          form.programming.passCondition = p.pass_condition || "编译通过";
+          form.programming.inputFormat = p.input_format || "";
+          form.programming.outputFormat = p.output_format || "";
+          form.programming.hints = p.hints || "无";
+          form.programming.timeLimitMs = p.time_limit_ms ?? 1000;
+          form.programming.memoryLimitMb = p.memory_limit_mb ?? 256;
+          form.programming.samples = (p.samples || []).map((s) => ({
+            input: s.input,
+            output: s.output,
+            is_sample: true,
+          }));
+          form.programming.refCode = {
+            cpp: p.ref_code?.cpp || "",
+            python: p.ref_code?.python || "",
+          };
+          form.programming.manualTestCases = (p.manual_test_cases || []).map((t) => ({
+            input: t.input,
+            output: t.output,
+            timeLimitMs: t.time_limit_ms ?? null,
+            memoryLimitMb: t.memory_limit_mb ?? null,
+          }));
+          form.programming.testDataPackage = p.testdata_package || null;
+        }
+        return form;
+      }
+
+      function closeModal() {
+        kt.close();
+        cleanupEditors();
+        closeMask(mask, releaseModalFocus);
+        releaseModalFocus = null;
+        formState = null;
+        initialSnapshot = null;
+        editingId = null;
+        pendingCppZipFile = null;
+        modalReadOnly = false;
+      }
+
+      // 三个关闭入口统一走 handleClose：dirty 判断只写一处
+      let closeConfirmOpen = false;
+      async function handleClose() {
+        if (!mask.classList.contains("show") || closeConfirmOpen) return;
+        if (saving) {
+          toast("正在保存，请稍候。", "info");
+          return;
+        }
+        if (isDirty()) {
+          closeConfirmOpen = true;
+          const discard = await confirmDialog({
+            title: "放弃未保存的改动？",
+            message: "当前录入内容尚未保存，关闭后将会丢失。",
+            confirmText: "放弃并关闭",
+            danger: true,
+          });
+          closeConfirmOpen = false;
+          if (!discard) return;
+        }
+        closeModal();
+      }
+
+      // 左栏（通用标签）状态回写，切换 type 不清空
+      function syncLeftPanel() {
+        kt.setSelected(formState.common.knowledge); // 归一化并回写 chips/摘要
+        const setRadio = (name, value) => {
+          const input = document.querySelector(`input[name="${name}"][value="${value}"]`);
+          if (input) input.checked = true;
+        };
+        setRadio("qType", formState.type);
+        setRadio("qLang", formState.subType);
+        setRadio("qDifficulty", formState.common.difficulty);
+        setRadio("qSource", formState.common.source);
+        setRadio("qStructure", formState.common.structure);
+        document.querySelectorAll(".multi-cloud").forEach((cloud) => {
+          const key = cloud.dataset.multi;
+          cloud
+            .querySelectorAll(".tk")
+            .forEach((tk) =>
+              tk.classList.toggle("active", formState.common[key].includes(tk.dataset.v)),
+            );
+        });
+        document.getElementById("langGroup").style.display =
+          formState.type === "programming" ? "" : "none";
+        document.querySelectorAll(".modal-left .left-block").forEach((block, index) => {
+          block.style.display = formState.type === "scratch" && index > 0 ? "none" : "";
+        });
+        document.getElementById("ownerDisplay").textContent = formState.owner?.display_name || "未分配负责人";
+        const rejectionDisplay = document.getElementById("rejectionDisplay");
+        rejectionDisplay.hidden = !formState.rejection?.reason;
+        rejectionDisplay.textContent = formState.rejection?.reason
+          ? `最近打回：${formState.rejection.reason}`
+          : "";
+        kt.refresh(); // 知识点 chips 与树勾选状态回写
+      }
+
+      // =====================================================================
+      // 三、受控渲染：右栏字段由 schema 驱动，输入事件回写 formState
+      // =====================================================================
+      const formFields = document.getElementById("formFields");
+
+      function renderAll() {
+        if (!formState) return;
+        cleanupEditors();
+        syncLeftPanel();
+        formFields.innerHTML = "";
+        for (const field of TYPE_SCHEMA[formState.type].fields) {
+          formFields.appendChild(RENDERERS[field]());
+        }
+        refreshCodeEditors();
+        applyModalAccess();
+      }
+
+      const ACCESS_CONTROLLED =
+        ".modal-left input, .modal-left button, #formFields input, #formFields textarea, #formFields select, #formFields button, #formFields [contenteditable=\"true\"]";
+
+      function applyModalAccess() {
+        const saveDraft = document.getElementById("saveDraftBtn");
+        const submitAudit = document.getElementById("submitAuditBtn");
+        const scratchMode = formState.type === "scratch";
+        saveDraft.textContent = scratchMode ? "保存挑战草稿" : "保存草稿";
+        submitAudit.textContent = scratchMode ? "发布挑战" : "提交审核";
+        document.getElementById("previewProblemBtn").hidden = scratchMode;
+        saveDraft.hidden = modalReadOnly;
+        submitAudit.hidden = modalReadOnly;
+        document.getElementById("readOnlyTip").hidden = !modalReadOnly;
+        // 左栏是静态 DOM，不随 renderAll 重建：必须显式复位，
+        // 否则查看一次只读题目后，再打开可编辑题目左栏仍然是禁用的。
+        document.querySelectorAll(ACCESS_CONTROLLED).forEach((element) => {
+          // data-read-action 的控件不受只读约束：这一层管的是"能不能改"，
+          // 而下载是读动作——能打开这道题就该能把测试数据拿走，和能不能编辑无关。
+          // 它们各自的 disabled 由业务状态决定（比如清单为空时不给下载），
+          // 在这里一刀切会把那个状态覆盖掉。
+          if (element.hasAttribute("data-read-action")) return;
+          element.disabled = modalReadOnly;
+        });
+        document.getElementById("ktTrigger").classList.toggle("is-disabled", modalReadOnly);
+        cmInstances.forEach((editor) => editor.setOption("readOnly", modalReadOnly));
+      }
+
+      const RENDERERS = {
+        scratch() {
+          const s = formState.scratch;
+          const box = document.createElement("div");
+          box.className = "scratch-question-editor";
+          box.innerHTML = `
+            <div class="scratch-question-head"><div><h3>Scratch 图形化编程挑战</h3><p>沿用题库录入工作区；挑战独立保存，不进入普通试卷题目表。</p></div><span class="node-badge ${s.status === "published" ? "trial" : "warn"}">${s.status === "published" ? "已发布" : "草稿"}</span></div>
+            ${s.rejection?.reason ? `<div class="scratch-rejection" role="alert"><strong>最近打回：</strong>${escapeHtml(s.rejection.reason)}</div>` : ""}
+            <div class="inline-picker scratch-existing-picker"><select id="scratchExisting"><option value="">加载已有挑战草稿…</option></select><button class="btn" id="scratchLoad" type="button">加载</button>${s.status === "published" ? '<button class="btn" id="scratchDuplicate" data-read-action type="button">复制为新版本</button>' : ""}</div>
+            <div class="form-field"><label>挑战标题 <b class="req">*</b></label><input id="scratchTitle" maxlength="200" value="${escapeHtml(s.title)}" placeholder="如：绿旗动一动" /></div>
+            <div class="form-field"><label>任务说明 <b class="req">*</b></label><textarea id="scratchInstructions" rows="6" placeholder="学生在 Scratch Studio 中看到的任务说明">${escapeHtml(s.instructions_md)}</textarea></div>
+            <section class="scratch-question-section"><h4>初始项目 <b class="req">*</b></h4><p class="muted">学生进入 Studio 时加载；可直接在 Studio 中制作，完成后存回本关。</p><div class="scratch-upload-row"><strong id="scratchStarterState">${s.has_starter ? `已上传 · ${Math.ceil((s.starter_size_bytes || 0) / 1024)} KB` : "未上传"}</strong><span class="scratch-upload-actions">${s.id ? `<a class="btn" href="${studioStarterUrl(s.id)}" target="_blank" rel="noopener">${s.has_starter ? "在 Studio 中编辑" : "在 Studio 中录制"}</a>` : `<button class="btn" id="scratchSaveAndEdit" type="button">保存草稿并在 Studio 中编辑</button>`}${s.starter_url ? `<a class="btn" href="${s.starter_url}" download>下载 .sb3</a>` : `<button class="btn" type="button" disabled title="还没有初始项目">下载 .sb3</button>`}<button class="btn" id="scratchStarterPick" type="button" ${s.id ? "" : "disabled"}>上传或替换 .sb3</button></span><input id="scratchStarterFile" type="file" accept=".sb3" hidden /></div></section>
+            <section class="scratch-question-section"><h4>判定规则 <b class="req">*</b></h4><ol class="scratch-rule-list" id="scratchRules"></ol><div class="inline-picker"><select id="scratchRuleType">${RULE_TYPES.map((type) => `<option value="${type.key}" title="${escapeHtml(type.desc)}">${type.label}</option>`).join("")}</select><button class="btn" id="scratchRuleAdd" type="button">添加规则（自动填入示例）</button></div><p class="muted scratch-rule-help" id="scratchRuleHelp"></p></section>
+            <section class="scratch-question-section"><h4>教师量规（可选）</h4><p class="muted">批改台按量规逐项打分；不配置则只做通过 / 不通过。满分 = 各准则最高档分值之和，自动计算，不必手填。</p><div class="inline-picker"><button class="btn" id="scratchRubricDefault" type="button">使用推荐量规</button><button class="btn" id="scratchRubricClear" type="button">不用量规</button><select id="scratchRubricImport"><option value="">从其它挑战导入量规…</option></select><button class="btn" id="scratchRubricImportBtn" type="button">导入</button></div><div id="scratchRubricArea"></div></section>
+            <section class="scratch-question-section"><h4>提示与扩展</h4><div class="form-field"><label>提示（每行一条）</label><textarea id="scratchHints" rows="3">${escapeHtml(s.hints_text)}</textarea></div><div class="check-grid" id="scratchExtensions">${EXTENSION_OPTIONS.map((option) => `<label><input type="checkbox" value="${option.key}" ${s.allowed_extensions.includes(option.key) ? "checked" : ""} /> ${option.label}</label>`).join("")}</div></section>
+            <section class="scratch-question-section"><h4>示范项目</h4><p class="muted">与初始项目一样在 Studio 里录制。学生<strong>提交作品并拿到结果后</strong>可在只读 Studio 中查看，提交前既看不到入口也取不到文件。</p><div class="scratch-upload-row"><strong id="scratchDemoState">${s.has_demo ? "已上传" : "未上传"}</strong><span class="scratch-upload-actions">${s.id ? `<a class="btn" href="${studioDemoUrl(s.id)}" target="_blank" rel="noopener">${s.has_demo ? "在 Studio 中编辑示范项目" : "在 Studio 中录制示范项目"}</a>` : `<button class="btn" type="button" disabled title="请先保存挑战草稿">在 Studio 中录制示范项目</button>`}${s.demo_url ? `<a class="btn" href="${s.demo_url}" download>下载 .sb3</a>` : `<button class="btn" type="button" disabled title="还没有示范项目">下载 .sb3</button>`}<button class="btn" id="scratchDemoPick" type="button" ${s.id ? "" : "disabled"}>上传或替换 .sb3</button></span><input id="scratchDemoFile" type="file" accept=".sb3" hidden /></div>${s.status === "published" ? '<p class="muted">已发布的挑战不能原地改示范项目，请先复制为新版本。</p>' : ""}</section>
+            <section class="scratch-question-section"><h4>教师解析视频</h4><p class="muted">可选。大加号点击或拖拽上传；学生提交作品并拿到结果后才可播放，避免提前泄题。</p><div class="av-area" data-scratch-av-mount></div></section>
+            <aside class="scratch-inline-readiness"><strong>发布就绪度</strong><ul id="scratchReadiness"></ul><span class="muted">版本 ${s.version ? `v${s.version}` : "未保存"} · 已绑定 ${s.bound_block_count || 0} 个内容块 · ${s.submission_count || 0} 条提交</span></aside>`;
+          const renderRules = () => {
+            const list = box.querySelector("#scratchRules");
+            // 数组/对象参数（attributes、pattern）在输入框里按文本形态回显，
+            // 与 buildChallengePayload 的 list/json 解析互逆。
+            const displayValue = (value) => {
+              if (Array.isArray(value)) return value.join(", ");
+              if (value && typeof value === "object") return JSON.stringify(value);
+              return String(value ?? "");
+            };
+            list.innerHTML = s.rules.length ? s.rules.map((rule, index) => {
+              const type = RULE_TYPES.find((item) => item.key === rule.type);
+              const fields = (type?.fields || []).map((field) => `<label class="scratch-rule-field" title="${escapeHtml(field.hint || "")}">${escapeHtml(field.label)}<input data-rule-index="${index}" data-rule-param="${field.key}" ${field.type === "number" ? "type=number" : ""} value="${escapeHtml(displayValue(rule.params?.[field.key]))}" placeholder="${escapeHtml(field.placeholder || "")}" /></label>`).join("");
+              const help = type ? ` <span class="rule-help-dot" title="${escapeHtml(ruleTypeHelp(rule.type) || "")}">?</span>` : "";
+              return `<li class="scratch-rule-row"><strong>${escapeHtml(ruleTypeLabel(rule.type))}${help}</strong>${fields}<button class="btn-text link danger" type="button" data-rule-delete="${index}">删除</button></li>`;
+            }).join("") : '<li class="muted">尚未添加规则。</li>';
+          };
+          // 类型下拉下面常驻一行中文说明（选中即换），比只靠悬停更容易被发现。
+          const renderRuleHelp = () => {
+            const helpBox = box.querySelector("#scratchRuleHelp");
+            const selected = box.querySelector("#scratchRuleType").value;
+            helpBox.textContent = ruleTypeHelp(selected) || "";
+          };
+          const renderReadiness = () => {
+            const payload = scratchPayload();
+            const missing = new Set(publishChecks({ ...s, ...payload }));
+            box.querySelector("#scratchReadiness").innerHTML = ["挑战标题", "任务说明", "初始项目（.sb3）", "至少一条声明式规则"].map((item) => `<li class="${missing.has(item) ? "missing" : "ready"}">${missing.has(item) ? "待补充" : "已完成"} · ${item}</li>`).join("");
+          };
+          const sync = () => {
+            s.title = box.querySelector("#scratchTitle").value;
+            s.instructions_md = box.querySelector("#scratchInstructions").value;
+            s.hints_text = box.querySelector("#scratchHints").value;
+            s.allowed_extensions = [...box.querySelectorAll("#scratchExtensions input:checked")].map((input) => input.value);
+            renderReadiness();
+          };
+          const loadExisting = async () => {
+            const selected = Number(box.querySelector("#scratchExisting").value);
+            if (!selected) return;
+            try {
+              const loaded = await scratchRequest(`/scratch/challenges/${selected}`);
+              formState.scratch = { ...formState.scratch, ...loaded, hints_text: (loaded.hints || []).join("\n"), rules: (loaded.rules || []).map(ruleToForm) };
+              formState.uploadedVideoId = null;
+              formState.uploadedVideoStatus = null;
+              modalReadOnly = loaded.status === "published";
+              initialSnapshot = snapshot(); renderAll();
+            } catch (error) { toast(error.message, "error"); }
+          };
+          box.querySelector("#scratchLoad").addEventListener("click", loadExisting);
+          box.querySelector("#scratchDuplicate")?.addEventListener("click", async () => {
+            try {
+              const copied = await scratchRequest(`/scratch/challenges/${s.id}/duplicate`, { method: "POST", body: "{}" });
+              formState.scratch = { ...formState.scratch, ...copied, hints_text: (copied.hints || []).join("\n"), rules: (copied.rules || []).map(ruleToForm) };
+              formState.uploadedVideoId = null;
+              formState.uploadedVideoStatus = null;
+              modalReadOnly = false; initialSnapshot = snapshot(); renderAll(); toast("已创建新的 Scratch 挑战草稿。");
+            } catch (error) { toast(error.message, "error"); }
+          });
+          scratchRequest("/scratch/challenges/options").then((data) => {
+            box.querySelector("#scratchExisting").innerHTML = '<option value="">加载已有挑战草稿…</option>' + (data.items || []).map((item) => `<option value="${item.id}">#${item.id} · ${escapeHtml(item.title)}（${item.status === "published" ? "已发布" : "草稿"}）</option>`).join("");
+          }).catch(() => { /* 不阻塞新建 */ });
+          // 解析视频：大加号 + 拖拽上传（与普通题型同一组件；绑定 s.analysis_video_id）
+          mountAnalysisVideoArea(box.querySelector("[data-scratch-av-mount]"), {
+            videoId: () => s.analysis_video_id,
+            setVideoId: (id) => {
+              s.analysis_video_id = id;
+              s.has_analysis_video = !!id;
+            },
+            status: () => formState.uploadedVideoStatus || s.analysis_video_status,
+            setStatus: (status) => {
+              formState.uploadedVideoStatus = status;
+              s.analysis_video_status = status;
+            },
+            uploadedId: () => formState.uploadedVideoId,
+            setUploadedId: (id, status) => {
+              formState.uploadedVideoId = id;
+              formState.uploadedVideoStatus = status;
+            },
+            onSaved: () => {
+              formState.uploadedVideoId = null;
+              formState.uploadedVideoStatus = null;
+            },
+          });
+          box.addEventListener("input", sync); box.addEventListener("change", sync);
+          box.querySelector("#scratchRuleAdd").addEventListener("click", () => {
+            // 添加即填入该类型的示例参数：老师照着改比从零填 opcode 快得多，
+            // 示例值本身也是"这个字段长什么样"的活文档。
+            const selected = box.querySelector("#scratchRuleType").value;
+            const example = RULE_TYPES.find((t) => t.key === selected)?.example || {};
+            s.rules.push({ type: selected, params: { ...example } });
+            renderRules(); renderReadiness();
+          });
+          box.querySelector("#scratchRuleType").addEventListener("change", renderRuleHelp);
+          renderRuleHelp();
+          box.querySelector("#scratchRules").addEventListener("click", (event) => { const button = event.target.closest("[data-rule-delete]"); if (!button) return; s.rules.splice(Number(button.dataset.ruleDelete), 1); renderRules(); renderReadiness(); });
+          box.querySelector("#scratchRules").addEventListener("input", (event) => { const input = event.target.closest("[data-rule-index]"); if (!input) return; s.rules[Number(input.dataset.ruleIndex)].params[input.dataset.ruleParam] = input.value; renderReadiness(); });
+          box.querySelector("#scratchSaveAndEdit")?.addEventListener("click", async (event) => {
+            // Studio 的初始项目属于某一条挑战，未保存的新表单没有 challenge_id，不能
+            // 直接打开。由这次用户手势先开空白页，等创建成功再跳转，避免 await 后被
+            // 浏览器当成弹窗拦截；创建失败则关闭空白页，当前表单保留供继续修改。
+            const { errors, payload } = scratchPayload();
+            if (errors.length) {
+              showModalErrors([{ selector: "#scratchTitle", message: errors[0] }]);
+              toast(errors[0], "error");
+              return;
+            }
+            const trigger = event.currentTarget;
+            trigger.disabled = true;
+            trigger.textContent = "正在保存…";
+            const studioWindow = window.open("about:blank", "_blank");
+            try {
+              const saved = await scratchRequest("/scratch/challenges", { method: "POST", body: JSON.stringify(payload) });
+              Object.assign(s, saved);
+              s.hints_text = (saved.hints || []).join("\n");
+              formState.uploadedVideoId = null;
+              formState.uploadedVideoStatus = null;
+              initialSnapshot = snapshot();
+              const destination = studioStarterUrl(s.id);
+              if (studioWindow) studioWindow.location.replace(destination);
+              else window.location.assign(destination);
+              toast("Scratch 挑战草稿已保存，已打开 Studio。", "success");
+              renderAll();
+            } catch (error) {
+              studioWindow?.close();
+              trigger.disabled = false;
+              trigger.textContent = "保存草稿并在 Studio 中编辑";
+              toast(error.message, "error");
+            }
+          });
+          const upload = async (kind, input) => {
+            const file = input.files?.[0]; input.value = ""; if (!file) return;
+            try {
+              const path = `/scratch/challenges/${s.id}/${kind}`;
+              let updated;
+              if (scratchMockEnabled()) updated = await scratchRequest(path, { method: "POST", body: JSON.stringify({ file_name: file.name, size: file.size }) });
+              else { const data = new FormData(); data.append("file", file); updated = await adminUpload(path, data); }
+              Object.assign(s, updated); s.hints_text = (updated.hints || []).join("\n"); toast("项目已上传"); renderAll();
+            } catch (error) { toast(error.message, "error"); }
+          };
+          box.querySelector("#scratchStarterPick").addEventListener("click", () => box.querySelector("#scratchStarterFile").click());
+          box.querySelector("#scratchDemoPick").addEventListener("click", () => box.querySelector("#scratchDemoFile").click());
+          box.querySelector("#scratchStarterFile").addEventListener("change", () => upload("starter-project", box.querySelector("#scratchStarterFile")));
+          box.querySelector("#scratchDemoFile").addEventListener("change", () => upload("demo-project", box.querySelector("#scratchDemoFile")));
+
+          // ---- 量规编辑器 ----
+          const renderRubric = () => {
+            const area = box.querySelector("#scratchRubricArea");
+            const rubric = s.rubric;
+            if (!rubric || !Array.isArray(rubric.criteria) || !rubric.criteria.length) {
+              area.innerHTML = '<p class="muted">未配置量规：批改台将只做「通过 / 不通过」。</p>';
+              return;
+            }
+            const total = rubricPayload(rubric).max_score;
+            area.innerHTML = `<div class="muted" style="margin-bottom:8px">满分 = 各准则最高档分值之和：<strong>${total} 分</strong></div>${
+              rubric.criteria.map((c, ci) => `<div class="scratch-rubric-criterion" style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px">
+                <div style="display:flex;gap:8px;margin-bottom:6px">
+                  <input data-rubric-cid="${ci}" value="${escapeHtml(c.id)}" placeholder="准则 id（英文/数字/下划线）" style="width:150px" />
+                  <input data-rubric-clabel="${ci}" value="${escapeHtml(c.label)}" placeholder="准则名，如：程序逻辑" style="flex:1" />
+                  <button class="btn-text link danger" type="button" data-rubric-cdel="${ci}">删除</button>
+                </div>
+                <input data-rubric-cdesc="${ci}" value="${escapeHtml(c.desc || "")}" placeholder="准则说明（可选）" style="width:100%;box-sizing:border-box;margin-bottom:6px" />
+                ${(c.levels || []).map((lvl, li) => `<div style="display:flex;gap:6px;margin-bottom:4px">
+                  <input data-rubric-llabel="${ci}:${li}" value="${escapeHtml(lvl.label)}" placeholder="档位名，如：完全达成" style="flex:1" />
+                  <input data-rubric-lpoints="${ci}:${li}" type="number" min="0" value="${lvl.points}" placeholder="分值" style="width:90px" />
+                  <button class="btn-text link danger" type="button" data-rubric-ldel="${ci}:${li}">删档</button>
+                </div>`).join("")}
+                <button class="btn-text link" type="button" data-rubric-ladd="${ci}">＋ 加一个档位</button>
+              </div>`).join("")
+            }<button class="btn" id="scratchRubricAdd" type="button">＋ 加一项准则</button>`;
+            box.querySelector("#scratchRubricAdd")?.addEventListener("click", () => {
+              if (!s.rubric) s.rubric = { criteria: [] };
+              s.rubric.criteria.push({ id: `c_${s.rubric.criteria.length + 1}`, label: "", desc: "", levels: [
+                { value: 1, label: "达成", points: 1 }, { value: 0, label: "未达成", points: 0 },
+              ] });
+              renderRubric();
+            });
+          };
+          box.querySelector("#scratchRubricDefault").addEventListener("click", () => {
+            s.rubric = JSON.parse(JSON.stringify(DEFAULT_RUBRIC));
+            renderRubric();
+          });
+          box.querySelector("#scratchRubricClear").addEventListener("click", () => {
+            s.rubric = null;
+            renderRubric();
+          });
+          box.querySelector("#scratchRubricImportBtn").addEventListener("click", async () => {
+            const id = Number(box.querySelector("#scratchRubricImport").value);
+            if (!id) { toast("请先选择要导入量规的挑战。", "error"); return; }
+            try {
+              const loaded = await scratchRequest(`/scratch/challenges/${id}`);
+              const rubric = loaded.rubric;
+              if (!rubric || !Array.isArray(rubric.criteria) || !rubric.criteria.length) {
+                toast("该挑战未配置量规，无可导入。", "error");
+                return;
+              }
+              s.rubric = JSON.parse(JSON.stringify(rubric));
+              renderRubric();
+              toast("已导入量规。");
+            } catch (error) { toast(error.message, "error"); }
+          });
+          box.querySelector("#scratchRubricArea").addEventListener("click", (event) => {
+            const del = event.target.closest("[data-rubric-cdel]");
+            if (del) { s.rubric?.criteria.splice(Number(del.dataset.rubricCdel), 1); renderRubric(); return; }
+            const ladd = event.target.closest("[data-rubric-ladd]");
+            if (ladd) {
+              const c = s.rubric?.criteria[Number(ladd.dataset.rubricLadd)];
+              if (c) {
+                const next = Math.max(-1, ...(c.levels || []).map((l) => l.value)) + 1;
+                c.levels.push({ value: next, label: "", points: 0 });
+                renderRubric();
+              }
+              return;
+            }
+            const ldel = event.target.closest("[data-rubric-ldel]");
+            if (ldel) {
+              const [ci, li] = ldel.dataset.rubricLdel.split(":").map(Number);
+              s.rubric?.criteria[ci]?.levels.splice(li, 1);
+              renderRubric();
+              return;
+            }
+          });
+          box.querySelector("#scratchRubricArea").addEventListener("input", (event) => {
+            const input = event.target;
+            if (input.dataset.rubricCid != null) { s.rubric.criteria[Number(input.dataset.rubricCid)].id = input.value; return; }
+            if (input.dataset.rubricClabel != null) { s.rubric.criteria[Number(input.dataset.rubricClabel)].label = input.value; return; }
+            if (input.dataset.rubricCdesc != null) { s.rubric.criteria[Number(input.dataset.rubricCdesc)].desc = input.value; return; }
+            if (input.dataset.rubricLlabel != null) {
+              const [ci, li] = input.dataset.rubricLlabel.split(":").map(Number);
+              s.rubric.criteria[ci].levels[li].label = input.value; return;
+            }
+            if (input.dataset.rubricLpoints != null) {
+              const [ci, li] = input.dataset.rubricLpoints.split(":").map(Number);
+              s.rubric.criteria[ci].levels[li].points = Number(input.value) || 0; return;
+            }
+          });
+          scratchRequest("/scratch/challenges/options").then((data) => {
+            box.querySelector("#scratchRubricImport").innerHTML = '<option value="">从其它挑战导入量规…</option>' + (data.items || []).filter((item) => item.id !== s.id).map((item) => `<option value="${item.id}">#${item.id} · ${escapeHtml(item.title)}</option>`).join("");
+          }).catch(() => { /* 不阻塞编辑 */ });
+
+          renderRules(); renderRubric(); renderReadiness(); return box;
+        },
+        stem() {
+          const box = document.createElement("div");
+          box.className = "form-grid";
+          box.innerHTML = `
+          <div class="field full markdown-editor-field" role="group" aria-label="题干或题目描述">
+            <div class="markdown-editor-label">题干 / 题目描述（Markdown）</div>
+            <div class="q-edit"></div>
+            <small>填空题可使用 <code>\placeholder[blank_1]{}</code>；也可输入连续 3 个下划线或 <code>{{blank}}</code>，系统会自动识别为空位。</small>
+          </div>`;
+          const editorContainer = box.querySelector(".q-edit");
+          editorContainer.id = "fStem";
+          stemMarkdownEditor = mountMarkdownEditor(editorContainer, formState.stem, (markdown) => {
+              const previousKeys = formState.fillBlanks.map((blank) => blank.blank_key).join("|");
+              formState.stem = markdown;
+              if (formState.type === "fill") {
+                syncFillBlanks(); // 根据 placeholder 标识同步空位
+                const currentKeys = formState.fillBlanks.map((blank) => blank.blank_key).join("|");
+                // 只重画答案列表，不能重建题干编辑器，否则输入中的光标会丢失。
+                if (currentKeys !== previousKeys) redrawFillBlanks?.();
+              }
+            }, undefined, (editor) => {
+              // 失焦时把编辑器内容同步为标准化格式（___ → \placeholder），刷新后所见即所存。
+              if (formState.type !== "fill") return;
+              const normalized = normalizeFillStem(formState.stem);
+              if (normalized !== formState.stem) {
+                formState.stem = normalized;
+                editor.setValue(normalized);
+              }
+            });
+          markdownInstances.push(stemMarkdownEditor);
+          return box;
+        },
+
+        options() {
+          const box = document.createElement("div");
+          box.className = "card";
+          box.style.cssText = "box-shadow:none;background:transparent;padding:0;margin-top:16px";
+          const multi = formState.type === "multi_choice";
+          box.innerHTML = `<label class="field" style="margin-bottom:10px">${multi ? "多选题" : "选择题"}选项（勾选 = 正确答案，仅服务端可见）</label>
+        <div id="optionsError" class="section-error" hidden></div>
+        <div id="optionsWrap" style="display:grid;gap:8px"></div>
+        ${multi ? '<button class="btn" id="addOptionBtn" type="button" style="margin-top:10px">＋ 添加选项</button>' : '<small class="muted">选择题固定 A、B、C、D 四个选项。</small>'}`;
+          const wrap = box.querySelector("#optionsWrap");
+          function draw() {
+            wrap.innerHTML = "";
+            formState.options.forEach((opt, i) => {
+              const div = document.createElement("div");
+              div.className = "row-select";
+              div.style.cssText = "align-items:flex-start";
+              div.innerHTML = `
+            <input type="${multi ? "checkbox" : "radio"}" name="correctOption" class="check" ${opt.correct ? "checked" : ""} title="正确答案" style="margin-top:14px" />
+            <span class="option-label">${optionLabel(i)}</span>
+            <div class="q-option" style="flex:1"></div>
+            ${multi ? '<button type="button" class="btn-text danger remove-option" style="margin-top:10px">删除</button>' : ""}`;
+              markdownInstances.push(
+                mountMarkdownEditor(
+                  div.querySelector(".q-option"),
+                  opt.content,
+                  (markdown) => (opt.content = markdown),
+                  "选项内容…",
+                ),
+              );
+              const correct = div.querySelector(
+                'input[type="' + (multi ? "checkbox" : "radio") + '"]',
+              );
+              correct.addEventListener("change", () => {
+                if (!multi) formState.options.forEach((o) => (o.correct = false));
+                opt.correct = correct.checked;
+              });
+              div.querySelector(".remove-option")?.addEventListener("click", () => {
+                formState.options.splice(i, 1);
+                renderAll();
+              });
+              wrap.appendChild(div);
+            });
+          }
+          box.querySelector("#addOptionBtn")?.addEventListener("click", () => {
+            formState.options.push({ content: "", correct: false });
+            renderAll();
+          });
+          draw();
+          return box;
+        },
+
+        judgeAnswer() {
+          const box = document.createElement("div");
+          box.className = "card";
+          box.style.cssText = "box-shadow:none;background:transparent;padding:0;margin-top:16px";
+          box.innerHTML = `<label class="field" style="margin-bottom:10px">正确答案</label>
+        <div class="pill-group">
+          <label class="pill"><input type="radio" name="judgeAnswer" value="正确" /><span>正确</span></label>
+          <label class="pill"><input type="radio" name="judgeAnswer" value="错误" /><span>错误</span></label>
+        </div>`;
+          box.querySelectorAll('input[name="judgeAnswer"]').forEach((r) => {
+            r.checked = r.value === formState.judgeAnswer;
+            r.addEventListener("change", () => (formState.judgeAnswer = r.value));
+          });
+          return box;
+        },
+
+        fillBlanks() {
+          const box = document.createElement("div");
+          box.className = "card";
+          box.style.cssText = "box-shadow:none;background:transparent;padding:0;margin-top:16px";
+          box.innerHTML = `<label class="field" style="margin-bottom:10px">
+          空位答案：题干中每出现一个 <span class="blank-tag">\placeholder[blank_1]{}</span> 自动生成一空（按题干出现顺序排列，无需手动输入）</label>
+        <div id="fillError" class="section-error" hidden></div>
+          <div class="fill-actions">
+            <button class="btn" id="insertFillBlankBtn" type="button">＋ 插入空位</button>
+            <small class="muted">在题干当前光标处插入一个新空位</small>
+          </div>
+        <div id="fillBlankWarn" hidden style="color:#c62828;font-size:12px;margin:0 0 8px"></div>
+        <div id="fillWrap" style="display:grid;gap:8px"></div>`;
+          syncFillBlanks();
+          const wrap = box.querySelector("#fillWrap");
+          const warn = box.querySelector("#fillBlankWarn");
+          function draw() {
+            // 重复空位标识即时提示（提交审核时后端也会拒绝）。
+            const counts = {};
+            formState.fillBlanks.forEach((blank) => (counts[blank.blank_key] = (counts[blank.blank_key] || 0) + 1));
+            const dups = Object.entries(counts).filter(([, count]) => count > 1);
+            warn.hidden = dups.length === 0;
+            warn.textContent = dups.length
+              ? `⚠ 空位标识重复：${dups.map(([key, count]) => `${key}（出现 ${count} 次）`).join("、")}，提交审核会被拒绝，请修改题干。`
+              : "";
+            wrap.innerHTML = "";
+            formState.fillBlanks.forEach((blank, i) => {
+              const div = document.createElement("div");
+              div.className = "row-select";
+              div.innerHTML = `<span class="blank-tag">空 ${i + 1}</span><small class="muted">${blank.blank_key}</small>
+            <input class="blank-answer" placeholder="标准答案；多种写法用 | 分隔，如 0.5 | 1/2（答案本身含竖线时写成 \\|）" style="flex:1" />`;
+              div.querySelector(".blank-answer").value = blank.answer;
+              div
+                .querySelector(".blank-answer")
+                .addEventListener("input", (e) => (blank.answer = e.target.value));
+              wrap.appendChild(div);
+            });
+          }
+          redrawFillBlanks = draw;
+          const insertBlankBtn = box.querySelector("#insertFillBlankBtn");
+          // 鼠标点按钮时保留题干编辑器中的选区，插入位置才会准确。
+          insertBlankBtn.addEventListener("mousedown", (event) => event.preventDefault());
+          insertBlankBtn.addEventListener("click", () => {
+            if (!stemMarkdownEditor) return;
+            const blankKey = nextFillBlankKey(formState.stem);
+            stemMarkdownEditor.insertMD(`\\placeholder[${blankKey}]{}`);
+            formState.stem = stemMarkdownEditor.getValue();
+            // 与自动识别保持一致：光标处于代码围栏内时不允许插入，回滚并提示。
+            const marker = `\\placeholder[${blankKey}]{}`;
+            const markerIndex = formState.stem.indexOf(marker);
+            if (markerIndex >= 0) {
+              const openFences = (formState.stem.slice(0, markerIndex).match(/^\s*(`{3,}|~{3,})/gm) || []).length;
+              if (openFences % 2 === 1) {
+                formState.stem = formState.stem.replace(marker, "");
+                stemMarkdownEditor.setValue(formState.stem);
+                alert("代码围栏内不能插入空位。");
+                stemMarkdownEditor.focus();
+                return;
+              }
+            }
+            syncFillBlanks();
+            draw();
+            stemMarkdownEditor.focus();
+          });
+          draw();
+          return box;
+        },
+
+        programming() {
+          const p = formState.programming;
+          const box = document.createElement("div");
+          box.className = "card";
+          box.style.cssText = "box-shadow:none;background:transparent;padding:0;margin-top:16px";
+
+          const grid = document.createElement("div");
+          grid.className = "form-grid";
+          grid.innerHTML = `
+        <label class="field">题目标题（≤ 20 字符）<input id="pTitle" maxlength="20" placeholder="如：A+B Problem" /></label>
+        <label class="field">通过条件
+          <span class="pill-group">
+            <label class="pill"><input type="radio" name="pPass" value="编译通过" /><span>编译通过</span></label>
+            <label class="pill"><input type="radio" name="pPass" value="样例通过" /><span>样例通过</span></label>
+            <label class="pill"><input type="radio" name="pPass" value="全测试点通过" /><span>全测试点通过</span></label>
+          </span>
+        </label>
+        <label class="field">输入格式<textarea id="pInput" rows="2"></textarea></label>
+        <label class="field">输出格式<textarea id="pOutput" rows="2"></textarea></label>
+        <label class="field">限时（ms，100–10000）<input id="pTimeLimit" type="number" min="100" max="10000" step="100" /></label>
+        <label class="field">内存（MB，16–512）<input id="pMemoryLimit" type="number" min="16" max="512" /></label>
+        <label class="field full">统一设定
+          <span class="muted" style="margin-left:8px">把所有测试点的单独限制清空回继承，之后改上面的题目级值即可全局生效</span>
+          <button id="pUnifyLimits" class="btn" type="button" style="margin-left:8px">统一设定</button>
+        </label>
+        <label class="field full">提示说明<textarea id="pHints" rows="2" placeholder="无"></textarea></label>`;
+          grid.querySelector("#pTitle").value = p.title;
+          grid.querySelectorAll('input[name="pPass"]').forEach((r) => {
+            r.checked = r.value === p.passCondition;
+            r.addEventListener("change", () => (p.passCondition = r.value));
+          });
+          grid.querySelector("#pInput").value = p.inputFormat;
+          grid.querySelector("#pOutput").value = p.outputFormat;
+          grid.querySelector("#pTimeLimit").value = p.timeLimitMs ?? 1000;
+          grid.querySelector("#pMemoryLimit").value = p.memoryLimitMb ?? 256;
+          grid.querySelector("#pHints").value = p.hints;
+          [
+            ["#pTitle", "title"],
+            ["#pInput", "inputFormat"],
+            ["#pOutput", "outputFormat"],
+            ["#pHints", "hints"],
+          ].forEach(([sel, key]) =>
+            grid.querySelector(sel).addEventListener("input", (e) => (p[key] = e.target.value)),
+          );
+          grid.querySelector("#pTimeLimit").addEventListener("input", (e) => {
+            p.timeLimitMs = e.target.value === "" ? null : Number(e.target.value);
+          });
+          grid.querySelector("#pMemoryLimit").addEventListener("input", (e) => {
+            p.memoryLimitMb = e.target.value === "" ? null : Number(e.target.value);
+          });
+          grid.querySelector("#pUnifyLimits").addEventListener("click", async () => {
+            const dirtyBefore = isDirty();
+            if (!editingId) {
+              // 还没建题：本地清空逐点值即可，题目级就是表单里这两个框。
+              p.manualTestCases.forEach((t) => { t.timeLimitMs = null; t.memoryLimitMb = null; });
+              renderAll();
+              toast("已清空所有测试点的单独限制（未保存）。");
+              return;
+            }
+            const timeLimitMs = p.timeLimitMs ?? 1000;
+            const memoryLimitMb = p.memoryLimitMb ?? 256;
+            try {
+              const result = await adminRequest(`/problems/${editingId}/unify-testcase-limits`, {
+                method: "POST",
+                headers: ifMatch(formState.revision),
+                body: JSON.stringify({ time_limit_ms: timeLimitMs, memory_limit_mb: memoryLimitMb }),
+              });
+              p.timeLimitMs = result.programming.time_limit_ms ?? timeLimitMs;
+              p.memoryLimitMb = result.programming.memory_limit_mb ?? memoryLimitMb;
+              p.manualTestCases.forEach((t) => { t.timeLimitMs = null; t.memoryLimitMb = null; });
+              // 已导入测试点的逐点值也被清了，清单要跟着换成服务端刚重算的那份
+              if (result.programming.testdata_package) p.testDataPackage = result.programming.testdata_package;
+              formState.revision = result.revision;
+              if (!dirtyBefore) initialSnapshot = snapshot();
+              renderAll();
+              toast("统一设定完成：所有测试点回到继承。");
+            } catch (error) {
+              toast(error.message || "统一设定失败。", "error");
+            }
+          });
+          box.appendChild(grid);
+
+          // 样例：数组 [{input, output, is_sample:true}]
+          const sampleTitle = document.createElement("h4");
+          sampleTitle.className = "sec-title";
+          sampleTitle.style.cssText = "margin:18px 0 8px";
+          sampleTitle.textContent = "样例（成对录入，可多组）";
+          box.appendChild(sampleTitle);
+          const sampleWrap = document.createElement("div");
+          sampleWrap.style.cssText = "display:grid;gap:8px";
+          box.appendChild(sampleWrap);
+          function drawSamples() {
+            sampleWrap.innerHTML = "";
+            p.samples.forEach((s, i) => {
+              const row = document.createElement("div");
+              row.className = "sample-row";
+              // 样例没有单独的限时/内存：它恒继承题目级。要给某个点单独设限制，
+              // 去「已导入测试点」或下面的手工测试点表里设。
+              row.innerHTML = `
+            <textarea class="s-in mono" rows="3" placeholder="样例输入"></textarea>
+            <textarea class="s-out mono" rows="3" placeholder="样例输出"></textarea>
+            <button type="button" class="btn-text danger remove-sample">删除</button>`;
+              row.querySelector(".s-in").value = s.input;
+              row.querySelector(".s-out").value = s.output;
+              row
+                .querySelector(".s-in")
+                .addEventListener("input", (e) => (s.input = e.target.value));
+              row
+                .querySelector(".s-out")
+                .addEventListener("input", (e) => (s.output = e.target.value));
+              row.querySelector(".remove-sample").addEventListener("click", () => {
+                p.samples.splice(i, 1);
+                drawSamples();
+              });
+              sampleWrap.appendChild(row);
+            });
+          }
+          const addSampleBtn = document.createElement("button");
+          addSampleBtn.className = "btn";
+          addSampleBtn.type = "button";
+          addSampleBtn.textContent = "＋ 添加样例";
+          addSampleBtn.addEventListener("click", () => {
+            p.samples.push({ input: "", output: "", is_sample: true });
+            drawSamples();
+          });
+          box.appendChild(addSampleBtn);
+          drawSamples();
+
+          // 参考代码：只展示当前 subType 对应的语言，避免 C++ 题混入 Python 内容。
+          const activeLang = subTypeOf() === "python" ? "python" : "cpp";
+          const languageLabel = activeLang === "python" ? "Python" : "C++";
+          const codeHead = document.createElement("div");
+          codeHead.style.cssText = "margin:18px 0 4px;display:flex;align-items:center;gap:8px";
+          const codeTitle = document.createElement("h4");
+          codeTitle.className = "sec-title";
+          codeTitle.style.cssText = "margin:0";
+          codeTitle.textContent = "参考代码";
+          const langPill = document.createElement("span");
+          langPill.className = "lang-pill";
+          langPill.textContent = languageLabel;
+          codeHead.append(codeTitle, langPill);
+          // 试跑入口紧贴参考代码：它验的就是这段代码，隔开放就没人会想起来点。
+          if (!modalReadOnly) codeHead.append(buildDryRunControls());
+          box.appendChild(codeHead);
+          const languageNote = document.createElement("p");
+          languageNote.className = "muted code-language-note";
+          languageNote.textContent = "切换语言请使用左侧题目设置";
+          box.appendChild(languageNote);
+          const codeArea = document.createElement("textarea");
+          codeArea.className = "code-area";
+          codeArea.id = "pRefCode";
+          codeArea.placeholder = "// 参考代码";
+          codeArea.value = p.refCode[activeLang];
+          box.appendChild(codeArea);
+          const codeCm = mountCodeMirror(
+            codeArea,
+            codeModeFor(activeLang),
+            (v) => (p.refCode[activeLang] = v),
+          );
+          cmInstances.push(codeCm);
+          box.appendChild(buildDryRunPanel());
+          if (!modalReadOnly) loadLatestDryRun();
+
+          // Python 仍可手工维护成对测试点；C++ 隐藏测试点使用 OJ ZIP 导入。
+          const tcTitle = document.createElement("h4");
+          tcTitle.className = "sec-title";
+          tcTitle.style.cssText = "margin:18px 0 8px";
+          tcTitle.textContent = formState.subType === "cpp" ? "C++ 测试数据（ZIP 导入）" : "Python 隐藏测试点（成对录入）";
+          box.appendChild(tcTitle);
+          const tcError = document.createElement("div");
+          tcError.id = "tcError";
+          tcError.className = "section-error";
+          tcError.hidden = true;
+          box.appendChild(tcError);
+          if (formState.subType === "cpp") {
+            const zipPanel = document.createElement("section");
+            zipPanel.className = "note";
+            zipPanel.style.cssText = "padding:14px;border:1px dashed #91b4ee;border-radius:8px;background:#f7fbff";
+            const imported = p.testDataPackage;
+            const importedCount = imported?.manifest?.length || 0;
+            zipPanel.innerHTML = `
+              <p style="margin:0 0 6px"><b>上传 Hydro 风格测试数据包</b>：可拖拽或选择 ZIP；仅识别成对的 <code>1.in</code>、<code>1.out</code> 数字编号文件；可选 <code>config.yaml</code> 存放时空限制、比较器和分值。</p>
+              <p class="muted" style="margin:0 0 10px">公开样例请在上方单独填写。隐藏测试点、配置与原始文件分离保存，不会回传到浏览器。</p>
+              <input id="cppZipInput" type="file" accept=".zip,application/zip" />
+              <button class="btn primary" id="cppZipUpload" type="button">${editingId ? "上传并解析 ZIP" : "选择后随草稿保存"}</button>
+              <span class="muted" id="cppZipStatus" style="margin-left:8px">${pendingCppZipFile ? `已选择 ${escapeHtml(pendingCppZipFile.name)}，${editingId ? "可立即上传" : "保存草稿后会自动上传"}。` : importedCount ? `已导入 ${importedCount} 个隐藏测试点${imported?.archive_name ? `（${escapeHtml(imported.archive_name)}）` : ""}` : "尚未导入测试数据"}</span>`;
+            const zipInput = zipPanel.querySelector("#cppZipInput");
+            const uploadButton = zipPanel.querySelector("#cppZipUpload");
+            const statusNode = zipPanel.querySelector("#cppZipStatus");
+            let selectedZipFile = null;
+            const chooseZipFile = (file) => {
+              if (!file) return;
+              if (!file.name.toLowerCase().endsWith(".zip")) {
+                statusNode.textContent = "只支持 .zip 测试数据包。";
+                return;
+              }
+              selectedZipFile = file;
+              pendingCppZipFile = file;
+              statusNode.textContent = editingId
+                ? `已选择 ${file.name}，点击“上传并解析 ZIP”开始导入。`
+                : `已选择 ${file.name}，保存草稿后会自动上传。`;
+            };
+            zipInput.addEventListener("change", () => chooseZipFile(zipInput.files?.[0]));
+            zipPanel.addEventListener("dragover", (event) => {
+              event.preventDefault();
+              zipPanel.style.background = "#eef6ff";
+            });
+            zipPanel.addEventListener("dragleave", () => (zipPanel.style.background = "#f7fbff"));
+            zipPanel.addEventListener("drop", (event) => {
+              event.preventDefault();
+              zipPanel.style.background = "#f7fbff";
+              chooseZipFile(event.dataTransfer?.files?.[0]);
+            });
+            uploadButton.addEventListener("click", async () => {
+              const file = selectedZipFile || zipInput.files?.[0];
+              if (!file) {
+                statusNode.textContent = "请选择一个 .zip 文件。";
+                return;
+              }
+              if (!editingId) {
+                pendingCppZipFile = file;
+                statusNode.textContent = "ZIP 已暂存；点击“保存草稿”后会自动上传。";
+                return;
+              }
+              uploadButton.disabled = true;
+              statusNode.textContent = "正在上传并解析…";
+              const dirtyBeforeUpload = isDirty();
+              try {
+                const data = new FormData();
+                data.append("archive", file);
+                const result = await adminUpload(`/problems/${editingId}/testdata-zip`, data, {
+                  headers: ifMatch(formState.revision),
+                });
+                p.testDataPackage = {
+                  archive_name: file.name,
+                  checker: result.checker,
+                  manifest: result.manifest,
+                };
+                // ZIP 的 config.yaml 会覆盖题目级限制（保留覆盖），回填表单让下次保存不丢。
+                p.timeLimitMs = result.time_limit_ms ?? p.timeLimitMs;
+                p.memoryLimitMb = result.memory_limit_mb ?? p.memoryLimitMb;
+                formState.revision = result.revision;
+                pendingCppZipFile = null;
+                if (!dirtyBeforeUpload) initialSnapshot = snapshot();
+                renderAll();
+                toast(`测试数据导入成功，共 ${result.case_count} 个测试点。`);
+              } catch (error) {
+                const message = error.message || "上传失败。";
+                statusNode.textContent = message;
+                toast(message, "error");
+                uploadButton.disabled = false;
+              }
+            });
+            box.appendChild(zipPanel);
+            // 导入后的清单表格：分值 / 限时 / 内存**逐点可改**。ZIP 只负责给测试点的内容，
+            // 为了把某个点的分值从 10 调成 20 就重新打包上传一次，是没有道理的。
+            // 限时/内存留空 = 继承题目级；分值留空 = 不单独计分（判分时等权）。
+            const manifestTitle = document.createElement("h4");
+            manifestTitle.className = "sec-title";
+            manifestTitle.style.cssText = "margin:14px 0 8px";
+            manifestTitle.textContent = "已导入测试点";
+            box.appendChild(manifestTitle);
+            const manifestHint = document.createElement("p");
+            manifestHint.className = "muted";
+            manifestHint.style.cssText = "margin:0 0 8px";
+            manifestHint.textContent = "分值 / 限时 / 内存可以逐点单独设置：限时、内存留空表示继承题目级，分值留空表示该点不单独计分。改完点下方按钮保存。";
+            box.appendChild(manifestHint);
+            const manifestTable = document.createElement("table");
+            manifestTable.innerHTML = `<thead><tr><th>#</th><th>分值</th><th>限时(ms)</th><th>内存(MB)</th><th>数据</th></tr></thead><tbody></tbody>`;
+            box.appendChild(manifestTable);
+            const manifestBar = document.createElement("div");
+            manifestBar.style.cssText = "display:flex;align-items:center;gap:10px;margin-top:8px";
+            const saveCasesBtn = document.createElement("button");
+            saveCasesBtn.className = "btn";
+            saveCasesBtn.type = "button";
+            saveCasesBtn.textContent = "保存测试点设置";
+            // 整包下载：拿回 N.in / N.out + 按当前库值生成的 config.yaml，
+            // 改完可以直接重新上传，是闭合的。
+            const downloadAllBtn = document.createElement("button");
+            downloadAllBtn.className = "btn";
+            downloadAllBtn.type = "button";
+            downloadAllBtn.textContent = "下载全部（ZIP）";
+            // 只读（查看）模式下也要能点：下载是读动作，见 applyModalAccess
+            downloadAllBtn.dataset.readAction = "";
+            const casesStatus = document.createElement("span");
+            casesStatus.className = "muted";
+            manifestBar.append(saveCasesBtn, downloadAllBtn, casesStatus);
+            box.appendChild(manifestBar);
+
+            /** 统一的下载入口：未保存的草稿没有服务端文件可下，先拦住。 */
+            async function downloadTestdata(path, fallbackName) {
+              if (!editingId) {
+                casesStatus.textContent = "请先保存草稿。";
+                return;
+              }
+              try {
+                casesStatus.textContent = "正在准备下载…";
+                const name = await adminDownload(`/problems/${editingId}${path}`, fallbackName);
+                casesStatus.textContent = `已下载 ${name}`;
+              } catch (error) {
+                casesStatus.textContent = error.message || "下载失败。";
+                toast(error.message || "下载失败。", "error");
+              }
+            }
+            downloadAllBtn.addEventListener("click", () =>
+              downloadTestdata("/testdata/archive", "testdata.zip"),
+            );
+
+            const manifestRows = () =>
+              (p.testDataPackage?.manifest || []).slice().sort((a, b) => a.case_no - b.case_no);
+            function drawManifest() {
+              const rows = manifestRows();
+              const body = manifestTable.querySelector("tbody");
+              body.innerHTML = "";
+              rows.forEach((entry) => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+              <td>${entry.case_no}</td>
+              <td><input class="mc-score mono" type="number" min="0" max="1000" placeholder="等权" /></td>
+              <td><input class="mc-time mono" type="number" min="100" max="10000" step="100" placeholder="继承 ${p.timeLimitMs ?? 1000}" /></td>
+              <td><input class="mc-mem mono" type="number" min="16" max="512" placeholder="继承 ${p.memoryLimitMb ?? 256}" /></td>
+              <td style="white-space:nowrap">
+                <a class="link mc-in" role="button" tabindex="0">输入</a>
+                <a class="link mc-out" role="button" tabindex="0" style="margin-left:8px">输出</a>
+              </td>`;
+                tr.querySelector(".mc-in").addEventListener("click", () =>
+                  downloadTestdata(`/testdata/cases/${entry.case_no}?side=in`, `${entry.case_no}.in`),
+                );
+                tr.querySelector(".mc-out").addEventListener("click", () =>
+                  downloadTestdata(`/testdata/cases/${entry.case_no}?side=out`, `${entry.case_no}.out`),
+                );
+                const bind = (selector, key) => {
+                  const input = tr.querySelector(selector);
+                  input.value = entry[key] ?? ""; // 空 = 继承 / 等权，与 null 一一对应
+                  input.addEventListener("input", (event) => {
+                    entry[key] = event.target.value === "" ? null : Number(event.target.value);
+                    casesStatus.textContent = "有未保存的改动。";
+                  });
+                };
+                bind(".mc-score", "score");
+                bind(".mc-time", "time_limit_ms");
+                bind(".mc-mem", "memory_limit_mb");
+                body.appendChild(tr);
+              });
+              const empty = rows.length === 0;
+              saveCasesBtn.disabled = empty;
+              downloadAllBtn.disabled = empty;
+              manifestBar.style.display = empty ? "none" : "flex";
+            }
+            saveCasesBtn.addEventListener("click", async () => {
+              if (!editingId) {
+                casesStatus.textContent = "请先保存草稿。";
+                return;
+              }
+              const rows = manifestRows();
+              const bad = (value, lo, hi) => value != null && !(Number.isInteger(value) && value >= lo && value <= hi);
+              const invalid = rows.find(
+                (entry) => bad(entry.score, 0, 1000) || bad(entry.time_limit_ms, 100, 10000) || bad(entry.memory_limit_mb, 16, 512),
+              );
+              if (invalid) {
+                casesStatus.textContent = `测试点 ${invalid.case_no} 的取值超出范围（分值 0–1000、限时 100–10000ms、内存 16–512MB）。`;
+                return;
+              }
+              const dirtyBefore = isDirty();
+              saveCasesBtn.disabled = true;
+              casesStatus.textContent = "保存中…";
+              try {
+                const result = await adminRequest(`/problems/${editingId}/testdata-cases`, {
+                  method: "PUT",
+                  headers: ifMatch(formState.revision),
+                  body: JSON.stringify({
+                    cases: rows.map((entry) => ({
+                      case_no: entry.case_no,
+                      score: entry.score ?? null,
+                      time_limit_ms: entry.time_limit_ms ?? null,
+                      memory_limit_mb: entry.memory_limit_mb ?? null,
+                    })),
+                  }),
+                });
+                p.testDataPackage = { ...p.testDataPackage, manifest: result.manifest };
+                formState.revision = result.revision;
+                if (!dirtyBefore) initialSnapshot = snapshot();
+                casesStatus.textContent = "已保存。";
+                drawManifest();
+                toast("测试点设置已保存。");
+              } catch (error) {
+                casesStatus.textContent = error.message || "保存失败。";
+                toast(error.message || "保存失败。", "error");
+              } finally {
+                saveCasesBtn.disabled = false;
+              }
+            });
+            drawManifest();
+            return box;
+          }
+          const tcTable = document.createElement("table");
+          tcTable.innerHTML = `<thead><tr><th>#</th><th>类型</th><th>输入</th><th>输出</th><th>限时(ms)</th><th>内存(MB)</th><th>操作</th></tr></thead><tbody></tbody>`;
+          box.appendChild(tcTable);
+          const tcBody = tcTable.querySelector("tbody");
+          function drawTC() {
+            tcBody.innerHTML = "";
+            p.manualTestCases.forEach((tc, i) => {
+              const tr = document.createElement("tr");
+              tr.innerHTML = `
+            <td>${i + 1}</td>
+            <td>隐藏</td>
+            <td><textarea class="tc-in mono" rows="3" placeholder="输入"></textarea></td>
+            <td><textarea class="tc-out mono" rows="3" placeholder="输出"></textarea></td>
+            <td><input class="tc-time mono" type="number" min="100" max="10000" step="100" placeholder="继承 ${p.timeLimitMs ?? 1000}" /></td>
+            <td><input class="tc-mem mono" type="number" min="16" max="512" placeholder="继承 ${p.memoryLimitMb ?? 256}" /></td>
+            <td><a class="link danger remove-tc">删除</a></td>`;
+              tr.querySelector(".tc-in").value = tc.input;
+              tr.querySelector(".tc-out").value = tc.output;
+              const timeInput = tr.querySelector(".tc-time");
+              const memInput = tr.querySelector(".tc-mem");
+              timeInput.value = tc.timeLimitMs ?? ""; // 空 = 继承题目级
+              memInput.value = tc.memoryLimitMb ?? "";
+              tr.querySelector(".tc-in").addEventListener(
+                "input",
+                (e) => (tc.input = e.target.value),
+              );
+              tr.querySelector(".tc-out").addEventListener(
+                "input",
+                (e) => (tc.output = e.target.value),
+              );
+              timeInput.addEventListener("input", (e) => {
+                tc.timeLimitMs = e.target.value === "" ? null : Number(e.target.value);
+              });
+              memInput.addEventListener("input", (e) => {
+                tc.memoryLimitMb = e.target.value === "" ? null : Number(e.target.value);
+              });
+              tr.querySelector(".remove-tc").addEventListener("click", () => {
+                p.manualTestCases.splice(i, 1);
+                drawTC();
+              });
+              tcBody.appendChild(tr);
+            });
+          }
+          const addTcBtn = document.createElement("button");
+          addTcBtn.className = "btn";
+          addTcBtn.type = "button";
+          addTcBtn.textContent = "＋ 添加测试点";
+          addTcBtn.addEventListener("click", () => {
+            p.manualTestCases.push({ input: "", output: "", timeLimitMs: null, memoryLimitMb: null });
+            drawTC();
+          });
+          box.appendChild(addTcBtn);
+          drawTC();
+          return box;
+        },
+
+        analysis() {
+          const box = document.createElement("div");
+          box.className = "form-grid";
+          box.style.cssText = "margin-top:16px";
+          box.innerHTML = `
+            <div class="field full markdown-editor-field" role="group" aria-label="答案解析">
+              <div class="markdown-editor-label">答案解析（Markdown）</div>
+              <div class="q-edit"></div>
+            </div>`;
+          markdownInstances.push(
+            mountMarkdownEditor(
+              box.querySelector(".q-edit"),
+              formState.analysis,
+              (markdown) => (formState.analysis = markdown),
+              "选填",
+            ),
+          );
+          return box;
+        },
+
+        analysisVideo() {
+          const box = document.createElement("div");
+          box.className = "form-grid";
+          box.style.cssText = "margin-top:16px";
+          box.innerHTML = `
+            <div class="field full" role="group" aria-label="解析视频">
+              <div class="markdown-editor-label">解析视频（选填）</div>
+              <div class="av-area" data-av-mount></div>
+              <p class="muted" style="margin-top:8px">大加号点击或拖拽视频文件上传（mp4/mkv/mov 等，≤2GB）。学生提交作答或交卷后才可观看，避免提前泄题。</p>
+            </div>`;
+          mountAnalysisVideoArea(box.querySelector("[data-av-mount]"), {
+            videoId: () => formState.analysisVideoId,
+            setVideoId: (id) => {
+              formState.analysisVideoId = id;
+              formState.hasAnalysisVideo = !!id;
+            },
+            // 状态优先取「本会话刚上传」的，其次取已保存绑定的（后端 analysis_video_status）
+            status: () => formState.uploadedVideoStatus || formState.analysisVideoStatus,
+            setStatus: (status) => {
+              formState.uploadedVideoStatus = status;
+              formState.analysisVideoStatus = status;
+            },
+            uploadedId: () => formState.uploadedVideoId,
+            setUploadedId: (id, status) => {
+              formState.uploadedVideoId = id;
+              formState.uploadedVideoStatus = status;
+            },
+            onSaved: () => {
+              // 保存成功后本会话上传的视频转为正式绑定，不再显示「删除（彻底）」入口
+              formState.uploadedVideoId = null;
+              formState.uploadedVideoStatus = null;
+            },
+          });
+          return box;
+        },
+      };
+
+      // =====================================================================
+      // 解析视频上传区：大加号 + 拖拽（Uppy Dashboard）+ 上传后可查看/删除。
+      //
+      // 交互状态机：
+      //   · 未绑定（videoId 为空）→ 大加号上传区（点击选文件 / 拖拽进框）。
+      //   · 上传成功 → 视频卡片（状态标签 + 预览 + 删除按钮）。
+      //   · 删除 → 先调 DELETE /api/admin/videos/{id} 彻底删（未引用才放行）；
+      //     已绑定题目的视频会 409 → 前端收到 409 仍解绑本题引用（视频资产保留在库）。
+      // 复用 videos.js 同款 Uppy + S3 Multipart 直传管道（vendor 已内置，零新依赖）。
+      // =====================================================================
+      const AV_PART_SIZE = 64 * 1024 * 1024; // 与后端 settings.video_part_size 一致
+      const AV_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 与后端 video_source_max_bytes 一致
+      let avUppy = null; // 当前表单区的 Uppy 实例（重渲染前 destroy）
+      let avPlayer = null; // videojs 预览实例（就地展开，dispose 复用）
+
+      function avUploadedVideoStatusLabel(status) {
+        return { draft: "待上传", uploaded: "已上传待转码", transcoding: "转码中", ready: "可播放", failed: "转码失败" }[status] || status || "处理中";
+      }
+
+      /** 视频卡片：状态 + 预览（就地展开 videojs）+ 删除。 */
+      function renderAvCard(mount, api, { readonly = false } = {}) {
+        mount.innerHTML = `
+          <div class="av-card">
+            <div class="av-card-info">
+              <span class="node-badge trial">视频 #${api.videoId()}</span>
+              <span class="node-badge warn">${avUploadedVideoStatusLabel(api.status())}</span>
+              <span class="muted">解析视频将在学生提交后开放观看</span>
+            </div>
+            <div class="av-card-actions">
+              <button class="btn" type="button" data-av-preview>预览</button>
+              ${readonly ? "" : '<button class="btn danger" type="button" data-av-remove>删除</button>'}
+            </div>
+            <div class="av-preview-wrap" hidden></div>
+          </div>`;
+        const previewWrap = mount.querySelector(".av-preview-wrap");
+        const playable = api.status() === "ready";
+        const previewBtn = mount.querySelector("[data-av-preview]");
+        previewBtn.disabled = !playable;
+        previewBtn.title = playable ? "" : "转码完成后可预览";
+        previewBtn.addEventListener("click", async () => {
+          if (!playable) return;
+          if (previewWrap.hidden) {
+            previewWrap.hidden = false;
+            previewWrap.innerHTML = '<div class="av-player-slot"></div>';
+            avPlayer?.dispose?.();
+            avPlayer = null;
+            try {
+              const data = await adminRequest(`/videos/${api.videoId()}/play`, {
+                method: "POST",
+                body: "{}",
+              });
+              const slot = previewWrap.querySelector(".av-player-slot");
+              const videoEl = document.createElement("video");
+              videoEl.className = "video-js vjs-big-play-centered";
+              videoEl.setAttribute("playsinline", "");
+              slot.appendChild(videoEl);
+              avPlayer = videojs(videoEl, {
+                controls: true,
+                fluid: true,
+                autoplay: false,
+                sources: [{ src: data.master_playlist, type: "application/vnd.apple.mpegurl" }],
+              });
+            } catch (err) {
+              toast(err?.message || "预览失败，请稍后再试。", "error");
+            }
+          } else {
+            avPlayer?.dispose?.();
+            avPlayer = null;
+            previewWrap.hidden = true;
+            previewWrap.innerHTML = "";
+          }
+        });
+        mount.querySelector("[data-av-remove]").addEventListener("click", async () => {
+          const id = api.videoId();
+          if (!id) return;
+          const ok = await confirmDialog({
+            title: "删除解析视频",
+            message: "删除后本题将不再关联该视频；未绑定的视频资产会被一并清除。确定删除？",
+            confirmText: "删除",
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            await adminRequest(`/videos/${id}`, { method: "DELETE" });
+            toast(`视频 #${id} 已删除。`);
+          } catch (err) {
+            // 409 = 视频被引用（通常是本题已保存过绑定）：仍解除本题引用，资产保留在库。
+            if (err?.status === 409) toast("该视频已被题目引用，已解除本题绑定；如需彻底删除请到视频管理页处理。");
+            else toast(err?.message || "删除失败，请重试。", "error");
+          }
+          api.setVideoId(null);
+          api.setStatus && api.setStatus(null);
+          mountAnalysisVideoArea(mount, api);
+        });
+      }
+
+      /** 大加号上传区：Uppy Dashboard（inline，小尺寸），拖拽 + 点击。 */
+      function renderAvUploader(mount, api) {
+        mount.innerHTML = '<div class="av-uppy"></div>';
+        const target = mount.querySelector(".av-uppy");
+        avUppy?.destroy?.();
+        avUppy = new Uppy({
+          autoProceed: false,
+          restrictions: {
+            maxFileSize: AV_MAX_BYTES,
+            allowedFileTypes: ["video/*", ".mkv", ".mov", ".m4v", "application/octet-stream"],
+          },
+        });
+        avUppy.use(Dashboard, {
+          inline: true,
+          target,
+          showProgressDetails: true,
+          proudlyDisplayPoweredByUppy: false,
+          height: 220,
+        });
+        avUppy.use(AwsS3, {
+          shouldUseMultipart: () => true,
+          getChunkSize: () => AV_PART_SIZE,
+          limit: 3,
+          async createMultipartUpload(file) {
+            const res = await adminRequest("/videos/uploads", {
+              method: "POST",
+              body: JSON.stringify({
+                title: file.name.replace(/\.[^.]+$/, "") || file.name,
+                filename: file.name,
+                content_type: file.type || "application/octet-stream",
+                file_size: file.size,
+              }),
+            });
+            return { uploadId: res.upload_id, key: res.object_key };
+          },
+          async signPart(file, { uploadId, key, partNumber }) {
+            const res = await adminRequest(`/videos/uploads/${uploadId}/parts/${partNumber}`);
+            return { url: res.url };
+          },
+          async completeMultipartUpload(file, { uploadId, key, parts }) {
+            const res = await adminRequest(`/videos/uploads/${uploadId}/complete`, {
+              method: "POST",
+              body: JSON.stringify({
+                parts: parts.map((p) => ({ part_number: p.PartNumber, etag: p.ETag })),
+              }),
+            });
+            return { location: "", video_id: res.video_id };
+          },
+          async abortMultipartUpload(file, { uploadId, key }) {
+            await adminRequest(`/videos/uploads/${uploadId}/abort`, { method: "POST", body: "{}" });
+          },
+        });
+        avUppy.on("upload-success", (file, response) => {
+          const body = response?.body || response;
+          const id = body?.video_id;
+          if (!id) return;
+          toast(`视频 #${id} 上传完成，已进入转码队列。`);
+          // 上传成功即视为本题解析视频；未保存前标记为本会话上传（可彻底删除）。
+          api.setUploadedId(id, "uploaded");
+          api.setVideoId(id);
+          api.setStatus && api.setStatus("uploaded");
+          mountAnalysisVideoArea(mount, api);
+        });
+        avUppy.on("upload-error", (file, error) => {
+          console.error("av-upload-error", error);
+          toast(error?.message || "上传失败，请重试。", "error");
+        });
+      }
+
+      /** 解析视频区入口：按当前绑定态渲染卡片或上传区；只读态只展示不编辑。 */
+      function mountAnalysisVideoArea(mount, api) {
+        if (api.videoId()) {
+          renderAvCard(mount, api, { readonly: modalReadOnly });
+        } else if (modalReadOnly) {
+          mount.innerHTML = '<p class="muted">未配置解析视频。</p>';
+        } else {
+          renderAvUploader(mount, api);
+        }
+      }
+
+      /** 全局销毁（换题/关弹窗时调用）：释放 Uppy 与 videojs 实例。 */
+      function destroyAnalysisVideoArea() {
+        avUppy?.destroy?.();
+        avUppy = null;
+        avPlayer?.dispose?.();
+        avPlayer = null;
+      }
+
+      // 填空：MathLive placeholder 的唯一标识是主键；位置变化后答案仍与原标识关联。
+      // 题干编辑器同时接受可视空位（___ 或 {{blank}}），保存前统一转为稳定标识。
+      // 注意：连续空格不再识别为空位——会误判正文双空格、行首缩进、行尾硬换行、行内代码等。
+      // 花括号内允许有内容（如 \placeholder[blank_1]{提示}），与后端 BLANK_KEY_RE 保持一致；
+      // normalizeFillStem 会在保存前收紧为空花括号的标准格式。
+      const FILL_PLACEHOLDER_RE = /\\placeholder\s*\[\s*([A-Za-z][A-Za-z0-9_-]{0,63})\s*\]\s*\{\s*[^{}]*\s*\}/g;
+      const VISUAL_BLANK_RE = /\{\{blank\}\}|_{3,}/g;
+
+      function fillKeysFromStem(stem) {
+        return [...stem.matchAll(FILL_PLACEHOLDER_RE)].map((match) => match[1]);
+      }
+
+      function nextFillBlankKey(stem) {
+        const usedKeys = new Set(fillKeysFromStem(stem));
+        let index = 1;
+        while (usedKeys.has(`blank_${index}`)) index += 1;
+        return `blank_${index}`;
+      }
+
+      function normalizeFillStem(stem) {
+        // 先收紧手工输入的 placeholder，保证前后端保存同一种格式。
+        let normalized = stem.replace(FILL_PLACEHOLDER_RE, (_, key) => `\\placeholder[${key}]{}`);
+        const usedKeys = new Set(fillKeysFromStem(normalized));
+        let nextAutoKey = 1;
+        const makeMarker = () => {
+          let key;
+          do {
+            key = `blank_auto_${nextAutoKey++}`;
+          } while (usedKeys.has(key));
+          usedKeys.add(key);
+          return `\\placeholder[${key}]{}`;
+        };
+
+        // Markdown 是纯文本；代码围栏内的缩进和下划线不能被识别成空位。
+        let inFence = false;
+        return normalized
+          .split("\n")
+          .map((line) => {
+            if (/^\s*(`{3,}|~{3,})/.test(line)) {
+              inFence = !inFence;
+              return line;
+            }
+            return inFence ? line : line.replace(VISUAL_BLANK_RE, makeMarker);
+          })
+          .join("\n");
+      }
+
+      // 一个空常有多种写法（0.5 与 1/2、列表与 list）。界面上仍是一个输入框，
+      // 多种写法用 | 分隔；答案里真要出现竖线就写 \|。发请求时拆成结构化的
+      // { answer: 第一条, alternatives: 其余 }——库里存结构，界面留一个框。
+      // 判分时几条写法平权，但展示给学员的「正确答案」永远是第一条。
+      function splitBlankAnswers(text) {
+        return String(text ?? "")
+          .split(/(?<!\\)\|/) // 前面带反斜杠的竖线不当分隔符
+          .map((item) => item.replace(/\\\|/g, "|").trim())
+          .filter(Boolean);
+      }
+
+      function joinBlankAnswers(answer, alternatives) {
+        return [answer, ...(alternatives || [])]
+          .filter((item) => item != null && item !== "")
+          .map((item) => String(item).replace(/\|/g, "\\|"))
+          .join(" | ");
+      }
+
+      function syncFillBlanksFor(form, answersByKey = new Map()) {
+        form.stem = normalizeFillStem(form.stem);
+        const keys = fillKeysFromStem(form.stem);
+        form.fillBlanks = keys.map((blank_key, blank_index) => ({
+          blank_index,
+          blank_key,
+          answer: answersByKey.get(blank_key) || "",
+        }));
+        return keys;
+      }
+
+      function syncFillBlanks() {
+        const answersByKey = new Map(
+          formState.fillBlanks.map((blank) => [blank.blank_key, blank.answer]),
+        );
+        return syncFillBlanksFor(formState, answersByKey);
+      }
+
+      // =====================================================================
+      // 四、类型切换：保留通用标签区，只清空题型专属字段
+      // =====================================================================
+
+      // ============ 知识点 · 悬浮树选择器 ============
+      // 树形结构：三级（阶段 → 主题 → 细知识点）；选中项只存三级叶子 id（扁平数组进 payload）。
+      // 一级 = 学习阶段（C++ 基础 / CSP-J / CSP-S / NOIP），带难度徽标；二级 = 主题（级联半选）；
+      // 三级 = 叶子。可由 GET /api/admin/tags 覆盖（后端按 parent_id 还原同一结构）。
+      const KNOWLEDGE_TREE = [
+  {
+    "num": "0",
+    "name": "C++ 编程语言基础",
+    "badge": "前置基础",
+    "children": [
+      {
+        "num": "0.1",
+        "name": "程序结构与基本语法",
+        "children": [
+          {
+            "num": "0.1.1",
+            "name": "程序框架",
+            "desc": "#include / using namespace std / main函数 / return 0"
+          },
+          {
+            "num": "0.1.2",
+            "name": "注释规范",
+            "desc": "单行// / 多行/* */"
+          },
+          {
+            "num": "0.1.3",
+            "name": "基本输入输出",
+            "desc": "cin / cout / scanf / printf / 格式化输出"
+          }
+        ]
+      },
+      {
+        "num": "0.2",
+        "name": "变量、常量与数据类型",
+        "children": [
+          {
+            "num": "0.2.1",
+            "name": "整型",
+            "desc": "int / long long / 范围与溢出 / unsigned"
+          },
+          {
+            "num": "0.2.2",
+            "name": "浮点型",
+            "desc": "float / double / 精度问题 / 科学计数法"
+          },
+          {
+            "num": "0.2.3",
+            "name": "字符与布尔",
+            "desc": "char / ASCII码 / bool / 逻辑值"
+          },
+          {
+            "num": "0.2.4",
+            "name": "常量",
+            "desc": "const / #define / 字面量"
+          },
+          {
+            "num": "0.2.5",
+            "name": "类型转换",
+            "desc": "隐式转换 / 强制转换 / 精度丢失"
+          }
+        ]
+      },
+      {
+        "num": "0.3",
+        "name": "运算符与表达式",
+        "children": [
+          {
+            "num": "0.3.1",
+            "name": "算术运算符",
+            "desc": "+ - * / % / 自增自减++ --"
+          },
+          {
+            "num": "0.3.2",
+            "name": "关系运算符",
+            "desc": "== != > < >= <="
+          },
+          {
+            "num": "0.3.3",
+            "name": "逻辑运算符",
+            "desc": "&& || ! / 短路求值"
+          },
+          {
+            "num": "0.3.4",
+            "name": "赋值运算符",
+            "desc": "= / += -= *= /= %="
+          },
+          {
+            "num": "0.3.5",
+            "name": "运算符优先级与结合性"
+          },
+          {
+            "num": "0.3.6",
+            "name": "条件运算符",
+            "desc": "? : 三目运算符"
+          }
+        ]
+      },
+      {
+        "num": "0.4",
+        "name": "控制结构",
+        "children": [
+          {
+            "num": "0.4.1",
+            "name": "顺序结构",
+            "desc": "语句逐条执行"
+          },
+          {
+            "num": "0.4.2",
+            "name": "分支结构",
+            "desc": "if / if-else / if-else if-else / switch-case"
+          },
+          {
+            "num": "0.4.3",
+            "name": "循环结构",
+            "desc": "for / while / do-while / 循环嵌套 / break / continue"
+          }
+        ]
+      },
+      {
+        "num": "0.5",
+        "name": "数组与字符串",
+        "children": [
+          {
+            "num": "0.5.1",
+            "name": "一维数组",
+            "desc": "定义 / 初始化 / 遍历 / 边界检查"
+          },
+          {
+            "num": "0.5.2",
+            "name": "二维数组与多维数组",
+            "desc": "定义 / 遍历 / 矩阵操作"
+          },
+          {
+            "num": "0.5.3",
+            "name": "字符数组与C风格字符串",
+            "desc": "char[] / gets/puts / str系列函数"
+          },
+          {
+            "num": "0.5.4",
+            "name": "string类",
+            "desc": "定义 / 输入输出 / 拼接 / 查找 / 截取 / 比较"
+          },
+          {
+            "num": "0.5.5",
+            "name": "数组与字符串的常用操作",
+            "desc": "排序 / 去重 / 反转"
+          }
+        ]
+      },
+      {
+        "num": "0.6",
+        "name": "函数",
+        "children": [
+          {
+            "num": "0.6.1",
+            "name": "函数定义与调用",
+            "desc": "返回值 / 参数列表 / 函数原型"
+          },
+          {
+            "num": "0.6.2",
+            "name": "参数传递",
+            "desc": "值传递 / 引用传递 & / 指针传递"
+          },
+          {
+            "num": "0.6.3",
+            "name": "作用域与生命周期",
+            "desc": "局部变量 / 全局变量 / 静态变量"
+          },
+          {
+            "num": "0.6.4",
+            "name": "函数重载",
+            "desc": "同名不同参"
+          },
+          {
+            "num": "0.6.5",
+            "name": "内联函数",
+            "desc": "inline / 宏函数对比"
+          }
+        ]
+      },
+      {
+        "num": "0.7",
+        "name": "指针与引用",
+        "children": [
+          {
+            "num": "0.7.1",
+            "name": "指针基础",
+            "desc": "定义 / 取地址& / 解引用* / 空指针NULL/nullptr"
+          },
+          {
+            "num": "0.7.2",
+            "name": "指针与数组",
+            "desc": "数组名即指针 / 指针算术"
+          },
+          {
+            "num": "0.7.3",
+            "name": "动态内存分配",
+            "desc": "new / delete / new[] / delete[]"
+          },
+          {
+            "num": "0.7.4",
+            "name": "引用",
+            "desc": "定义 / 与指针的区别 / 作为函数参数"
+          }
+        ]
+      },
+      {
+        "num": "0.8",
+        "name": "结构体与联合体",
+        "children": [
+          {
+            "num": "0.8.1",
+            "name": "结构体定义与使用",
+            "desc": "struct / 成员访问 . / 嵌套结构体"
+          },
+          {
+            "num": "0.8.2",
+            "name": "结构体数组与指针"
+          },
+          {
+            "num": "0.8.3",
+            "name": "联合体",
+            "desc": "union / 共用内存"
+          }
+        ]
+      },
+      {
+        "num": "0.9",
+        "name": "文件操作",
+        "children": [
+          {
+            "num": "0.9.1",
+            "name": "文件重定向",
+            "desc": "freopen / 标准输入输出重定向"
+          },
+          {
+            "num": "0.9.2",
+            "name": "文件流",
+            "desc": "ifstream / ofstream / fstream / 读写操作"
+          },
+          {
+            "num": "0.9.3",
+            "name": "输入输出优化",
+            "desc": "ios::sync_with_stdio(false) / cin.tie(nullptr)"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "num": "1",
+    "name": "CSP-J 入门级",
+    "badge": "难度 1~5 · 普及组",
+    "children": [
+      {
+        "num": "1.1",
+        "name": "计算机基础知识",
+        "hint": "初赛重点，占比约 20%",
+        "children": [
+          {
+            "num": "1.1.1",
+            "name": "计算机组成",
+            "desc": "CPU / 存储器RAM/ROM/Cache / 输入输出设备"
+          },
+          {
+            "num": "1.1.2",
+            "name": "存储单位与换算",
+            "desc": "bit / Byte / KB / MB / GB / TB"
+          },
+          {
+            "num": "1.1.3",
+            "name": "数制与编码",
+            "desc": "二进制 / 八进制 / 十进制 / 十六进制 / 相互转换"
+          },
+          {
+            "num": "1.1.4",
+            "name": "原码 / 反码 / 补码",
+            "desc": "表示范围 / 补码加减法"
+          },
+          {
+            "num": "1.1.5",
+            "name": "位运算基础",
+            "desc": "& | ^ ~ << >> / 优先级 / 常用技巧"
+          },
+          {
+            "num": "1.1.6",
+            "name": "计算机网络基础",
+            "desc": "OSI模型 / TCP/IP / 域名 / URL"
+          },
+          {
+            "num": "1.1.7",
+            "name": "操作系统基础",
+            "desc": "进程管理 / 文件管理 / 常用Linux命令"
+          },
+          {
+            "num": "1.1.8",
+            "name": "计算机历史与人物",
+            "desc": "冯·诺依曼 / 图灵 / 计算机发展史"
+          }
+        ]
+      },
+      {
+        "num": "1.2",
+        "name": "C++ 竞赛语法进阶",
+        "hint": "复赛编程基础",
+        "children": [
+          {
+            "num": "1.2.1",
+            "name": "万能头文件",
+            "desc": "#include <bits/stdc++.h>"
+          },
+          {
+            "num": "1.2.2",
+            "name": "STL 入门容器",
+            "desc": "vector / stack / queue / pair"
+          },
+          {
+            "num": "1.2.3",
+            "name": "STL 常用算法",
+            "desc": "sort / reverse / max/min / swap"
+          },
+          {
+            "num": "1.2.4",
+            "name": "范围for循环",
+            "desc": "for (auto x : vec)"
+          }
+        ]
+      },
+      {
+        "num": "1.3",
+        "name": "基础数据结构",
+        "hint": "占比约 20%",
+        "children": [
+          {
+            "num": "1.3.1",
+            "name": "线性表",
+            "desc": "数组 / 链表（单链表/双链表） / 增删改查操作"
+          },
+          {
+            "num": "1.3.2",
+            "name": "栈",
+            "desc": "LIFO / 压栈弹栈 / 括号匹配 / 表达式求值"
+          },
+          {
+            "num": "1.3.3",
+            "name": "队列",
+            "desc": "FIFO / 入队出队 / BFS应用 / 双端队列"
+          },
+          {
+            "num": "1.3.4",
+            "name": "二叉树",
+            "desc": "定义 / 度 / 深度 / 叶子节点 / 满二叉树与完全二叉树"
+          },
+          {
+            "num": "1.3.5",
+            "name": "二叉树的遍历",
+            "desc": "前序 / 中序 / 后序 / 层序 —— 递归与迭代"
+          },
+          {
+            "num": "1.3.6",
+            "name": "哈夫曼树",
+            "desc": "带权路径长度 / 哈夫曼编码"
+          },
+          {
+            "num": "1.3.7",
+            "name": "图的存储",
+            "desc": "邻接矩阵 / 邻接表"
+          },
+          {
+            "num": "1.3.8",
+            "name": "图的遍历",
+            "desc": "DFS深度优先 / BFS广度优先 / 连通分量"
+          }
+        ]
+      },
+      {
+        "num": "1.4",
+        "name": "基础算法",
+        "hint": "占比约 30%",
+        "children": [
+          {
+            "num": "1.4.1",
+            "name": "枚举",
+            "desc": "穷举法 / 枚举优化 / 状态枚举"
+          },
+          {
+            "num": "1.4.2",
+            "name": "模拟",
+            "desc": "过程模拟 / 场景还原 / 日期推算"
+          },
+          {
+            "num": "1.4.3",
+            "name": "排序算法",
+            "desc": "选择 / 冒泡 / 插入 / 计数排序 / sort自定义比较"
+          },
+          {
+            "num": "1.4.4",
+            "name": "二分查找",
+            "desc": "有序序列 / 二分答案 / lower_bound/upper_bound"
+          },
+          {
+            "num": "1.4.5",
+            "name": "递推",
+            "desc": "斐波那契 / 递推公式 / 递推与递归的转换"
+          },
+          {
+            "num": "1.4.6",
+            "name": "递归",
+            "desc": "递归三要素 / 递归终止条件 / 递归与栈"
+          },
+          {
+            "num": "1.4.7",
+            "name": "贪心",
+            "desc": "局部最优→全局最优 / 活动安排 / 找零钱 / 正确性证明"
+          },
+          {
+            "num": "1.4.8",
+            "name": "高精度计算",
+            "desc": "大整数加减乘除 / 竖式模拟"
+          },
+          {
+            "num": "1.4.9",
+            "name": "前缀和与差分",
+            "desc": "一维/二维前缀和 / 区间加差分"
+          }
+        ]
+      },
+      {
+        "num": "1.5",
+        "name": "基础数学",
+        "children": [
+          {
+            "num": "1.5.1",
+            "name": "质数与合数",
+            "desc": "判断质数 / 质因数分解"
+          },
+          {
+            "num": "1.5.2",
+            "name": "质数筛法",
+            "desc": "埃氏筛 / 欧拉筛/线性筛"
+          },
+          {
+            "num": "1.5.3",
+            "name": "最大公约数与最小公倍数",
+            "desc": "GCD / LCM / 欧几里得算法/辗转相除法"
+          },
+          {
+            "num": "1.5.4",
+            "name": "排列与组合",
+            "desc": "排列数A / 组合数C / 加法原理与乘法原理"
+          },
+          {
+            "num": "1.5.5",
+            "name": "概率与期望基础",
+            "desc": "古典概型 / 期望定义与计算"
+          },
+          {
+            "num": "1.5.6",
+            "name": "集合运算",
+            "desc": "交/并/补 / 容斥原理初步"
+          }
+        ]
+      },
+      {
+        "num": "1.6",
+        "name": "初赛专项",
+        "hint": "CSP-J 第一轮笔试",
+        "children": [
+          {
+            "num": "1.6.1",
+            "name": "单项选择题",
+            "desc": "计算机基础 / C++语法 / 数据结构与算法 / 数学"
+          },
+          {
+            "num": "1.6.2",
+            "name": "程序阅读题",
+            "desc": "阅读代码写输出 / 跟踪变量变化 / 时间复杂度分析"
+          },
+          {
+            "num": "1.6.3",
+            "name": "完善程序题",
+            "desc": "补全代码 / 边界条件 / 算法逻辑填空"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "num": "2",
+    "name": "CSP-S 提高级",
+    "badge": "难度 5~8 · 提高组",
+    "children": [
+      {
+        "num": "2.1",
+        "name": "进阶数据结构",
+        "children": [
+          {
+            "num": "2.1.1",
+            "name": "二叉搜索树 BST",
+            "desc": "查找 / 插入 / 删除 / 中序有序性"
+          },
+          {
+            "num": "2.1.2",
+            "name": "堆与优先队列",
+            "desc": "大根堆/小根堆 / priority_queue / 堆排序"
+          },
+          {
+            "num": "2.1.3",
+            "name": "并查集",
+            "desc": "路径压缩 / 按秩合并 / 连通性与环检测"
+          },
+          {
+            "num": "2.1.4",
+            "name": "树状数组",
+            "desc": "单点修改 / 区间查询 / 离散化"
+          },
+          {
+            "num": "2.1.5",
+            "name": "线段树",
+            "desc": "区间修改 / 区间查询 / lazy标记 / 动态开点"
+          },
+          {
+            "num": "2.1.6",
+            "name": "哈希表",
+            "desc": "unordered_map / unordered_set / 哈希冲突 / 自定义哈希"
+          },
+          {
+            "num": "2.1.7",
+            "name": "单调栈与单调队列",
+            "desc": "维护极值 / 滑动窗口"
+          },
+          {
+            "num": "2.1.8",
+            "name": "bitset",
+            "desc": "位集合 / 复杂度O(n/w) / 01背包优化"
+          }
+        ]
+      },
+      {
+        "num": "2.2",
+        "name": "进阶算法",
+        "children": [
+          {
+            "num": "2.2.1",
+            "name": "排序进阶",
+            "desc": "快速排序 / 归并排序 / 基数排序 / 排序稳定性"
+          },
+          {
+            "num": "2.2.2",
+            "name": "二分进阶",
+            "desc": "二分答案 / 二分查找变体 / 实数二分"
+          },
+          {
+            "num": "2.2.3",
+            "name": "倍增法",
+            "desc": "LCA最近公共祖先 / RMQ区间最值 / 快速幂"
+          },
+          {
+            "num": "2.2.4",
+            "name": "分治",
+            "desc": "归并 / 快速排序 / 最大子段和 / CDQ分治"
+          }
+        ]
+      },
+      {
+        "num": "2.3",
+        "name": "动态规划 DP",
+        "hint": "核心考点，几乎必考",
+        "children": [
+          {
+            "num": "2.3.1",
+            "name": "线性DP",
+            "desc": "最长上升子序列LIS / 最长公共子序列LCS / 最大子段和"
+          },
+          {
+            "num": "2.3.2",
+            "name": "背包DP",
+            "desc": "0/1背包 / 完全背包 / 多重背包 / 分组背包 / 依赖背包"
+          },
+          {
+            "num": "2.3.3",
+            "name": "区间DP",
+            "desc": "矩阵连乘 / 石子合并 / 括号匹配DP"
+          },
+          {
+            "num": "2.3.4",
+            "name": "树形DP",
+            "desc": "树上最大独立集 / 树上背包 / 换根DP"
+          },
+          {
+            "num": "2.3.5",
+            "name": "状压DP",
+            "desc": "状态压缩 / 集合DP / 旅行商问题TSP"
+          },
+          {
+            "num": "2.3.6",
+            "name": "数位DP",
+            "desc": "数字统计 / 不含某数字的个数 / 按位DP"
+          },
+          {
+            "num": "2.3.7",
+            "name": "DP优化",
+            "desc": "滚动数组 / 单调队列优化 / 斜率优化 / 四边形不等式"
+          }
+        ]
+      },
+      {
+        "num": "2.4",
+        "name": "图论",
+        "hint": "高频考点",
+        "children": [
+          {
+            "num": "2.4.1",
+            "name": "图的遍历进阶",
+            "desc": "DFS/BFS / 连通分量 / 二分图判定"
+          },
+          {
+            "num": "2.4.2",
+            "name": "拓扑排序",
+            "desc": "DAG / Kahn算法 / 判环"
+          },
+          {
+            "num": "2.4.3",
+            "name": "最短路径",
+            "desc": "Dijkstra / SPFA / Floyd / 负环检测"
+          },
+          {
+            "num": "2.4.4",
+            "name": "最小生成树",
+            "desc": "Prim / Kruskal"
+          },
+          {
+            "num": "2.4.5",
+            "name": "强连通分量",
+            "desc": "Tarjan / Kosaraju / 缩点"
+          },
+          {
+            "num": "2.4.6",
+            "name": "差分约束",
+            "desc": "不等式转最短路"
+          },
+          {
+            "num": "2.4.7",
+            "name": "最近公共祖先 LCA",
+            "desc": "倍增 / 树链剖分 / Tarjan离线"
+          }
+        ]
+      },
+      {
+        "num": "2.5",
+        "name": "搜索与回溯",
+        "children": [
+          {
+            "num": "2.5.1",
+            "name": "DFS深度优先搜索",
+            "desc": "剪枝优化 / 记忆化搜索"
+          },
+          {
+            "num": "2.5.2",
+            "name": "BFS广度优先搜索",
+            "desc": "最短路 / 状态搜索 / 双向BFS"
+          },
+          {
+            "num": "2.5.3",
+            "name": "回溯法",
+            "desc": "全排列 / 组合 / 子集 / N皇后"
+          },
+          {
+            "num": "2.5.4",
+            "name": "迭代加深与A*",
+            "desc": "IDA* / A*估价函数"
+          }
+        ]
+      },
+      {
+        "num": "2.6",
+        "name": "进阶数学",
+        "children": [
+          {
+            "num": "2.6.1",
+            "name": "快速幂",
+            "desc": "模幂运算 / 矩阵快速幂"
+          },
+          {
+            "num": "2.6.2",
+            "name": "扩展欧几里得",
+            "desc": "exGCD / 不定方程 / 模逆元"
+          },
+          {
+            "num": "2.6.3",
+            "name": "组合数学",
+            "desc": "排列组合计数 / 组合数取模 / 卢卡斯定理Lucas"
+          },
+          {
+            "num": "2.6.4",
+            "name": "同余与模运算",
+            "desc": "同余方程 / 中国剩余定理CRT"
+          },
+          {
+            "num": "2.6.5",
+            "name": "欧拉函数与欧拉定理"
+          },
+          {
+            "num": "2.6.6",
+            "name": "矩阵与行列式",
+            "desc": "矩阵乘法 / 矩阵快速幂 / 高斯消元"
+          }
+        ]
+      },
+      {
+        "num": "2.7",
+        "name": "初赛专项·提高",
+        "hint": "CSP-S 第一轮笔试",
+        "children": [
+          {
+            "num": "2.7.1",
+            "name": "提高级单选",
+            "desc": "覆盖入门级+提高级全部理论考点"
+          },
+          {
+            "num": "2.7.2",
+            "name": "提高级阅读",
+            "desc": "复杂代码 / 递归 / 指针 / 复杂度分析"
+          },
+          {
+            "num": "2.7.3",
+            "name": "提高级完善",
+            "desc": "进阶算法填空 / DP/图论/数据结构代码补全"
+          }
+        ],
+        "desc": "CSP-S 第一轮笔试"
+      }
+    ]
+  },
+  {
+    "num": "3",
+    "name": "NOIP 全国青少年信息学奥林匹克联赛",
+    "badge": "难度 5~10 · 深化",
+    "children": [
+      {
+        "num": "3.1",
+        "name": "高级数据结构",
+        "children": [
+          {
+            "num": "3.1.1",
+            "name": "平衡树",
+            "desc": "Treap / Splay / 伸展树"
+          },
+          {
+            "num": "3.1.2",
+            "name": "树链剖分",
+            "desc": "轻重链剖分 / 路径操作 / 子树操作"
+          },
+          {
+            "num": "3.1.3",
+            "name": "可持久化数据结构",
+            "desc": "主席树 / 可持久化线段树 / 可持久化并查集"
+          },
+          {
+            "num": "3.1.4",
+            "name": "分块与莫队",
+            "desc": "分块思想 / 普通莫队 / 带修莫队"
+          },
+          {
+            "num": "3.1.5",
+            "name": "字符串数据结构",
+            "desc": "Trie树 / AC自动机 / 后缀数组 / SAM后缀自动机"
+          }
+        ]
+      },
+      {
+        "num": "3.2",
+        "name": "高级算法",
+        "children": [
+          {
+            "num": "3.2.1",
+            "name": "网络流",
+            "desc": "最大流Dinic / 最小割 / 费用流"
+          },
+          {
+            "num": "3.2.2",
+            "name": "二分图匹配",
+            "desc": "匈牙利算法 / KM算法"
+          },
+          {
+            "num": "3.2.3",
+            "name": "计算几何基础",
+            "desc": "点/线/多边形 / 凸包 / 半平面交"
+          },
+          {
+            "num": "3.2.4",
+            "name": "字符串匹配",
+            "desc": "KMP / 扩展KMP / Manacher回文算法"
+          },
+          {
+            "num": "3.2.5",
+            "name": "随机化算法",
+            "desc": "模拟退火 / 爬山算法 / 随机贪心"
+          }
+        ]
+      },
+      {
+        "num": "3.3",
+        "name": "动态规划进阶",
+        "hint": "T3/T4 核心",
+        "children": [
+          {
+            "num": "3.3.1",
+            "name": "多维状态DP",
+            "desc": "三维/四维状态设计"
+          },
+          {
+            "num": "3.3.2",
+            "name": "DP与数据结构优化",
+            "desc": "线段树优化DP / 树状数组优化DP"
+          },
+          {
+            "num": "3.3.3",
+            "name": "插头DP / 轮廓线DP",
+            "desc": "棋盘覆盖 / 连通性DP"
+          }
+        ]
+      },
+      {
+        "num": "3.4",
+        "name": "高级图论",
+        "children": [
+          {
+            "num": "3.4.1",
+            "name": "割点与桥",
+            "desc": "Tarjan / 点双连通 / 边双连通"
+          },
+          {
+            "num": "3.4.2",
+            "name": "2-SAT",
+            "desc": "布尔方程求解 / 强连通分量应用"
+          },
+          {
+            "num": "3.4.3",
+            "name": "树上问题进阶",
+            "desc": "树的直径 / 树的重心 / 虚树"
+          }
+        ]
+      },
+      {
+        "num": "3.5",
+        "name": "高级数学",
+        "children": [
+          {
+            "num": "3.5.1",
+            "name": "生成函数与多项式",
+            "desc": "FFT快速傅里叶变换 / NTT"
+          },
+          {
+            "num": "3.5.2",
+            "name": "博弈论",
+            "desc": "SG函数 / Nim游戏 / 组合博弈"
+          },
+          {
+            "num": "3.5.3",
+            "name": "概率与期望DP",
+            "desc": "期望递推 / 高斯消元解期望"
+          },
+          {
+            "num": "3.5.4",
+            "name": "线性基",
+            "desc": "异或空间 / 最大异或和"
+          }
+        ]
+      },
+      {
+        "num": "3.6",
+        "name": "综合应用能力",
+        "hint": "区别于 CSP 的核心",
+        "children": [
+          {
+            "num": "3.6.1",
+            "name": "多知识点融合",
+            "desc": "“数学+图论”“数据结构+DP”缝合题型"
+          },
+          {
+            "num": "3.6.2",
+            "name": "复杂问题建模",
+            "desc": "将实际问题抽象为算法模型"
+          },
+          {
+            "num": "3.6.3",
+            "name": "部分分策略",
+            "desc": "针对数据范围设计不同复杂度解法"
+          },
+          {
+            "num": "3.6.4",
+            "name": "代码调试与对拍",
+            "desc": "构造数据 / 暴力对拍 / 边界测试"
+          }
+        ]
+      }
+    ]
+  }
+];
+
+      // 知识点树选择器：实现在 admin-tagtree.js（触发区 chips + 浮层三级树）。
+      // 叶子 id 由编号生成：0.1.1 → 0-1-1（全树唯一；后端标签驱动时用数据库 id 覆盖）
+      function assignKnowledgeIds(nodes) {
+        nodes.forEach((n) => {
+          n.id = n.num.replace(/\./g, "-");
+          if (n.children) assignKnowledgeIds(n.children);
+        });
+      }
+      assignKnowledgeIds(KNOWLEDGE_TREE);
+      const kt = createKnowledgeTree({
+        els: {
+          trigger: document.getElementById("ktTrigger"),
+          hint: document.getElementById("ktHint"),
+          pop: document.getElementById("ktPop"),
+          filter: document.getElementById("ktFilter"),
+          tree: document.getElementById("ktTree"),
+          summary: document.getElementById("ktSummary"),
+          scrollContext: document.querySelector(".modal-left"),
+        },
+        // 选中项归一化后回写受控表单；Modal 未打开时 formState 为 null。
+        onChange: (ids) => { if (formState) formState.common.knowledge = ids; },
+      });
+      kt.setTree(KNOWLEDGE_TREE); // 本地树兜底，GET /api/admin/tags 成功后覆盖
+
+      function switchType(newType) {
+        // 只重置题型专属字段：通用标签、题干、解析保留；
+        // 题目身份（id/版本/负责人/权限）更不能丢——否则编辑态换题型后
+        // revision 变成 null，后续 PUT 携带的 If-Match 会被后端拒绝。
+        const preserved = {
+          common: formState.common,
+          stem: formState.stem,
+          analysis: formState.analysis,
+          status: formState.status,
+          revision: formState.revision,
+          owner: formState.owner,
+          allowedActions: formState.allowedActions,
+          rejection: formState.rejection,
+          scratch: formState.scratch,
+        };
+        formState = { ...emptyForm(), ...preserved, type: newType };
+        if (newType === "fill") syncFillBlanks(); // 进入填空时按标记重建空位
+        renderAll();
+      }
+
+      document.getElementById("typeGroup").addEventListener("change", (e) => {
+        const input = e.target.closest('input[name="qType"]');
+        if (input) switchType(input.value);
+      });
+      document.querySelectorAll('input[name="qLang"]').forEach((r) => {
+        r.addEventListener("change", () => {
+          formState.subType = document.querySelector('input[name="qLang"]:checked').value;
+          renderAll(); // subType 影响参考代码默认语言
+        });
+      });
+
+      // 通用标签回写 formState.common（切换 type 不受影响）
+      const readCommon = () => {
+        const input = (name) => document.querySelector(`input[name="${name}"]:checked`)?.value;
+        formState.common.difficulty = input("qDifficulty") || "入门";
+        formState.common.source = input("qSource") || "第三方";
+        formState.common.structure = input("qStructure") || "单项知识点";
+      };
+      ["qDifficulty", "qSource", "qStructure"].forEach((name) => {
+        document.querySelectorAll(`input[name="${name}"]`).forEach((r) =>
+          r.addEventListener("change", () => {
+            readCommon();
+          }),
+        );
+      });
+      document.querySelectorAll(".multi-cloud").forEach((cloud) => {
+        const key = cloud.dataset.multi;
+        cloud.addEventListener("click", (e) => {
+          const tk = e.target.closest(".tk");
+          if (!tk) return;
+          tk.classList.toggle("active");
+          const values = formState.common[key];
+          const idx = values.indexOf(tk.dataset.v);
+          if (idx >= 0) values.splice(idx, 1);
+          else values.push(tk.dataset.v);
+        });
+      });
+
+      // =====================================================================
+      // 五、保存/提交：收集 formState 为提交结构（对齐最终组件数据格式）
+      // =====================================================================
+      function buildPayload() {
+        readCommon();
+        syncFillBlanks();
+        const payload = {
+          type: formState.type,
+          sub_type: formState.type === "programming" ? formState.subType : null,
+          common: {
+            ...formState.common,
+            // 知识点：状态存叶子 id，payload 输出名称（后端 tags 表就位后直接存 id）
+            knowledge: formState.common.knowledge.map(kt.nameOf),
+          },
+          stem: formState.stem, // Markdown 源码
+          analysis: formState.analysis,
+          // 解析视频：绑定已上传成功的 video_id；「移除」后为 null（不传则保持后端原值，
+          // 这里显式给出，保证移除操作能真的解绑）。
+          analysis_video_id: formState.analysisVideoId ?? null,
+        };
+        if (formState.type === "choice" || formState.type === "multi_choice") {
+          payload.options = formState.options.map((o) => ({
+            content: o.content,
+            is_correct: o.correct,
+          }));
+        } else if (formState.type === "judge") {
+          payload.options = [
+            { content: "对", is_correct: formState.judgeAnswer === "正确" },
+            { content: "错", is_correct: formState.judgeAnswer === "错误" },
+          ];
+        } else if (formState.type === "fill") {
+          payload.blanks = formState.fillBlanks.map((b) => {
+            // 输入框里是 "0.5 | 1/2" 这样一行，拆成标准答案 + 其它可接受写法
+            const [answer = "", ...alternatives] = splitBlankAnswers(b.answer);
+            return {
+              blank_index: b.blank_index,
+              blank_key: b.blank_key,
+              answer,
+              alternatives,
+            };
+          });
+        } else if (formState.type === "programming") {
+          payload.programming = {
+            title: formState.programming.title,
+            pass_condition: formState.programming.passCondition,
+            input_format: formState.programming.inputFormat,
+            output_format: formState.programming.outputFormat,
+            hints: formState.programming.hints,
+            // ?? 兜底不能省：输入框清空时状态是 null，而后端这两个字段是必填 int，
+            // 直接发 null 会 422，连"保存草稿"都存不上。
+            time_limit_ms: formState.programming.timeLimitMs ?? 1000,
+            memory_limit_mb: formState.programming.memoryLimitMb ?? 256,
+            // 样例不带逐点限制，恒继承题目级
+            samples: formState.programming.samples.map((s) => ({
+              input: s.input,
+              output: s.output,
+            })),
+            ref_code: {
+              cpp: formState.subType === "cpp" ? formState.programming.refCode.cpp : "",
+              python: formState.subType === "python" ? formState.programming.refCode.python : "",
+            },
+            manual_test_cases: formState.programming.manualTestCases.map((t) => ({
+              input: t.input,
+              output: t.output,
+              time_limit_ms: t.timeLimitMs ?? null,
+              memory_limit_mb: t.memoryLimitMb ?? null,
+            })),
+          };
+        }
+        return payload;
+      }
+
+      function scratchPayload() {
+        const s = formState.scratch;
+        const result = buildChallengePayload({
+          title: s.title,
+          instructions_md: s.instructions_md,
+          analysis_video_id: s.analysis_video_id,
+          hints_text: s.hints_text,
+          allowed_extensions: s.allowed_extensions,
+          rules: s.rules,
+          rubric: s.rubric,
+        }).payload;
+        // ChallengePayload 的草稿说明字段是空字符串，不接受 null；发布时后端再强制非空。
+        result.instructions_md = s.instructions_md.trim();
+        return result;
+      }
+
+      function markdownToText(markdown = "") {
+        let text = String(markdown);
+        text = text
+          .replace(/^\s*(?:```|~~~)[^\n]*$/gm, "")
+          .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+          .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+          .replace(/^\s*#{1,6}\s+/gm, "")
+          .replace(/^\s*>\s?/gm, "")
+          .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
+          .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, " ")
+          .replace(FILL_PLACEHOLDER_RE, " ")
+          .replace(/[*_~`|]/g, "");
+        return text.replace(/\s+/g, " ").trim();
+      }
+
+      // 判空一律走这里，别再直接 `!markdownToText(...)`。与后端 _has_content() 同口径：
+      // 图片单独算数，否则纯图题干（几何题就是一张图）和纯图选项（图形选择题）
+      // 会被判成"没填"，在前端就提交不出去。
+      function hasMarkdownContent(markdown = "") {
+        return Boolean(markdownToText(markdown) || /!\[[^\]]*\]\([^)]*\)/.test(String(markdown)));
+      }
+
+      function codeFence(value, language = "text") {
+        return `\n\n\`\`\`${language}\n${value || ""}\n\`\`\``;
+      }
+
+      function buildWholeProblemMarkdown() {
+        const sections = [formState.stem || ""];
+        if (formState.type === "choice" || formState.type === "multi_choice") {
+          sections.push(
+            formState.options
+              .map((option, index) => `${optionLabel(index)}. ${option.content || ""}`)
+              .join("\n"),
+          );
+        } else if (formState.type === "judge") {
+          sections.push("A. 对\nB. 错");
+        } else if (formState.type === "fill") {
+          sections.push(
+            formState.fillBlanks
+              .map((blank, index) => {
+                // 预览里把多种写法摊开成"标准答案（或：…）"，别原样甩一行带竖线的文本
+                const [answer = "", ...alternatives] = splitBlankAnswers(blank.answer);
+                const extra = alternatives.length ? `（或：${alternatives.join("、")}）` : "";
+                return `空 ${index + 1}：${answer}${extra}`;
+              })
+              .join("\n"),
+          );
+        } else if (formState.type === "programming") {
+          const p = formState.programming;
+          const language = formState.subType === "python" ? "python" : "cpp";
+          sections.push(
+            `## ${p.title || "操作题"}\n\n### 输入格式\n${p.inputFormat || ""}\n\n### 输出格式\n${p.outputFormat || ""}\n\n### 提示\n${p.hints || ""}\n\n### 参考代码${codeFence(p.refCode[language], language)}`,
+          );
+          if (p.samples.length) {
+            sections.push(
+              p.samples
+                .map(
+                  (sample, index) =>
+                    `### 样例 ${index + 1}\n输入${codeFence(sample.input)}\n输出${codeFence(sample.output)}`,
+                )
+                .join("\n\n"),
+            );
+          }
+        }
+        if (formState.analysis) sections.push(`## 答案解析\n\n${formState.analysis}`);
+        return sections.filter((section) => section.trim()).join("\n\n");
+      }
+
+      function openWholePreview() {
+        const previewMask = document.getElementById("previewMask");
+        const previewBody = document.getElementById("previewBody");
+        previewBody.replaceChildren();
+        renderMarkdown(previewBody, buildWholeProblemMarkdown());
+        previewMask.hidden = false;
+        previewMask.setAttribute("aria-hidden", "false");
+        document.getElementById("previewClose").focus();
+      }
+
+      function closeWholePreview() {
+        const previewMask = document.getElementById("previewMask");
+        previewMask.hidden = true;
+        previewMask.setAttribute("aria-hidden", "true");
+        document.getElementById("previewBody").replaceChildren();
+      }
+
+      // 内联校验：字段/区块提示的实现在 admin-ui.js；这里只声明区块级路由表。
+      const SECTION_ERROR_SLOTS = [
+        { selectors: '[name="correctOption"], .q-option', slotId: "optionsError" },
+        { selectors: ".blank-answer", slotId: "fillError" },
+        { selectors: ".tc-in", slotId: "tcError" },
+      ];
+      const clearModalErrors = () => clearFieldErrors(SECTION_ERROR_SLOTS.map((rule) => rule.slotId));
+      const showModalErrors = (errors) => showFieldErrors(errors, SECTION_ERROR_SLOTS);
+
+      // 范围与后端 schema 同一套。**草稿也要查**：这不是"填得不完整"，是填了个存不进去的值，
+      // 不拦的话后端回一句英文 pydantic 报错，还落不到具体输入框上。
+      function validateLimits() {
+        const errors = [];
+        if (formState.type !== "programming") return errors;
+        const p = formState.programming;
+        const bad = (value, lo, hi) => value != null && !(Number.isInteger(value) && value >= lo && value <= hi);
+        if (bad(p.timeLimitMs, 100, 10000)) errors.push({ selector: "#pTimeLimit", message: "限时需在 100–10000 ms 之间。" });
+        if (bad(p.memoryLimitMb, 16, 512)) errors.push({ selector: "#pMemoryLimit", message: "内存需在 16–512 MB 之间。" });
+        if (p.manualTestCases.some((item) => bad(item.timeLimitMs, 100, 10000)))
+          errors.push({ selector: ".tc-time", message: "测试点限时需在 100–10000 ms 之间，留空表示继承题目级。" });
+        if (p.manualTestCases.some((item) => bad(item.memoryLimitMb, 16, 512)))
+          errors.push({ selector: ".tc-mem", message: "测试点内存需在 16–512 MB 之间，留空表示继承题目级。" });
+        return errors;
+      }
+
+      function validateForSubmit(status) {
+        if (formState.type === "scratch") {
+          const errors = [];
+          const { errors: payloadErrors } = buildChallengePayload({ ...formState.scratch, hints_text: formState.scratch.hints_text });
+          if (payloadErrors.length) errors.push({ selector: "#scratchTitle", message: payloadErrors[0] });
+          if (status !== "draft") {
+            const missing = publishChecks({ ...formState.scratch, ...scratchPayload() });
+            if (missing.length) errors.push({ selector: "#scratchTitle", message: `发布前请完成：${missing.join("、")}` });
+          }
+          return errors;
+        }
+        // 草稿用于暂存工作，不要求题目已经完整；提交审核才执行完整校验。
+        if (status === "draft") return validateLimits();
+        const errors = validateLimits();
+        const require = (selector, message) => errors.push({ selector, message });
+        if (!hasMarkdownContent(formState.stem)) require("#fStem", "请填写题干。");
+        if (formState.type === "choice" || formState.type === "multi_choice") {
+          const options = formState.options;
+          if (options.length < 2 || options.some((item) => !hasMarkdownContent(item.content)))
+            require(".q-option", "请至少填写两个完整选项。");
+          const correctCount = options.filter((item) => item.correct).length;
+          if (formState.type === "choice" && correctCount !== 1)
+            require('[name="correctOption"]', "选择题必须且只能选择一个正确答案。");
+          if (formState.type === "multi_choice" && correctCount < 1)
+            require('[name="correctOption"]', "请至少选择一个正确答案。");
+        }
+        if (formState.type === "fill") {
+          if (!formState.fillBlanks.length)
+            require("#fStem", "请使用空位标记（\\placeholder[blank_1]{}）、连续下划线或 {{blank}} 定义至少一个空位。");
+          const keys = formState.fillBlanks.map((item) => item.blank_key);
+          if (new Set(keys).size !== keys.length)
+            require("#fStem", "每个填空的 placeholder 标识必须唯一。");
+          // 拆完为空才算没填：只写了个 "|" 或 " | " 拆出来一条都没有，后端会 422
+          if (formState.fillBlanks.some((item) => splitBlankAnswers(item.answer).length === 0))
+            require(".blank-answer", "请填写每个空位的标准答案。");
+        }
+        if (formState.type === "programming") {
+          const p = formState.programming;
+          if (!p.title.trim()) require("#pTitle", "请填写题目标题。");
+          if (!p.inputFormat.trim()) require("#pInput", "请填写输入格式。");
+          if (!p.outputFormat.trim()) require("#pOutput", "请填写输出格式。");
+          if (!p.refCode[formState.subType].trim())
+            require("#pRefCode", `请填写 ${formState.subType === "python" ? "Python" : "C++"} 参考代码。`);
+          if (p.passCondition === "全测试点通过" && formState.subType === "cpp") {
+            const hasImportedTests = (p.testDataPackage?.manifest || []).length > 0;
+            if (!hasImportedTests && !pendingCppZipFile)
+              require("#cppZipInput", "已选择“全测试点通过”，请上传包含 N.in/N.out 的 ZIP。");
+          } else if (p.passCondition === "全测试点通过" && (!p.manualTestCases.length || p.manualTestCases.some((item) => !item.input.trim() || !item.output.trim()))) {
+            require(".tc-in", "已选择“全测试点通过”，请至少填写一个完整测试点。");
+          }
+        }
+        return errors;
+      }
+
+      // 保存期间锁住底部按钮：网络慢时连点会重复创建草稿。
+      function setSaving(busy, activeButtonId) {
+        saving = busy;
+        const scratchMode = formState?.type === "scratch";
+        [
+          ["saveDraftBtn", scratchMode ? "保存挑战草稿" : "保存草稿"],
+          ["submitAuditBtn", scratchMode ? "发布挑战" : "提交审核"],
+        ].forEach(([id, label]) => {
+          const button = document.getElementById(id);
+          button.disabled = busy;
+          button.textContent = busy && id === activeButtonId ? "处理中…" : label;
+        });
+        document.getElementById("modalCancel").disabled = busy;
+      }
+
+      // 保存冲突（409）的三选一交互：confirmDialog 只有确认/取消两个按钮，
+      // 用两段对话框表达三个选择——先问「重新加载」，取消后再问「强制覆盖」，
+      // 再取消则回到表单（改动不丢，老师可以稍后再试）。
+      async function resolveScratchConflict() {
+        const reload = await confirmDialog({
+          title: "保存冲突",
+          message: "这个挑战刚被其他人（或其他标签页）修改过。",
+          detail: "选择「重新加载最新版本」会丢弃你这次的改动，载入最新内容后再编辑；点「取消」可选择强制覆盖保存。",
+          confirmText: "重新加载最新版本",
+        });
+        if (reload) return "reload";
+        const force = await confirmDialog({
+          title: "强制覆盖保存？",
+          message: "会用你当前填写的内容覆盖对方刚才的修改，被覆盖的改动无法找回。",
+          confirmText: "强制覆盖保存",
+          danger: true,
+        });
+        return force ? "force" : null;
+      }
+
+      async function onSave(status) {
+        if (saving) return;
+        const validationErrors = validateForSubmit(status);
+        if (validationErrors.length) {
+          showModalErrors(validationErrors);
+          toast(`还有 ${validationErrors.length} 处必填项未完成。`, "error");
+          return;
+        }
+        clearModalErrors();
+        setSaving(true, status === "draft" ? "saveDraftBtn" : "submitAuditBtn");
+        try {
+          if (formState.type === "scratch") {
+            const s = formState.scratch;
+            const payload = scratchPayload();
+            // 乐观锁带 edit_seq（后端 base_version 比对的是它，不是发布版次 version）。
+            // 保存成功后的响应带着递增后的 edit_seq，Object.assign 一并接住，
+            // 连续多次保存才不会误报 409。
+            let saved;
+            try {
+              saved = s.id
+                ? await scratchRequest(`/scratch/challenges/${s.id}`, { method: "PUT", body: JSON.stringify({ ...payload, base_version: s.edit_seq }) })
+                : await scratchRequest("/scratch/challenges", { method: "POST", body: JSON.stringify(payload) });
+            } catch (error) {
+              const conflict = s.id && /保存冲突/.test(error.message || "");
+              if (!conflict) throw error;
+              const choice = await resolveScratchConflict();
+              if (choice === "reload") {
+                // 丢弃本次改动，载入最新版本继续编辑。
+                await openScratchChallenge(s.id);
+                toast("已载入最新版本，请基于最新内容重新修改。", "info");
+                return;
+              }
+              if (choice !== "force") return; // 老师取消：表单原样保留，改动不丢
+              // 强制覆盖：重新拉取最新 edit_seq 再重试同一个 PUT。
+              const latest = await scratchRequest(`/scratch/challenges/${s.id}`);
+              s.edit_seq = latest.edit_seq;
+              saved = await scratchRequest(`/scratch/challenges/${s.id}`, { method: "PUT", body: JSON.stringify({ ...payload, base_version: s.edit_seq }) });
+            }
+            Object.assign(s, saved); s.hints_text = (saved.hints || []).join("\n");
+            // 保存成功：本会话上传的视频转为正式绑定（analysis_video_id 已入库）
+            formState.uploadedVideoId = null;
+            formState.uploadedVideoStatus = null;
+            if (status === "pending") {
+              const result = await scratchRequest(`/scratch/challenges/${s.id}/submit`, { method: "POST", body: "{}" });
+              Object.assign(s, result.challenge || result);
+              modalReadOnly = true;
+            }
+            initialSnapshot = snapshot();
+            toast(status === "draft" ? "Scratch 挑战草稿已保存，请继续上传初始项目。" : "Scratch 挑战已提交审核。 ");
+            renderAll();
+            // Scratch 用独立挑战表保存，不能指望普通 /problems 的列表自动出现它。
+            // 草稿保存后主动切到汇总草稿区并刷新，教师关闭弹窗就能立即找到刚保存的关卡。
+            if (status === "draft") {
+              zone = "draft";
+              document.querySelectorAll(".zone-tabs button").forEach((button) => {
+                button.classList.toggle("active", button.dataset.zone === zone);
+              });
+              list.page = 1;
+              list.reload();
+            }
+            return;
+          }
+          // 先统一保存为草稿，确保 ZIP 能在草稿状态写入；再单独触发审核流转。
+          const payload = buildPayload();
+          const saved = editingId
+            ? await adminRequest(`/problems/${editingId}`, { method: "PUT", headers: ifMatch(formState.revision), body: JSON.stringify(payload) })
+            : await adminRequest("/problems", { method: "POST", body: JSON.stringify(payload) });
+          editingId = saved.id || editingId;
+          formState.revision = saved.revision;
+          if (formState.type === "programming" && formState.subType === "cpp" && pendingCppZipFile) {
+            const data = new FormData();
+            data.append("archive", pendingCppZipFile);
+            const uploaded = await adminUpload(`/problems/${editingId}/testdata-zip`, data, { headers: ifMatch(formState.revision) });
+            formState.revision = uploaded.revision;
+            pendingCppZipFile = null;
+          }
+          if (status === "pending") {
+            await adminRequest(`/problems/${editingId}/submit`, { method: "POST", headers: ifMatch(formState.revision), body: "{}" });
+          }
+          zone = status === "draft" ? "draft" : "pending";
+          list.page = 1;
+          document.querySelectorAll(".zone-tabs button").forEach((button) =>
+            button.classList.toggle("active", button.dataset.zone === zone),
+          );
+          closeModal();
+          toast(status === "draft" ? "草稿已保存。" : "已提交审核。");
+          list.reload();
+        } catch (error) {
+          const message = error.message || "保存失败，请检查网络或登录状态后重试。";
+          showModalErrors([
+            {
+              selector: formState?.type === "programming" && formState.subType === "cpp" ? "#cppZipInput" : "#fStem",
+              message,
+            },
+          ]);
+          toast(message, "error");
+        } finally {
+          // closeModal 已在成功路径复位表单，这里只需解除按钮锁。
+          setSaving(false);
+        }
+      }
+
+      // =====================================================================
+      // 六、事件绑定
+      // =====================================================================
+      const mask = document.getElementById("modalMask");
+      let editingId = null;
+      const previewMask = document.getElementById("previewMask");
+
+      document.getElementById("addBtn").addEventListener("click", () => openModal());
+      document.getElementById("modalClose").addEventListener("click", handleClose);
+      document.getElementById("modalCancel").addEventListener("click", handleClose);
+      document.getElementById("previewProblemBtn").addEventListener("click", openWholePreview);
+      document.getElementById("previewClose").addEventListener("click", closeWholePreview);
+      mask.addEventListener("click", (e) => {
+        if (e.target === mask) handleClose();
+      });
+      previewMask.addEventListener("click", (e) => {
+        if (e.target === previewMask) closeWholePreview();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        if (!previewMask.hidden) {
+          e.stopPropagation();
+          closeWholePreview();
+          return;
+        }
+        handleClose();
+      });
+      document.getElementById("saveDraftBtn").addEventListener("click", () => onSave("draft"));
+      document.getElementById("submitAuditBtn").addEventListener("click", () => onSave("pending"));
+
+      // 列表展示用的枚举文案；数据全部来自 /api/admin/problems。
+      const TYPE_LABEL = {
+        choice: "选择",
+        multi_choice: "多选",
+        judge: "判断",
+        fill: "填空",
+        programming: "操作题",
+      };
+      const STATUS_LABEL = {
+        draft: ["草稿", "gray"],
+        pending: ["待审核", "warn"],
+        approved: ["已通过", ""],
+      };
+      const DIFFICULTY_LABEL = [
+        // 洛谷同款难度分级（无颜色）
+        "入门",
+        "普及-",
+        "普及/提高-",
+        "普及+/提高",
+        "提高+/省选-",
+        "省选/NOI-",
+        "NOI/NOI+/CTSC",
+      ];
+
+      // 左栏难度胶囊由常量驱动
+      function renderDifficultyPills() {
+        const group = document.getElementById("difficultyGroup");
+        group.innerHTML = DIFFICULTY_LABEL.map(
+          (label) => `
+          <label class="pill">
+            <input type="radio" name="qDifficulty" value="${label}" />
+            <span>${label}</span>
+          </label>`,
+        ).join("");
+        group.querySelectorAll('input[name="qDifficulty"]').forEach((r) =>
+          r.addEventListener("change", () => {
+            if (formState) formState.common.difficulty = r.value;
+          }),
+        );
+      }
+            // ==================== 列表：真实 API 数据（无假数据） ====================
+      // 三态/骨架屏/分页器在 admin-list.js（试卷列表与组卷选题面板复用）；
+      // 本页只负责筛选参数、行渲染与选择/批量逻辑。
+      function displayStem(problem) {
+        const text = markdownToText(problem.stem || problem.title).replace(/\s+/g, " ");
+        // 纯图题干派生不出文字。回落到服务端派生的 title（那里给的是「[图片单选题]」
+        // 这类占位），再兜一个空串——列表里那一行不能是完全空白的。
+        return text || markdownToText(problem.title) || "";
+      }
+      // 默认停在「已通过（已发布）」：日常进题库是找能用的题，草稿/待审核是录入与审核的工作台。
+      let zone = "approved";
+      const selectedIds = new Set();
+      const rows = document.getElementById("problemRows");
+      const emptyTip = document.getElementById("emptyTip");
+      const errorTip = document.getElementById("errorTip");
+      const totalTip = document.getElementById("totalTip");
+
+      document.getElementById("sDifficulty").innerHTML =
+        '<option value="">全部</option>' +
+        DIFFICULTY_LABEL.map((d) => `<option>${d}</option>`).join("");
+      renderDifficultyPills();
+      document.getElementById("sSource").innerHTML =
+        '<option value="">全部</option>' +
+        ["第三方", "原创", "自命题", "洛谷", "NOIP", "CSP-J", "CSP-S", "USACO"]
+          .map((s) => `<option>${s}</option>`)
+          .join("");
+
+      // 审核动作由后端 allowed_actions 决定，前端不放宽；但要把"为什么不能审"讲清楚。
+      function reviewBlockedReason(problem, allowed) {
+        if (problem.status !== "pending" || allowed.has("approve")) return "";
+        const isAuthor = problem.created_by?.id && problem.created_by.id === currentAdmin?.id;
+        return isAuthor
+          ? '<span class="muted action-note" title="职责分离：题目录入人不能审核自己的题，请交由其他审核员处理">不可自审</span>'
+          : '<span class="muted action-note" title="当前角色不具备审核权限，需要 reviewer 或 super_admin">无审核权限</span>';
+      }
+
+      // 行渲染：页面专属（题型/难度/来源/知识点徽标 + 行内动作），三态交给列表组件。
+      function renderProblemRows(items) {
+        rows.innerHTML = items
+          .map((problem) => {
+            if (problem._entity === "scratch") {
+              const title = problem.title || `Scratch 挑战 #${problem.challenge_id}`;
+              const instructions = markdownToText(problem.instructions_md || "").replace(/\s+/g, " ");
+              const scratchLabel = { draft: "草稿", pending: "待审核", published: "已通过" }[problem.status] || problem.status;
+              // 状态动作与既有题目（problems 行）对齐：
+              //   draft → 编辑 / 提交审核 / 删除（仅草稿可提交与直接删）
+              //   pending → 通过 / 打回（审核中不给删除，同题目口径）
+              //   published → 查看（只读）/ 修改（= 撤回成草稿再编辑，同题目的 revise 语义） / 删除（同题目：未引用可删）
+              const scratchActions = problem.status === "draft"
+                ? `<button class="btn-text link" type="button" data-edit-scratch="${problem.challenge_id}">编辑</button><button class="btn-text link" type="button" data-scratch-action="submit" data-scratch-id="${problem.challenge_id}">提交审核</button><button class="btn-text link danger" type="button" data-scratch-action="delete" data-scratch-id="${problem.challenge_id}">删除</button>`
+                : problem.status === "pending"
+                  ? `<button class="btn-text link" type="button" data-scratch-action="approve" data-scratch-id="${problem.challenge_id}">通过</button><button class="btn-text link danger" type="button" data-scratch-action="reject" data-scratch-id="${problem.challenge_id}">打回</button>`
+                  : `<button class="btn-text link" type="button" data-view-scratch="${problem.challenge_id}">查看</button><button class="btn-text link" type="button" data-scratch-action="unpublish" data-scratch-id="${problem.challenge_id}">修改</button><button class="btn-text link danger" type="button" data-scratch-action="delete" data-scratch-id="${problem.challenge_id}">删除</button>`;
+              const scratchRejectFlag = problem.rejection?.reason
+                ? `<span class="reject-flag" title="最近打回：${escapeHtml(problem.rejection.reason)}">⚑</span>`
+                : "";
+              return `
+        <tr data-scratch-row="${problem.challenge_id}">
+          <td><input type="checkbox" class="check row-check" data-scratch-id="${problem.challenge_id}" aria-label="选择 Scratch 挑战 ${escapeHtml(title)}" ${selectedIds.has(problem.id) ? "checked" : ""} /></td>
+          <td>SC-${problem.challenge_id}</td>
+          <td><span class="tag">Scratch</span></td>
+          <td class="cell-clip" title="${escapeHtml(instructions)}"><strong>${escapeHtml(title)}</strong>${instructions ? `<br><span class="muted">${escapeHtml(instructions)}</span>` : ""}</td>
+          <td>—</td><td>原创</td><td>—</td><td>—</td>
+          <td><span class="tag ${problem.status === "pending" ? "warn" : problem.status === "published" ? "" : "gray"}">${scratchLabel}</span>${scratchRejectFlag}</td>
+          <td><div class="row-actions">${scratchActions}</div></td>
+        </tr>`;
+            }
+            const allowed = new Set(problem.allowed_actions || []);
+            const actions = [
+              allowed.has("edit")
+                ? `<button class="btn-text link" type="button" data-edit="${problem.id}">编辑</button>`
+                : `<button class="btn-text link" type="button" data-view="${problem.id}">查看</button>`,
+              allowed.has("approve")
+                ? `<button class="btn-text link" type="button" data-approve="${problem.id}">通过</button>`
+                : "",
+              allowed.has("reject")
+                ? `<button class="btn-text link danger" type="button" data-reject="${problem.id}">打回</button>`
+                : "",
+              // 已发布题的"修改"= 开一份草稿副本；线上内容在副本通过前不变。
+              allowed.has("revise")
+                ? `<button class="btn-text link" type="button" data-revise="${problem.id}">修改</button>`
+                : "",
+              allowed.has("view_revision")
+                ? `<button class="btn-text link" type="button" data-open-revision="${problem.open_revision.id}">查看修订稿</button>`
+                : "",
+              allowed.has("delete")
+                ? `<button class="btn-text link danger" type="button" data-delete="${problem.id}">删除</button>`
+                : "",
+              // 待审题却没有审核动作时必须说明原因：按钮凭空消失只会让人以为界面坏了。
+              reviewBlockedReason(problem, allowed),
+            ].join("");
+            const stem = displayStem(problem);
+            const difficulty = problem.common?.difficulty ?? problem.difficulty ?? "—";
+            const source = problem.common?.source ?? problem.source ?? "—";
+            const knowledge = problem.common?.knowledge || [];
+            // 知识点可能很多，行内只展示两个，其余折叠成 +N 并在 title 里给全量。
+            const knowledgeCell = knowledge.length
+              ? knowledge
+                  .slice(0, 2)
+                  .map((tag) => `<span class="tag gray" style="margin-right:4px">${escapeHtml(tag)}</span>`)
+                  .join("") + (knowledge.length > 2 ? `<span class="muted">+${knowledge.length - 2}</span>` : "")
+              : "—";
+            // 打回原因是录入员最需要的信息，列表里必须能看到，不用打开题目才知道。
+            const rejectFlag = problem.rejection?.reason
+              ? `<span class="reject-flag" title="最近打回：${escapeHtml(problem.rejection.reason)}">⚑</span>`
+              : "";
+            const version = problem.version_no > 1 ? `<span class="muted"> v${problem.version_no}</span>` : "";
+            // 线上这一版正被修订：状态列点明，否则会以为"修改"按钮无故消失。
+            const revisionFlag = problem.open_revision
+              ? `<span class="tag warn" style="margin-left:4px" title="修订稿 #${problem.open_revision.id} ${problem.open_revision.status === "pending" ? "待审核" : "编辑中"}，通过后替换当前版本">修订中</span>`
+              : "";
+            return `
+        <tr data-row="${problem.id}">
+          <td><input type="checkbox" class="check row-check" data-id="${problem.id}" aria-label="选择试题 ${escapeHtml(stem.slice(0, 20))}" ${selectedIds.has(problem.id) ? "checked" : ""} /></td>
+          <td>${escapeHtml(problem.problem_id_no || "—")}${version}</td>
+          <td><span class="tag">${escapeHtml(TYPE_LABEL[problem.type] || problem.type)}</span></td>
+          <td class="cell-clip" title="${escapeHtml(stem)}">${escapeHtml(stem) || '<span class="muted">（未填写题干）</span>'}</td>
+          <td>${escapeHtml(difficulty)}</td>
+          <td>${escapeHtml(source)}</td>
+          <td class="cell-clip">${escapeHtml(problem.owner?.display_name || "未分配")}</td>
+          <td>${knowledgeCell}</td>
+          <td><span class="tag ${STATUS_LABEL[problem.status]?.[1] || "gray"}">${STATUS_LABEL[problem.status]?.[0] || "未知"}</span>${rejectFlag}${revisionFlag}</td>
+          <td><div class="row-actions">${actions}</div></td>
+        </tr>`;
+          })
+          .join("");
+      }
+
+      // 批量条只放行「当前所有勾选项都被后端允许」的动作，避免一半成功一半 403。
+      function renderBatchBar() {
+        const bar = document.getElementById("batchBar");
+        const chosen = list.items.filter((item) => selectedIds.has(item.id));
+        bar.hidden = chosen.length === 0;
+        document.getElementById("batchCount").textContent = chosen.length;
+        [
+          ["batchSubmitBtn", "submit"],
+          ["batchApproveBtn", "approve"],
+          ["batchRejectBtn", "reject"],
+          ["batchDeleteBtn", "delete"],
+        ].forEach(([id, action]) => {
+          document.getElementById(id).hidden =
+            !chosen.length || !chosen.every((item) => (item.allowed_actions || []).includes(action));
+        });
+      }
+
+      const list = createPagedList({
+        els: {
+          rows,
+          emptyTip,
+          errorTip,
+          errorText: document.getElementById("errorText"),
+          totalTip,
+          prevBtn: document.getElementById("prevPageBtn"),
+          nextBtn: document.getElementById("nextPageBtn"),
+          retryBtn: document.getElementById("retryBtn"),
+          pageSizeSelect: document.getElementById("pageSize"),
+          checkAll: document.getElementById("checkAll"),
+        },
+        skeletonCols: 10,
+        fetchPage: async ({ page, size }) => {
+          const params = new URLSearchParams({ status: zone, page, size });
+          const get = (id) => document.getElementById(id).value.trim();
+          if (get("sKeyword")) params.set("keyword", get("sKeyword"));
+          if (get("sType")) params.set("type", get("sType"));
+          if (get("sDifficulty")) params.set("difficulty", get("sDifficulty"));
+          if (get("sSource")) params.set("source", get("sSource"));
+          if (get("sTag")) params.set("knowledge", get("sTag"));
+          if (get("sOwner")) params.set("owner_id", get("sOwner"));
+          // 挑战没有难度/来源/知识点/负责人这些字段，挑战接口也筛不了；这些条件一旦生效
+          // 还把挑战并进来，就会出现「筛了却筛不掉」的行，总数也跟着虚高。关键词两边都支持。
+          const problemOnlyFilter = ["sType", "sDifficulty", "sSource", "sTag", "sOwner"].some((id) => get(id));
+          const scratchStatus = problemOnlyFilter
+            ? null
+            : { draft: "draft", pending: "pending", approved: "published" }[zone];
+          const scratchParams = new URLSearchParams({ status: scratchStatus || "draft", page: "1", size: "100" });
+          if (get("sKeyword")) scratchParams.set("keyword", get("sKeyword"));
+          const [data, statusSummary, scratchDrafts, scratchAll] = await Promise.all([
+            adminRequest(`/problems?${params}`),
+            adminRequest("/problem-status-counts"),
+            scratchStatus
+              ? scratchRequest(`/scratch/challenges?${scratchParams}`)
+              : Promise.resolve(null),
+            // 三个分区的徽标都要把挑战算进去，而上面那次只查了当前分区的一页；
+            // options 是全量精简列表，一次就能按状态分完三份。挂了就退回只数普通题，
+            // 不能让徽标这种附属信息把整张列表拖进 error 态。
+            scratchRequest("/scratch/challenges/options").catch(() => null),
+          ]);
+          // 挑战状态 → 题库分区（archived 不属于任何分区，忽略）。
+          const scratchZone = { draft: "draft", pending: "pending", published: "approved" };
+          const scratchZoneCount = { draft: 0, pending: 0, approved: 0 };
+          (scratchAll?.items || []).forEach((challenge) => {
+            const target = scratchZone[challenge.status];
+            if (target) scratchZoneCount[target] += 1;
+          });
+          // 徽标是「分区总量」：普通题 + Scratch 挑战，与 /problem-status-counts 同口径
+          // 不随筛选变化（筛选后的条数由分页器的「共 N 条」负责）。
+          Object.entries(statusSummary.counts || {}).forEach(([status, count]) => {
+            const node = document.getElementById(`${status}Count`);
+            if (node) node.textContent = Number(count) + (scratchZoneCount[status] || 0);
+          });
+          if (scratchDrafts) {
+            // Scratch 的提交/审核状态机与普通题不同，故只把它作为只读的题库行汇总；
+            // 编辑仍走挑战接口，批量普通题动作也不会误作用到它。
+            const scratchItems = (scratchDrafts.items || []).map((challenge) => ({
+              _entity: "scratch",
+              id: `scratch-${challenge.id}`,
+              challenge_id: challenge.id,
+              type: "scratch",
+              title: challenge.title,
+              instructions_md: challenge.instructions_md,
+              status: challenge.status,
+              allowed_actions: challenge.status === "draft"
+                ? ["submit", "delete"]
+                : challenge.status === "pending"
+                  ? ["approve", "reject"]
+                  : ["revise"],
+            }));
+            // Scratch 项钉在第一页展示一次，不随翻页移动，因此走 extra_total 而不是 total：
+            // 页数只按普通题算（挑战不占页），条数把挑战算上。加进 total 会凭空多出一页空页
+            //（普通题在 ceil(P/size) 页就翻完了，多出来的那页请求的是越界的 offset）。
+            // 徽标不在这里写：这里只知道当前分区的挑战数，写谁都是把别的分区写成假数
+            //（旧代码无条件写 draftCount，默认停在「已通过」时就把已通过的总数写进了草稿徽标，
+            // 于是草稿显示 6、点进去只有 1）。三个分区统一在上面按 options 的全量状态分布算。
+            if (page === 1) data.items = [...scratchItems, ...(data.items || [])];
+            data.extra_total = Number(scratchDrafts.total || 0);
+          }
+          return data;
+        },
+        renderRows: renderProblemRows,
+        onBeforeLoad: () => selectedIds.clear(),
+        afterRender: () => renderBatchBar(),
+      });
+
+      document.querySelectorAll(".zone-tabs button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll(".zone-tabs button")
+            .forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          zone = btn.dataset.zone;
+          list.page = 1;
+          list.reload();
+        });
+      });
+      document.getElementById("searchBtn").addEventListener("click", () => {
+        list.page = 1;
+        list.reload();
+      });
+      document.getElementById("sKeyword").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          list.page = 1;
+          list.reload();
+        }
+      });
+      document.getElementById("resetBtn").addEventListener("click", () => {
+        ["sKeyword", "sType", "sDifficulty", "sSource", "sTag", "sOwner"].forEach(
+          (id) => (document.getElementById(id).value = ""),
+        );
+        document.querySelectorAll(".sel-combo input").forEach((input) => (input.value = ""));
+        document.querySelectorAll(".sel-combo-drop").forEach((drop) => (drop.hidden = true));
+        list.page = 1;
+        list.reload();
+      });
+      document.getElementById("checkAll").addEventListener("change", (e) => {
+        selectedIds.clear();
+        if (e.target.checked) list.items.forEach((item) => selectedIds.add(item.id));
+        document
+          .querySelectorAll("#problemRows .row-check")
+          .forEach((el) => (el.checked = e.target.checked));
+        renderBatchBar();
+      });
+      rows.addEventListener("change", (e) => {
+        const box = e.target.closest(".row-check");
+        if (!box) return;
+        const id = box.dataset.scratchId ? `scratch-${box.dataset.scratchId}` : Number(box.dataset.id);
+        if (box.checked) selectedIds.add(id);
+        else selectedIds.delete(id);
+        document.getElementById("checkAll").checked =
+          list.items.length > 0 && list.items.every((item) => selectedIds.has(item.id));
+        renderBatchBar();
+      });
+      document.getElementById("batchClearBtn").addEventListener("click", () => {
+        selectedIds.clear();
+        document.querySelectorAll("#problemRows .row-check").forEach((el) => (el.checked = false));
+        document.getElementById("checkAll").checked = false;
+        renderBatchBar();
+      });
+
+      // 批量执行：逐条串行调用，单条失败不影响其余，最后汇总结果。
+      async function runBatch(action, { title, message, confirmText, danger }) {
+        const targets = list.items.filter(
+          (item) => selectedIds.has(item.id) && (item.allowed_actions || []).includes(action),
+        );
+        if (!targets.length) return;
+        let reason = null;
+        if (action === "reject") {
+          // 打回必须有原因；批量场景下一条原因适用于本次选中的全部题目。
+          reason = await promptDialog({
+            title,
+            message: `${message}（共 ${targets.length} 题）`,
+            label: "打回原因",
+            placeholder: "这条原因会写入本次选中的每一道题。",
+            confirmText,
+            danger: true,
+          });
+          if (!reason) return;
+        } else {
+          const ok = await confirmDialog({
+            title,
+            message: `${message}（共 ${targets.length} 题）`,
+            detail: "该操作会逐条提交，失败的题目会保留原状态。",
+            confirmText,
+            danger,
+          });
+          if (!ok) return;
+        }
+        const failures = [];
+        for (const item of targets) {
+          try {
+            if (item._entity === "scratch") {
+              if (action === "delete") await scratchRequest(`/scratch/challenges/${item.challenge_id}`, { method: "DELETE" });
+              else await scratchRequest(`/scratch/challenges/${item.challenge_id}/${action}`, { method: "POST", body: "{}" });
+            } else {
+              const options = { headers: ifMatch(item.revision) };
+              if (action === "delete") await adminRequest(`/problems/${item.id}`, { method: "DELETE", ...options });
+              else
+              await adminRequest(`/problems/${item.id}/${action}`, {
+                method: "POST",
+                ...options,
+                body: JSON.stringify(action === "reject" ? { reason } : {}),
+              });
+            }
+          } catch (error) {
+            failures.push(`#${item.id} ${error.message || "失败"}`);
+          }
+        }
+        if (failures.length)
+          toast(`${targets.length - failures.length} 题成功，${failures.length} 题失败：${failures[0]}`, "error");
+        else toast(`已处理 ${targets.length} 题。`);
+        list.reload();
+      }
+
+      document.getElementById("batchSubmitBtn").addEventListener("click", () =>
+        runBatch("submit", { title: "批量提交审核", message: "确认将选中的草稿提交审核？", confirmText: "提交审核" }),
+      );
+      document.getElementById("batchApproveBtn").addEventListener("click", () =>
+        runBatch("approve", { title: "批量通过", message: "确认通过选中的题目并分配对外编号？", confirmText: "全部通过" }),
+      );
+      document.getElementById("batchRejectBtn").addEventListener("click", () =>
+        runBatch("reject", { title: "批量打回", message: "选中的题目将退回录入员修改。", confirmText: "确认打回" }),
+      );
+      document.getElementById("batchDeleteBtn").addEventListener("click", () =>
+        runBatch("delete", {
+          title: "批量删除",
+          message: "删除后题目的答案与测试数据无法恢复。",
+          confirmText: "确认删除",
+          danger: true,
+        }),
+      );
+
+      // 行操作由后端返回的 allowed_actions 决定，前端不自行放宽状态权限。
+      rows.addEventListener("click", async (e) => {
+        const scratchEdit = e.target.closest("[data-edit-scratch]");
+        if (scratchEdit) {
+          openScratchChallenge(Number(scratchEdit.dataset.editScratch));
+          return;
+        }
+        // 「查看」= 打开只读表单（published 挑战打开即只读，与题目「查看」同义）
+        const scratchView = e.target.closest("[data-view-scratch]");
+        if (scratchView) {
+          openScratchChallenge(Number(scratchView.dataset.viewScratch));
+          return;
+        }
+        const scratchAction = e.target.closest("[data-scratch-action]");
+        if (scratchAction) {
+          const action = scratchAction.dataset.scratchAction;
+          const challengeId = Number(scratchAction.dataset.scratchId);
+          const labels = { submit: "提交审核", approve: "通过", reject: "打回", delete: "删除", duplicate: "创建新草稿版本", unpublish: "撤回并修改" };
+          const danger = action === "delete" || action === "reject";
+          // 打回必填原因（对齐题目 reject 口径）：录入员在列表 ⚑ 就能看到为什么被退。
+          let rejectReason = "";
+          if (action === "reject") {
+            rejectReason = await promptDialog({
+              title: "打回 Scratch 挑战",
+              message: "打回原因会写入挑战记录，列表 ⚑ 可见。",
+              label: "打回原因",
+              placeholder: "说明需要修改的地方…",
+              confirmText: "确认打回",
+              danger: true,
+            });
+            if (rejectReason == null) return;
+            rejectReason = String(rejectReason).trim();
+            if (!rejectReason) { toast("请填写打回原因。", "error"); return; }
+          }
+          // 已发布挑战的「修改」= 撤回成草稿再编辑（对齐既有题目 revise 的语义：改的是当前
+          // 这题而不是另起一个）。撤回后学生端立即不可见，改完重新提交审核通过即新版本。
+          const confirm = action === "unpublish"
+            ? {
+                title: "修改已发布挑战",
+                message: `将「${(list.items.find((i) => i._entity === "scratch" && i.challenge_id === challengeId)?.title) || `#${challengeId}`}」撤回为草稿进行修改。`,
+                detail: "撤回后学生端立即不可见；修改完成重新提交审核、通过后即为新版本（版本号 +1），历史判定记录不受影响。若该挑战正被已发布课包使用会被拒绝，请先下架相关课包。",
+                confirmText: "撤回并修改",
+              }
+            : {
+                title: `Scratch 挑战：${labels[action]}`,
+                message: `确认${labels[action]}该 Scratch 挑战？`,
+                confirmText: labels[action],
+                danger,
+              };
+          const ok = await confirmDialog(confirm);
+          if (!ok) return;
+          try {
+            const response = action === "delete"
+              ? await scratchRequest(`/scratch/challenges/${challengeId}`, { method: "DELETE" })
+              : await scratchRequest(`/scratch/challenges/${challengeId}/${action}`, {
+                  method: "POST",
+                  body: JSON.stringify(action === "reject" ? { reason: rejectReason } : {}),
+                });
+            if (action === "duplicate") {
+              toast("已创建 Scratch 挑战草稿版本。");
+              await openScratchChallenge(response.id);
+            } else if (action === "unpublish") {
+              toast("已撤回为草稿，请继续修改。");
+              await openScratchChallenge(challengeId);
+            } else toast(`Scratch 挑战已${labels[action]}。`);
+            list.page = 1;
+            list.reload();
+          } catch (error) { toast(error.message, "error"); }
+          return;
+        }
+        const link = e.target.closest("[data-edit],[data-view],[data-approve],[data-reject],[data-delete],[data-revise],[data-open-revision]");
+        if (!link) return;
+        const id = Number(
+          link.dataset.edit || link.dataset.view || link.dataset.approve || link.dataset.reject || link.dataset.delete || link.dataset.revise || link.dataset.openRevision,
+        );
+        if (!id) return;
+        if (link.dataset.edit || link.dataset.view || link.dataset.openRevision) {
+          openModal(id);
+          return;
+        }
+        const problem = list.items.find((item) => item.id === id);
+        if (!problem) return;
+        const mutation = { headers: ifMatch(problem.revision) };
+        const stem = displayStem(problem).slice(0, 40) || `#${problem.id}`;
+        try {
+          if (link.dataset.revise) {
+            const ok = await confirmDialog({
+              title: "修改已发布题目",
+              message: `将「${stem}」开出一份草稿副本进行修改。`,
+              detail: `线上内容在副本通过审核前保持不变；副本通过后继承编号 ${problem.problem_id_no || ""}，试卷引用不受影响。`,
+              confirmText: "开始修改",
+            });
+            if (!ok) return;
+            const draft = await adminRequest(`/problems/${id}/revise`, { method: "POST", ...mutation, body: "{}" });
+            toast("已创建修订稿，可直接编辑。");
+            await list.reload();
+            openModal(draft.id); // 直接进编辑，省掉"去草稿区找一遍"这一步
+            return;
+          } else if (link.dataset.delete) {
+            const ok = await confirmDialog({
+              title: "删除题目",
+              message: `确认删除「${stem}」？`,
+              detail:
+                problem.status === "approved"
+                  ? "已发布题目删除后，引用它的试卷会失去这道题，且答案与测试数据无法恢复。"
+                  : "题目的答案与测试数据将一并删除，无法恢复。",
+              confirmText: "确认删除",
+              danger: true,
+            });
+            if (!ok) return;
+            await adminRequest(`/problems/${id}`, { method: "DELETE", ...mutation });
+            list.retreatIfEmpty();
+            toast("题目已删除。");
+          } else if (link.dataset.reject) {
+            // 打回原因是审核留痕的一部分，必须走带校验的表单而不是原生 prompt。
+            const reason = await promptDialog({
+              title: "打回修改",
+              message: `将「${stem}」退回给录入员修改。`,
+              label: "打回原因",
+              placeholder: "例如：C 选项与题干矛盾，请重新核对标准答案。",
+              confirmText: "确认打回",
+              danger: true,
+            });
+            if (!reason) return;
+            await adminRequest(`/problems/${id}/reject`, { method: "POST", ...mutation, body: JSON.stringify({ reason }) });
+            toast("已打回，录入员可在草稿区看到原因。");
+          } else {
+            const isRevision = problem.root_problem_id !== problem.id;
+            const ok = await confirmDialog({
+              title: "通过题目",
+              message: `确认通过「${stem}」？`,
+              detail: isRevision
+                ? "这是一份修订稿：通过后将继承线上编号并替换当前发布的版本。"
+                : "通过后系统分配对外题目编号，可用于组卷。",
+              confirmText: "确认通过",
+            });
+            if (!ok) return;
+            await adminRequest(`/problems/${id}/approve`, { method: "POST", ...mutation, body: "{}" });
+            toast("已通过。");
+          }
+          list.reload();
+        } catch (error) {
+          toast(error.message || "操作失败，请重新加载后重试。", "error");
+          list.reload();
+        }
+      });
+
+      // 标签选项 + 知识点树（GET /api/admin/tags；失败回退本地树）
+      async function loadTags() {
+        try {
+          const data = await adminRequest("/tags");
+          const tags = data.knowledge || [];
+          if (tags.length) {
+            // 后端按 parent_id 还原三级结构（一级=阶段，二级=主题，三级=叶子）。
+            const byId = new Map(tags.map((t) => [String(t.id), { id: String(t.id), name: t.name, desc: t.description || "", children: [] }]));
+            const roots = [];
+            tags.forEach((t) => {
+              const node = byId.get(String(t.id));
+              const parent = t.parent_id != null ? byId.get(String(t.parent_id)) : null;
+              if (parent) parent.children.push(node);
+              else roots.push(node);
+            });
+            kt.setTree(roots);
+            // 隐藏 select 仅承载当前筛选值（列表组件读取）；可选值 = 全部节点（阶段/主题/叶子）。
+            const allNames = tags.map((t) => t.name);
+            document.getElementById("sTag").innerHTML =
+              '<option value="">全部</option>' +
+              allNames.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+          }
+        } catch {
+          // 后端不可用时保留本地树与空筛选
+        }
+      }
+
+      async function loadCurrentAdmin() {
+        currentAdmin = await adminMe();
+      }
+
+      async function loadOwners() {
+        const data = await adminRequest("/problem-owners");
+        document.getElementById("sOwner").innerHTML =
+          '<option value="">全部</option>' +
+          (data.items || [])
+            .map((owner) => `<option value="${owner.id}">${escapeHtml(owner.display_name)}</option>`)
+            .join("");
+      }
+
+      // ============ 列表页 · 统一筛选选择器（输入框 + 下拉，方框样式与原生 select 一致） ============
+      // 普通筛选（题型/难度/来源/负责人）= 文本列表；知识点 = 三级树形文本（点节点 = 筛选含全部下级，点 ▶ = 展开）。
+      function initCombo(selectId, options = {}) {
+        const select = document.getElementById(selectId);
+        const wrapper = document.createElement("div");
+        wrapper.className = "sel-combo";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = options.placeholder || "";
+        input.autocomplete = "off";
+        const drop = document.createElement("div");
+        drop.className = "sel-combo-drop";
+        drop.hidden = true;
+        wrapper.append(input, drop);
+        select.hidden = true;
+        select.insertAdjacentElement("afterend", wrapper);
+
+        const getOptions = () =>
+          [...select.options].filter((o) => o.value !== "").map((o) => ({ value: o.value, label: o.text }));
+
+        const selectValue = (value, label) => {
+          select.value = value;
+          input.value = label;
+          drop.hidden = true;
+        };
+
+        const renderDrop = (keyword = "") => {
+          drop.innerHTML = "";
+          if (options.tree) { renderTree(keyword.trim()); return; }
+          const kw = keyword.trim();
+          const hits = kw ? getOptions().filter((o) => o.label.includes(kw)) : getOptions();
+          if (!hits.length) { drop.hidden = true; return; }
+          const all = document.createElement("li");
+          all.textContent = "全部";
+          all.dataset.role = "all";
+          all.addEventListener("click", () => selectValue("", ""));
+          drop.appendChild(all);
+          hits.forEach((o) => {
+            const li = document.createElement("li");
+            li.textContent = o.label;
+            li.addEventListener("click", () => selectValue(o.value, o.label));
+            drop.appendChild(li);
+          });
+          drop.hidden = false;
+        };
+
+        // 知识点：三级树形文本（一级/二级/三级缩进呈现）
+        const treeOpen = new Set();
+        const renderTree = (kw) => {
+          const nodeVisible = (n) => !kw || n.name.includes(kw) || (n.children || []).some(nodeVisible);
+          const renderList = (nodes, depth) => {
+            const ul = document.createElement("ul");
+            nodes.forEach((node) => {
+              if (kw && !nodeVisible(node)) return;
+              const hasKids = node.children && node.children.length;
+              const li = document.createElement("li");
+              if (hasKids) {
+                li.className =
+                  (depth === 0 ? "sel-tree-stage" : "sel-tree-group") +
+                  (treeOpen.has(node.id) || (kw && nodeVisible(node)) ? " open" : "");
+                const row = document.createElement("div");
+                row.className = "sel-tree-row";
+                const arrow = document.createElement("span");
+                arrow.className = "arrow";
+                arrow.textContent = "▶";
+                const name = document.createElement("span");
+                name.className = "sel-tree-name";
+                name.textContent = `${node.num ? node.num + " " : ""}${node.name}`;
+                name.title = node.desc || "";
+                row.append(arrow, name);
+                arrow.addEventListener("click", (e) => {
+                  e.stopPropagation();
+                  li.classList.toggle("open");
+                  if (li.classList.contains("open")) treeOpen.add(node.id);
+                  else treeOpen.delete(node.id);
+                });
+                row.addEventListener("click", () => selectValue(node.name, node.name));
+                li.append(row, renderList(node.children, depth + 1));
+              } else {
+                li.className = "sel-tree-leaf";
+                const name = document.createElement("span");
+                name.className = "sel-tree-name";
+                name.textContent = `${node.num ? node.num + " " : ""}${node.name}`;
+                name.title = node.desc || "";
+                li.append(name);
+                li.addEventListener("click", () => selectValue(node.name, node.name));
+              }
+              ul.appendChild(li);
+            });
+            return ul;
+          };
+          const list = renderList(kt.getTreeData(), 0);
+          list.className = "sel-tree";
+          drop.appendChild(list);
+          drop.hidden = list.children.length === 0;
+        };
+
+        input.addEventListener("focus", () => renderDrop(input.value));
+        input.addEventListener("input", () => renderDrop(input.value));
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            const first = [...drop.querySelectorAll("li")].find((li) => li.dataset.role !== "all");
+            if (first) (first.querySelector(".sel-tree-row") || first).click();
+          } else if (e.key === "Escape") {
+            drop.hidden = true;
+          }
+        });
+        document.addEventListener("mousedown", (e) => {
+          if (!wrapper.contains(e.target)) drop.hidden = true;
+        });
+      }
+      // 统一初始化（隐藏原生 select 仅承载筛选值，列表组件/reset 逻辑不变）
+      initCombo("sType");
+      initCombo("sDifficulty");
+      initCombo("sSource", { placeholder: "输入筛选，如：洛谷" });
+      initCombo("sOwner", { placeholder: "输入负责人筛选" });
+      initCombo("sTag", { tree: true, placeholder: "输入筛选，如：背包" });
+
+      // 引导：登录态/负责人/标签任一失败都不应让整页停在空白，
+      // 列表照常加载，缺失的下拉项由各自的兜底逻辑处理。
+      async function bootstrap() {
+        const results = await Promise.allSettled([loadCurrentAdmin(), loadOwners(), loadTags()]);
+        const failed = results.find((item) => item.status === "rejected");
+        if (failed) toast(failed.reason?.message || "部分筛选项加载失败。", "error");
+        await list.reload();
+        if (new URLSearchParams(location.search).get("mode") === "scratch") openModal(null, "scratch");
+      }
+      bootstrap();
+    </script>
+  </body>
+</html>
