@@ -1,12 +1,15 @@
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -1803,3 +1806,108 @@ class MathGameSession(Base):
     count_wrong: Mapped[int] = mapped_column(Integer, default=0)
     max_combo: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClassGroup(Base):
+    """班级主表；关系历史由 ClassMember / ClassTeacher 保留。"""
+
+    __tablename__ = "class_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("courses.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="draft", index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active', 'archived')", name="ck_class_groups_status"
+        ),
+        CheckConstraint(
+            "end_at IS NULL OR start_at IS NULL OR end_at >= start_at",
+            name="ck_class_groups_time_range",
+        ),
+    )
+
+
+class ClassMember(Base):
+    """学生入退班关系；退班只结束当前关系，不删除历史行。"""
+
+    __tablename__ = "class_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("class_groups.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="active", index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint("status IN ('active', 'left')", name="ck_class_members_status"),
+        CheckConstraint(
+            "left_at IS NULL OR left_at >= joined_at", name="ck_class_members_time_range"
+        ),
+        CheckConstraint(
+            "(status = 'active' AND left_at IS NULL) OR (status = 'left' AND left_at IS NOT NULL)",
+            name="ck_class_members_status_matches_left_at",
+        ),
+        Index(
+            "uq_class_members_active",
+            "class_id",
+            "student_id",
+            unique=True,
+            postgresql_where=sa.text("status = 'active'"),
+            sqlite_where=sa.text("status = 'active'"),
+        ),
+    )
+
+
+class ClassTeacher(Base):
+    """管理员与班级的带班关系；结束关系保留历史。"""
+
+    __tablename__ = "class_teachers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("class_groups.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    admin_user_id: Mapped[int] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    role_in_class: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "role_in_class IN ('teacher', 'assistant')", name="ck_class_teachers_role_in_class"
+        ),
+        CheckConstraint(
+            "ended_at IS NULL OR ended_at >= assigned_at", name="ck_class_teachers_time_range"
+        ),
+        Index(
+            "uq_class_teachers_active",
+            "class_id",
+            "admin_user_id",
+            unique=True,
+            postgresql_where=sa.text("ended_at IS NULL"),
+            sqlite_where=sa.text("ended_at IS NULL"),
+        ),
+    )
