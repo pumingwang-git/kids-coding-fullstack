@@ -6,13 +6,18 @@ from app import create_admin
 from app.permissions import (
     ACADEMIC_ADMIN_ROLE,
     ASSISTANT_ROLE,
+    GLOBAL_SCOPE,
     KNOWN_ROLE_NAMES,
     KNOWN_ROLES,
+    ROLE_SCOPE_NOTES,
+    ROLE_SCOPES,
+    SCOPE_LABELS,
     TEACHER_ROLE,
     is_editor,
     is_reviewer,
     is_super,
     validate_admin_role,
+    visible_class_ids,
 )
 
 
@@ -61,6 +66,23 @@ def test_new_roles_do_not_gain_existing_content_or_review_permissions(role):
     assert not is_super(admin(role))
     assert not is_editor(admin(role))
     assert not is_reviewer(admin(role))
+
+
+@pytest.mark.parametrize("role", KNOWN_ROLE_NAMES)
+def test_every_role_declares_a_scope_and_a_note(role):
+    assert ROLE_SCOPES[role] in SCOPE_LABELS
+    assert ROLE_SCOPE_NOTES[role].strip()
+
+
+@pytest.mark.parametrize("role", KNOWN_ROLE_NAMES)
+def test_declared_scope_matches_visible_class_ids(role):
+    """展示用的 scope 不能与真正生效的范围函数分叉。
+
+    E2 把 teacher / assistant 换成真实查询时，这条会盯住"说明还停留在旧语义"
+    这种不报错的漂移：`global` 必须且只能对应 `None`（不受限）。
+    """
+    unrestricted = visible_class_ids(admin(role), db=None) is None
+    assert unrestricted == (ROLE_SCOPES[role] == GLOBAL_SCOPE)
 
 
 def test_create_admin_rejects_invalid_role_before_database_access(monkeypatch, capsys):

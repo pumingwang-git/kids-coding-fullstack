@@ -37,6 +37,42 @@ ROLE_LABELS = {
 KNOWN_ROLE_NAMES = tuple(ROLE_LABELS)
 KNOWN_ROLES = frozenset(KNOWN_ROLE_NAMES)
 
+# 每个角色能看到哪些学生数据。取值与 visible_class_ids() 的返回语义一一对应：
+#   global → None（不受限）  class → 班级 ID 集合  none → 空集合
+# 加角色时这里必须同步，test_permissions.py 有一条参数化测试盯着两者不许分叉。
+GLOBAL_SCOPE = "global"
+CLASS_SCOPE = "class"
+NO_SCOPE = "none"
+
+ROLE_SCOPES = {
+    SUPER_ROLE: GLOBAL_SCOPE,
+    "editor": NO_SCOPE,
+    "admin": NO_SCOPE,
+    "reviewer": NO_SCOPE,
+    TEACHER_ROLE: CLASS_SCOPE,
+    ASSISTANT_ROLE: CLASS_SCOPE,
+    ACADEMIC_ADMIN_ROLE: GLOBAL_SCOPE,
+}
+
+SCOPE_LABELS = {
+    GLOBAL_SCOPE: "全局",
+    CLASS_SCOPE: "限本班",
+    NO_SCOPE: "不涉及学生数据",
+}
+
+# 面向人的说明，管理端直接展示。放这里而不是前端：E2 把 teacher / assistant 从
+# 「恒返回空集」换成真实查询时，只改这一处；前端自备一份就会静默过期，
+# 变成比没有说明更害人的误导。
+ROLE_SCOPE_NOTES = {
+    SUPER_ROLE: "可以看到全部班级与全部学生。",
+    "editor": "只做内容生产，不涉及任何学生数据。",
+    "admin": "等同内容录入员，不涉及任何学生数据。",
+    "reviewer": "只做内容审核，不涉及任何学生数据。",
+    TEACHER_ROLE: "只能看到自己带班的学生。E1 阶段尚未建立带班关系，因此当前看不到任何学生。",
+    ASSISTANT_ROLE: "只能看到被授权协助的班级学生。E1 阶段尚未建立带班关系，因此当前看不到任何学生。",
+    ACADEMIC_ADMIN_ROLE: "教务角色，可以看到全部班级与全部学生。",
+}
+
 
 def validate_admin_role(role: str) -> str:
     """校验管理员角色写入值，并返回原值供调用方直接赋值。"""

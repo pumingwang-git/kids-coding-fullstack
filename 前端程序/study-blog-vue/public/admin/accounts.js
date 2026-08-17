@@ -13,6 +13,10 @@ import { closeMask, confirmDialog, escapeHtml, fmtTime, openMask, toast } from "
 // 只有启用/停用两态，不做删除（《41、管理端账号管理范围裁决》§2.1）。
 const STATUS_LABEL = { active: "启用", disabled: "已停用" };
 
+// 数据范围徽标的配色：全局最显眼（能看到全校学生），限本班次之，不涉及学生数据用默认灰。
+// 文案本身一律来自接口，这里只决定怎么上色。
+const SCOPE_BADGE = { global: "warn", class: "trial", none: "" };
+
 initLayout();
 
 const $ = (id) => document.getElementById(id);
@@ -20,8 +24,17 @@ const $ = (id) => document.getElementById(id);
 let accounts = [];
 let roleOptions = [];
 let roleLabel = {};
+let roleScope = {};
 let editing = null;
 let releaseFocus = null;
+
+function scopeBadge(role) {
+  const option = roleScope[role];
+  if (!option) return "";
+  return `<span class="node-badge ${SCOPE_BADGE[option.scope] || ""}" title="${escapeHtml(
+    option.scope_note,
+  )}">${escapeHtml(option.scope_label)}</span>`;
+}
 
 function renderRows(items) {
   $("emptyTip").hidden = items.length > 0;
@@ -30,7 +43,10 @@ function renderRows(items) {
       (account) => `<tr>
       <td>${escapeHtml(account.display_name || "—")}</td>
       <td>${escapeHtml(account.username)}</td>
-      <td><span class="tag">${escapeHtml(roleLabel[account.role] || account.role)}</span></td>
+      <td>
+        <span class="tag">${escapeHtml(roleLabel[account.role] || account.role)}</span>
+        ${scopeBadge(account.role)}
+      </td>
       <td><span class="node-badge ${account.status === "active" ? "trial" : ""}">${
         STATUS_LABEL[account.status] || escapeHtml(account.status)
       }</span></td>
@@ -52,6 +68,7 @@ async function loadList() {
     const data = await adminRequest("/admin-users");
     roleOptions = data.roles || [];
     roleLabel = Object.fromEntries(roleOptions.map((role) => [role.value, role.label]));
+    roleScope = Object.fromEntries(roleOptions.map((role) => [role.value, role]));
     accounts = data.items || [];
     renderRows(accounts);
   } catch (error) {
@@ -77,8 +94,18 @@ function openEditor(id) {
     )
     .join("");
   $("roleError").hidden = true;
+  renderScopeNote();
   releaseFocus = openMask($("roleMask"), { focusSelector: "#roleSelect" });
 }
+
+// 选中哪个角色就显示哪个角色的范围说明——让操作者在点保存前看到影响面，
+// 而不是等对方打开页面全空之后来报假 bug。
+function renderScopeNote() {
+  const option = roleScope[$("roleSelect").value];
+  $("roleScopeNote").textContent = option ? option.scope_note : "—";
+}
+
+$("roleSelect").addEventListener("change", renderScopeNote);
 
 function closeEditor() {
   closeMask($("roleMask"), releaseFocus);

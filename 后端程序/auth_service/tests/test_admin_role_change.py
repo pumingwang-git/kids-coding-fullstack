@@ -264,7 +264,13 @@ def test_success_audit_summary_has_no_sensitive_or_org_fields(tmp_path):
 
 def test_role_options_come_from_permissions_single_source(tmp_path):
     """角色下拉的取值域与展示顺序由 permissions.py 提供，前端不得自备一份。"""
-    from app.permissions import KNOWN_ROLE_NAMES, ROLE_LABELS
+    from app.permissions import (
+        KNOWN_ROLE_NAMES,
+        ROLE_LABELS,
+        ROLE_SCOPE_NOTES,
+        ROLE_SCOPES,
+        SCOPE_LABELS,
+    )
 
     with admin_client(tmp_path) as client:
         login_root(client)
@@ -273,6 +279,11 @@ def test_role_options_come_from_permissions_single_source(tmp_path):
         assert [role["label"] for role in body["roles"]] == [
             ROLE_LABELS[name] for name in KNOWN_ROLE_NAMES
         ]
+        # 数据范围也走同一份来源，页面不需要（也不许）自己推导。
+        for role in body["roles"]:
+            assert role["scope"] == ROLE_SCOPES[role["value"]]
+            assert role["scope_label"] == SCOPE_LABELS[role["scope"]]
+            assert role["scope_note"] == ROLE_SCOPE_NOTES[role["value"]]
 
 
 # ==================== 最后一名超管不得降级 ====================

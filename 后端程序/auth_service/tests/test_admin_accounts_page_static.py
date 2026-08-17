@@ -142,6 +142,19 @@ def test_role_options_are_rendered_from_the_api_payload(accounts_js):
     assert re.search(r"roleOptions\s*\n?\s*\.map\(|roleOptions\.map\(", body), "下拉必须由 roleOptions 渲染"
 
 
+def test_scope_note_comes_from_the_api_not_the_page(accounts_js, accounts_html):
+    """范围说明必须来自接口：前端抄一份，E2 换真实查询时它会静默过期。"""
+    from app.permissions import ROLE_SCOPE_NOTES
+
+    body = strip_comments(accounts_js)
+    assert "scope_note" in body and "scope_label" in body
+    # 任何一句后端文案都不许出现在前端源码里。
+    for source in (body, accounts_html):
+        for note in ROLE_SCOPE_NOTES.values():
+            assert note not in source, "范围说明被硬编码进了前端"
+    assert re.search(r'id="roleScopeNote"', accounts_html), "缺少范围说明展示位"
+
+
 def test_role_select_is_empty_in_markup(accounts_html):
     """静态标记里不能预置 option，否则就是又一份角色集合。"""
     select = re.search(r'<select id="roleSelect">(.*?)</select>', accounts_html, flags=re.S)

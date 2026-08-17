@@ -19,6 +19,9 @@ from ..models import AdminSession, AdminUser, AuditEvent, SliderCaptchaChallenge
 from ..permissions import (
     KNOWN_ROLE_NAMES,
     ROLE_LABELS,
+    ROLE_SCOPE_NOTES,
+    ROLE_SCOPES,
+    SCOPE_LABELS,
     SUPER_ROLE,
     is_super,
     validate_admin_role,
@@ -409,7 +412,15 @@ def list_admin_users(request: Request, db: Session = Depends(db_session)):
     return {
         "items": [_admin_user_payload(admin) for admin in admins],
         "roles": [
-            {"value": role, "label": ROLE_LABELS[role]} for role in KNOWN_ROLE_NAMES
+            {
+                "value": role,
+                "label": ROLE_LABELS[role],
+                # 数据范围说明由 permissions.py 单源提供，前端不得自备一份。
+                "scope": ROLE_SCOPES[role],
+                "scope_label": SCOPE_LABELS[ROLE_SCOPES[role]],
+                "scope_note": ROLE_SCOPE_NOTES[role],
+            }
+            for role in KNOWN_ROLE_NAMES
         ],
     }
 
