@@ -13,12 +13,11 @@ from sqlalchemy import select
 from .config import get_settings
 from .database import build_database
 from .models import AdminUser
+from .permissions import validate_admin_role
 from .security import password_hash
 
 
 def main() -> None:
-    settings = get_settings()
-    _, factory = build_database(settings.database_url)
     username = os.environ.get("ADMIN_USERNAME") or (sys.argv[1] if len(sys.argv) > 1 else "")
     password = os.environ.get("ADMIN_PASSWORD") or (sys.argv[2] if len(sys.argv) > 2 else "")
     display = os.environ.get("ADMIN_DISPLAY_NAME") or (sys.argv[3] if len(sys.argv) > 3 else username)
@@ -26,6 +25,13 @@ def main() -> None:
     if not username or not password:
         print("用法：ADMIN_USERNAME=xxx ADMIN_PASSWORD=yyy python -m app.create_admin")
         raise SystemExit(1)
+    try:
+        role = validate_admin_role(role)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+    settings = get_settings()
+    _, factory = build_database(settings.database_url)
     db = factory()
     try:
         existing = db.scalar(select(AdminUser).where(AdminUser.username == username))

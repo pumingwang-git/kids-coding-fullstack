@@ -20,6 +20,29 @@ from __future__ import annotations
 SUPER_ROLE = "super_admin"
 EDITOR_ROLES = frozenset({"editor", "admin"})
 REVIEWER_ROLES = frozenset({"reviewer"})
+TEACHER_ROLE = "teacher"
+ASSISTANT_ROLE = "assistant"
+ACADEMIC_ADMIN_ROLE = "academic_admin"
+
+# 顺序是面向人类的稳定展示顺序；集合用于所有程序判断。
+KNOWN_ROLE_NAMES = (
+    SUPER_ROLE,
+    "editor",
+    "admin",  # 0013 之前的历史录入员角色，仍须兼容。
+    "reviewer",
+    TEACHER_ROLE,
+    ASSISTANT_ROLE,
+    ACADEMIC_ADMIN_ROLE,
+)
+KNOWN_ROLES = frozenset(KNOWN_ROLE_NAMES)
+
+
+def validate_admin_role(role: str) -> str:
+    """校验管理员角色写入值，并返回原值供调用方直接赋值。"""
+    if role not in KNOWN_ROLES:
+        allowed = "、".join(KNOWN_ROLE_NAMES)
+        raise ValueError(f"非法管理员角色 {role!r}；合法取值：{allowed}。")
+    return role
 
 
 def is_super(admin) -> bool:
