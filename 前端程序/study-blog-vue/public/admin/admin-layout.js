@@ -41,6 +41,9 @@ export const MENU = [
       { label: "学员管理", page: "students.html", crumb: "运营 / 学员管理" },
       { label: "成绩统计", page: "reports.html", crumb: "运营 / 成绩统计" },
       { label: "课时作业成绩", page: "homework-results.html", crumb: "运营 / 课时作业成绩" },
+      // superOnly：ADR-001 §2.4 规定变更 AdminUser.role 仅限 super_admin，
+      // 非超管连入口都不该看到。隐藏入口只是体验，后端仍然独立 403。
+      { label: "账号与角色", page: "accounts.html", crumb: "运营 / 账号与角色", superOnly: true },
     ],
   },
 ];
@@ -55,7 +58,7 @@ export function initLayout() {
   if (sidebar) renderSidebar(sidebar);
   if (topbar) {
     renderTopbar(topbar);
-    loadAdmin(topbar);
+    loadAdmin(topbar, sidebar);
   }
 }
 
@@ -67,7 +70,9 @@ function renderSidebar(sidebar) {
       const open = group.children.some((child) => child.page === page) ? " open" : "";
       html += `<div class="menu-group${open}"><div class="menu-parent">${group.icon} ${group.label} <span class="arrow">▾</span></div><div class="menu-children">`;
       for (const child of group.children) {
-        html += `<a class="menu-item${child.page === page ? " active" : ""}" href="${child.page}">${child.label}</a>`;
+        // 默认渲染成 hidden，避免非超管在 /me 返回前先看到一帧授权入口。
+        const gated = child.superOnly ? " data-super-only hidden" : "";
+        html += `<a class="menu-item${child.page === page ? " active" : ""}"${gated} href="${child.page}">${child.label}</a>`;
       }
       html += "</div></div>";
     } else {
@@ -115,11 +120,16 @@ function findActive(page) {
   return null;
 }
 
-async function loadAdmin(topbar) {
+async function loadAdmin(topbar, sidebar) {
   try {
     const me = await adminMe();
     const name = topbar.querySelector("#adminName");
     if (name) name.textContent = `${me.display_name}（${me.role}）`;
+    if (me.can_manage_admin_roles && sidebar) {
+      sidebar.querySelectorAll("[data-super-only]").forEach((item) => {
+        item.hidden = false;
+      });
+    }
   } catch {
     // 未登录 → 回登录页，登录后回到当前页
     location.href = `login.html?next=${encodeURIComponent(location.pathname)}`;

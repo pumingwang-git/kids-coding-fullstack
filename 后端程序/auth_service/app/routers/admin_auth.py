@@ -16,8 +16,9 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from ..models import AdminSession, AdminUser, AuditEvent, SliderCaptchaChallenge
+from ..permissions import KNOWN_ROLE_NAMES, ROLE_LABELS, is_super, validate_admin_role
 from ..rate_limit import RateLimiterUnavailable
-from ..schemas import AdminLoginRequest, SliderVerifyRequest
+from ..schemas import AdminLoginRequest, AdminRoleUpdateRequest, SliderVerifyRequest
 from ..security import (
     DUMMY_PASSWORD_HASH,
     as_utc,
@@ -78,6 +79,55 @@ def audit(
             resource_id=resource_id,
             summary_json=json.dumps(summary, ensure_ascii=False, sort_keys=True) if summary else None,
         )
+    )
+
+
+def _admin_user_payload(admin: AdminUser) -> dict:
+    return {
+        "id": admin.id,
+        "username": admin.username,
+        "display_name": admin.display_name,
+        "role": admin.role,
+        "status": admin.status,
+        "created_at": admin.created_at,
+        "updated_at": admin.updated_at,
+    }
+
+
+def _role_change_summary(
+    *,
+    old_role: str | None = None,
+    new_role: str | None = None,
+    reason_code: str | None = None,
+) -> dict:
+    summary: dict[str, int | str] = {"schema_version": 1}
+    if old_role is not None:
+        summary["old_role"] = old_role
+    if new_role is not None:
+        summary["new_role"] = new_role
+    if reason_code is not None:
+        summary["reason_code"] = reason_code
+    return summary
+
+
+def _audit_role_change(
+    db: Session,
+    request: Request,
+    actor_id: int,
+    target_id: int,
+    outcome: str,
+    summary: dict,
+) -> None:
+    audit(
+        db,
+        request.app.state.settings,
+        "role_change",
+        outcome,
+        client_ip(request),
+        actor_id,
+        resource_type="admin_user",
+        resource_id=target_id,
+        summary=summary,
     )
 
 
@@ -265,7 +315,114 @@ def me(admin: AdminUser = Depends(current_admin)):
         "username": admin.username,
         "display_name": admin.display_name,
         "role": admin.role,
+        "can_manage_admin_roles": is_super(admin),
     }
+
+
+@router.get("/admin-users")
+def list_admin_users(request: Request, db: Session = Depends(db_session)):
+    actor = current_admin(request, db)
+    if not is_super(actor):
+        raise HTTPException(403, "仅超级管理员可查看后台账号角色。")
+    admins = db.scalars(select(AdminUser).order_by(AdminUser.id)).all()
+    return {
+        "items": [_admin_user_payload(admin) for admin in admins],
+        "roles": [
+            {"value": role, "label": ROLE_LABELS[role]} for role in KNOWN_ROLE_NAMES
+        ],
+    }
+
+
+@router.put("/admin-users/{admin_user_id}/role")
+def update_admin_user_role(
+    admin_user_id: int,
+    payload: AdminRoleUpdateRequest,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    actor = current_admin(request, db)
+    target = db.get(AdminUser, admin_user_id)
+
+    if not is_super(actor):
+        try:
+            attempted_role = validate_admin_role(payload.role)
+        except ValueError:
+            attempted_role = None
+        _audit_role_change(
+            db,
+            request,
+            actor.id,
+            admin_user_id,
+            "failure",
+            _role_change_summary(
+                old_role=target.role if target else None,
+                new_role=attempted_role,
+                reason_code="forbidden",
+            ),
+        )
+        db.commit()
+        raise HTTPException(403, "仅超级管理员可变更后台账号角色。")
+
+    try:
+        new_role = validate_admin_role(payload.role)
+    except ValueError as exc:
+        _audit_role_change(
+            db,
+            request,
+            actor.id,
+            admin_user_id,
+            "failure",
+            _role_change_summary(
+                old_role=target.role if target else None,
+                reason_code="invalid_role",
+            ),
+        )
+        db.commit()
+        raise HTTPException(422, str(exc)) from exc
+
+    target = db.scalar(
+        select(AdminUser).where(AdminUser.id == admin_user_id).with_for_update()
+    )
+    if target is None:
+        _audit_role_change(
+            db,
+            request,
+            actor.id,
+            admin_user_id,
+            "failure",
+            _role_change_summary(new_role=new_role, reason_code="not_found"),
+        )
+        db.commit()
+        raise HTTPException(404, "后台账号不存在。")
+    if target.role == new_role:
+        _audit_role_change(
+            db,
+            request,
+            actor.id,
+            target.id,
+            "failure",
+            _role_change_summary(
+                old_role=target.role,
+                new_role=new_role,
+                reason_code="conflict",
+            ),
+        )
+        db.commit()
+        raise HTTPException(409, "目标账号已经是该角色。")
+
+    old_role = target.role
+    target.role = new_role
+    _audit_role_change(
+        db,
+        request,
+        actor.id,
+        target.id,
+        "success",
+        _role_change_summary(old_role=old_role, new_role=new_role),
+    )
+    db.commit()
+    return _admin_user_payload(target)
 
 
 @router.post("/refresh")

@@ -24,16 +24,17 @@ TEACHER_ROLE = "teacher"
 ASSISTANT_ROLE = "assistant"
 ACADEMIC_ADMIN_ROLE = "academic_admin"
 
-# 顺序是面向人类的稳定展示顺序；集合用于所有程序判断。
-KNOWN_ROLE_NAMES = (
-    SUPER_ROLE,
-    "editor",
-    "admin",  # 0013 之前的历史录入员角色，仍须兼容。
-    "reviewer",
-    TEACHER_ROLE,
-    ASSISTANT_ROLE,
-    ACADEMIC_ADMIN_ROLE,
-)
+# 字典顺序就是管理端的稳定展示顺序；0013 之前的 admin 仍须兼容老会话与老数据。
+ROLE_LABELS = {
+    SUPER_ROLE: "超级管理员",
+    "editor": "内容录入员",
+    "admin": "历史内容录入员",
+    "reviewer": "内容审核员",
+    TEACHER_ROLE: "教师",
+    ASSISTANT_ROLE: "助教",
+    ACADEMIC_ADMIN_ROLE: "教务管理员",
+}
+KNOWN_ROLE_NAMES = tuple(ROLE_LABELS)
 KNOWN_ROLES = frozenset(KNOWN_ROLE_NAMES)
 
 

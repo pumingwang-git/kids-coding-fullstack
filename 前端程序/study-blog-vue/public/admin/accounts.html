@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>账号与角色 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <h1>账号与角色</h1>
+          <p>后台账号的角色授权；仅超级管理员可变更，每次变更都记入审计</p>
+        </div>
+      </div>
+
+      <div class="card" id="forbiddenCard" hidden>
+        <div class="empty">仅超级管理员可管理后台账号角色。</div>
+      </div>
+
+      <div class="card" id="listCard" hidden>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>账号</th>
+                <th>用户名</th>
+                <th style="width: 150px">角色</th>
+                <th style="width: 90px">状态</th>
+                <th style="width: 170px">创建时间</th>
+                <th style="width: 110px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="accountRows"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="emptyTip" hidden>没有后台账号</div>
+        <div class="list-error" id="errorTip" hidden>
+          <span id="errorText">列表加载失败。</span>
+          <button class="btn" id="retryBtn" type="button">重新加载</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ==================== 角色变更 Modal ==================== -->
+<div class="modal-mask" id="roleMask" hidden inert>
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="roleTitle">
+    <header class="modal-head">
+      <h2 id="roleTitle">变更角色</h2>
+      <button class="icon-btn" id="roleClose" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body form-only">
+      <div class="form-field"><label>账号</label><span id="roleTarget">—</span></div>
+      <div class="form-field"><label>当前角色</label><span id="roleCurrent">—</span></div>
+      <div class="form-field">
+        <label for="roleSelect">变更为</label>
+        <select id="roleSelect"></select>
+      </div>
+      <small class="field-error" id="roleError" hidden></small>
+    </div>
+    <footer class="modal-foot">
+      <span class="muted">变更在目标账号的下一次请求即生效，无需重新登录。</span>
+      <span class="spacer"></span>
+      <button class="btn" id="roleCancel" type="button">取消</button>
+      <button class="btn primary" id="roleSave" type="button">保存</button>
+    </footer>
+  </div>
+</div>
+
+<script type="module" src="accounts.js"></script>
+</body>
+</html>

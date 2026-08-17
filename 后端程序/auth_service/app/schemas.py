@@ -110,6 +110,10 @@ class AdminLoginRequest(BaseModel):
     slider_x: int | None = Field(default=None, ge=0, le=400)
 
 
+class AdminRoleUpdateRequest(BaseModel):
+    role: str = Field(min_length=1, max_length=32)
+
+
 class SliderVerifyRequest(BaseModel):
     slider_id: str = Field(min_length=36, max_length=36)
     slider_x: int = Field(ge=0, le=400)
