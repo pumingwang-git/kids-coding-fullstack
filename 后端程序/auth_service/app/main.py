@@ -20,6 +20,7 @@ from .mailer import InMemoryEmailSender, SmtpEmailSender
 from .models import Base
 from .rate_limit import InMemoryRateLimiter, RedisRateLimiter
 from .routers.admin_auth import router as admin_router
+from .routers.admin_classes import router as admin_classes_router
 from .routers.admin_course_content import router as admin_course_content_router
 from .routers.admin_courses import router as admin_courses_router
 from .routers.admin_dryrun import router as admin_dryrun_router
@@ -40,18 +41,18 @@ from .routers.admin_scratch import router as admin_scratch_router
 from .routers.admin_videos import router as admin_videos_router
 from .routers.auth_secure import router
 from .routers.courses import router as student_courses_router
-from .routers.lesson_practice import router as lesson_practice_router
-from .routers.learning_catalog import admin_router as admin_learning_catalog_router
-from .routers.learning_catalog import router as learning_catalog_router
-from .routers.math_games import router as math_games_router
-from .routers.lesson_practice import run_lesson_code
 from .routers.exam import judge_submission, sweep_stale_judgings
 from .routers.exam import router as exam_router
 from .routers.focus import router as focus_router
-from .routers.student_mistakes import router as student_mistakes_router
-from .routers.student_profile import router as student_profile_router
+from .routers.learning_catalog import admin_router as admin_learning_catalog_router
+from .routers.learning_catalog import router as learning_catalog_router
+from .routers.lesson_practice import router as lesson_practice_router
+from .routers.lesson_practice import run_lesson_code
+from .routers.math_games import router as math_games_router
 from .routers.scratch import router as scratch_router
 from .routers.scratch_works import router as scratch_works_router
+from .routers.student_mistakes import router as student_mistakes_router
+from .routers.student_profile import router as student_profile_router
 from .routers.typing import router as typing_router
 from .routers.video_play import play_router as video_play_stream_router
 from .routers.video_play import router as video_play_router
@@ -163,6 +164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.trusted_proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.trusted_proxies)
     app.include_router(admin_router)
+    app.include_router(admin_classes_router)
     app.include_router(admin_courses_router)
     app.include_router(admin_learning_catalog_router)
     app.include_router(admin_course_content_router)
