@@ -67,10 +67,22 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "left_at IS NULL OR left_at >= joined_at", name="ck_class_members_time_range"
         ),
+        sa.CheckConstraint(
+            "(status = 'active' AND left_at IS NULL) OR (status = 'left' AND left_at IS NOT NULL)",
+            name="ck_class_members_status_time",
+        ),
     )
     op.create_index("ix_class_members_class_id", "class_members", ["class_id"])
     op.create_index("ix_class_members_student_id", "class_members", ["student_id"])
     op.create_index("ix_class_members_status", "class_members", ["status"])
+    op.create_index(
+        "uq_class_members_active_student",
+        "class_members",
+        ["class_id", "student_id"],
+        unique=True,
+        postgresql_where=sa.text("status = 'active' AND left_at IS NULL"),
+        sqlite_where=sa.text("status = 'active' AND left_at IS NULL"),
+    )
 
     op.create_table(
         "class_teachers",
@@ -102,6 +114,14 @@ def upgrade() -> None:
     op.create_index("ix_class_teachers_class_id", "class_teachers", ["class_id"])
     op.create_index("ix_class_teachers_admin_user_id", "class_teachers", ["admin_user_id"])
     op.create_index("ix_class_teachers_role_in_class", "class_teachers", ["role_in_class"])
+    op.create_index(
+        "uq_class_teachers_active_assignment",
+        "class_teachers",
+        ["class_id", "admin_user_id"],
+        unique=True,
+        postgresql_where=sa.text("ended_at IS NULL"),
+        sqlite_where=sa.text("ended_at IS NULL"),
+    )
 
 
 def downgrade() -> None:
@@ -114,6 +134,8 @@ def downgrade() -> None:
                 "请改用向前修复（新增一个迁移），不要 downgrade。"
             )
 
+    op.drop_index("uq_class_teachers_active_assignment", table_name="class_teachers")
     op.drop_table("class_teachers")
+    op.drop_index("uq_class_members_active_student", table_name="class_members")
     op.drop_table("class_members")
     op.drop_table("class_groups")
