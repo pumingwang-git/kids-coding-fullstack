@@ -93,6 +93,26 @@ def test_every_named_import_is_actually_exported(accounts_js):
             assert name in exported, f"{module} 没有导出 {name}"
 
 
+def test_status_endpoint_matches_the_backend_route(accounts_js):
+    routes = registered_routes()
+    assert ("/api/admin/admin-users/{admin_user_id}/status", "PUT") in routes
+    assert re.search(r"`/admin-users/\$\{[^}]+\}/status`", accounts_js), "启用/停用路径与后端路由不一致"
+    assert re.search(r'JSON\.stringify\(\{\s*status:', accounts_js), "请求体字段名必须是 status"
+
+
+def test_status_labels_match_the_backend_enum(accounts_js):
+    """状态是闭集，前端的文案表必须与后端 Literal 的取值完全对齐。"""
+    from typing import get_args
+
+    from app.schemas import AdminStatusUpdateRequest
+
+    backend = set(get_args(AdminStatusUpdateRequest.model_fields["status"].annotation))
+    table = re.search(r"const STATUS_LABEL = \{(.*?)\};", accounts_js, flags=re.S)
+    assert table, "accounts.js 缺少 STATUS_LABEL"
+    frontend = set(re.findall(r"(\w+):", table.group(1)))
+    assert frontend == backend, f"前端状态 {frontend} 与后端 {backend} 不一致"
+
+
 def test_page_uses_the_shared_admin_request_wrapper(accounts_js):
     """必须走 adminRequest：CSRF、401 续期、错误文案都在里面，绕开就得各抄一份。"""
     assert 'from "./admin-api.js"' in accounts_js

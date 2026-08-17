@@ -114,6 +114,13 @@ class AdminRoleUpdateRequest(BaseModel):
     role: str = Field(min_length=1, max_length=32)
 
 
+class AdminStatusUpdateRequest(BaseModel):
+    # 只有启用/停用两态，不做删除（见《41、管理端账号管理范围裁决》§2.1）。
+    # 用 Literal 在入参层挡掉非法值：状态取值域是闭集，不像角色那样需要
+    # permissions.py 单源，也就不需要为非法值单独定义 reason_code。
+    status: Literal["active", "disabled"]
+
+
 class SliderVerifyRequest(BaseModel):
     slider_id: str = Field(min_length=36, max_length=36)
     slider_x: int = Field(ge=0, le=400)

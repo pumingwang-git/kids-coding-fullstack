@@ -8,7 +8,10 @@
 
 import { adminMe, adminRequest } from "./admin-api.js";
 import { initLayout } from "./admin-layout.js";
-import { closeMask, escapeHtml, fmtTime, openMask, toast } from "./admin-ui.js";
+import { closeMask, confirmDialog, escapeHtml, fmtTime, openMask, toast } from "./admin-ui.js";
+
+// 只有启用/停用两态，不做删除（《41、管理端账号管理范围裁决》§2.1）。
+const STATUS_LABEL = { active: "启用", disabled: "已停用" };
 
 initLayout();
 
@@ -28,11 +31,16 @@ function renderRows(items) {
       <td>${escapeHtml(account.display_name || "—")}</td>
       <td>${escapeHtml(account.username)}</td>
       <td><span class="tag">${escapeHtml(roleLabel[account.role] || account.role)}</span></td>
-      <td><span class="node-badge ${account.status === "active" ? "trial" : "warn"}">${
-        account.status === "active" ? "启用" : escapeHtml(account.status)
+      <td><span class="node-badge ${account.status === "active" ? "trial" : ""}">${
+        STATUS_LABEL[account.status] || escapeHtml(account.status)
       }</span></td>
       <td>${fmtTime(account.created_at)}</td>
-      <td><button class="btn-text link" type="button" data-edit="${account.id}">变更角色</button></td>
+      <td>
+        <button class="btn-text link" type="button" data-edit="${account.id}">变更角色</button>
+        <button class="btn-text link" type="button" data-status="${account.id}">${
+          account.status === "active" ? "停用" : "启用"
+        }</button>
+      </td>
     </tr>`,
     )
     .join("");
@@ -83,9 +91,42 @@ function showEditorError(message) {
   $("roleError").hidden = false;
 }
 
+async function toggleStatus(id) {
+  const account = accounts.find((item) => item.id === id);
+  if (!account) return;
+  const disabling = account.status === "active";
+  const name = account.display_name || account.username;
+  // 停用会把人挡在门外，值得一次确认；启用是恢复，不拦。
+  if (disabling) {
+    const confirmed = await confirmDialog({
+      title: "停用账号",
+      message: `确定停用「${name}」吗？`,
+      detail: "该账号将立即无法登录，已登录的会话会被强制退出。历史数据与审计记录全部保留，随时可以重新启用。",
+      confirmText: "停用",
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
+  try {
+    await adminRequest(`/admin-users/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status: disabling ? "disabled" : "active" }),
+    });
+    toast(disabling ? `已停用「${name}」。` : `已启用「${name}」。`);
+    await loadList();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
 $("accountRows").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-edit]");
-  if (button) openEditor(Number(button.dataset.edit));
+  const edit = event.target.closest("[data-edit]");
+  if (edit) {
+    openEditor(Number(edit.dataset.edit));
+    return;
+  }
+  const status = event.target.closest("[data-status]");
+  if (status) toggleStatus(Number(status.dataset.status));
 });
 
 $("retryBtn").addEventListener("click", loadList);

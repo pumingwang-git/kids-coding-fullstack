@@ -24,7 +24,12 @@ from ..permissions import (
     validate_admin_role,
 )
 from ..rate_limit import RateLimiterUnavailable
-from ..schemas import AdminLoginRequest, AdminRoleUpdateRequest, SliderVerifyRequest
+from ..schemas import (
+    AdminLoginRequest,
+    AdminRoleUpdateRequest,
+    AdminStatusUpdateRequest,
+    SliderVerifyRequest,
+)
 from ..security import (
     DUMMY_PASSWORD_HASH,
     as_utc,
@@ -100,6 +105,31 @@ def _admin_user_payload(admin: AdminUser) -> dict:
     }
 
 
+ACTIVE_STATUS = "active"
+DISABLED_STATUS = "disabled"
+
+
+def _remaining_active_supers(db: Session, exclude_id: int) -> int:
+    """除 exclude_id 外，还有几个能登录的超管。
+
+    降级和停用是把超管降到零的两条路，而改角色只有超管能做（ADR-001 §2.4）——
+    归零之后网页后台里再没有任何人能改回来，只能上服务器跑 create_admin 重建。
+    两条路**共用这一处计数**：抄第二份就迟早会出现"改角色拦住了、停用没拦住"
+    这种不报错的漏洞，正是 permissions.py 文件头警告过的失败模式。
+
+    只数 active：停用的超管登不进来（current_admin 会 401），不构成兜底。
+    """
+    return db.scalar(
+        select(func.count())
+        .select_from(AdminUser)
+        .where(
+            AdminUser.role == SUPER_ROLE,
+            AdminUser.status == ACTIVE_STATUS,
+            AdminUser.id != exclude_id,
+        )
+    )
+
+
 def _role_change_summary(
     *,
     old_role: str | None = None,
@@ -116,6 +146,48 @@ def _role_change_summary(
     return summary
 
 
+def _status_change_summary(
+    *,
+    old_status: str | None = None,
+    new_status: str | None = None,
+    reason_code: str | None = None,
+) -> dict:
+    summary: dict[str, int | str] = {"schema_version": 1}
+    if old_status is not None:
+        summary["old_status"] = old_status
+    if new_status is not None:
+        summary["new_status"] = new_status
+    if reason_code is not None:
+        summary["reason_code"] = reason_code
+    return summary
+
+
+def _audit_admin_user_event(
+    db: Session,
+    request: Request,
+    event: str,
+    actor_id: int,
+    target_id: int,
+    outcome: str,
+    summary: dict,
+) -> None:
+    """管理员账号类事件的统一落点：actor 进 admin_user_id，目标进 resource。
+
+    两者不能倒置——《37、审计事件字段规范》§2.1、§6.2。
+    """
+    audit(
+        db,
+        request.app.state.settings,
+        event,
+        outcome,
+        client_ip(request),
+        actor_id,
+        resource_type="admin_user",
+        resource_id=target_id,
+        summary=summary,
+    )
+
+
 def _audit_role_change(
     db: Session,
     request: Request,
@@ -124,16 +196,19 @@ def _audit_role_change(
     outcome: str,
     summary: dict,
 ) -> None:
-    audit(
-        db,
-        request.app.state.settings,
-        "role_change",
-        outcome,
-        client_ip(request),
-        actor_id,
-        resource_type="admin_user",
-        resource_id=target_id,
-        summary=summary,
+    _audit_admin_user_event(db, request, "role_change", actor_id, target_id, outcome, summary)
+
+
+def _audit_status_change(
+    db: Session,
+    request: Request,
+    actor_id: int,
+    target_id: int,
+    outcome: str,
+    summary: dict,
+) -> None:
+    _audit_admin_user_event(
+        db, request, "account_status_change", actor_id, target_id, outcome, summary
     )
 
 
@@ -417,21 +492,10 @@ def update_admin_user_role(
         db.commit()
         raise HTTPException(409, "目标账号已经是该角色。")
 
-    # 最后一名超管不能降级：改角色只有超管能做（ADR-001 §2.4），降到零之后
-    # 网页后台里没有任何人能改回来，只能上服务器跑 create_admin 重建——那条路
-    # 还会顺带重置密码。交接不受影响：先把接班人提成超管，再改自己，两步都能过。
-    # 只数 active：停用的超管登不进来（current_admin 会 401），不构成兜底。
+    # 最后一名超管不能降级。交接不受影响：先把接班人提成超管，再改自己，两步都能过。
+    # 计数与停用共用 _remaining_active_supers，见该函数的注释。
     if target.role == SUPER_ROLE and new_role != SUPER_ROLE:
-        remaining_supers = db.scalar(
-            select(func.count())
-            .select_from(AdminUser)
-            .where(
-                AdminUser.role == SUPER_ROLE,
-                AdminUser.status == "active",
-                AdminUser.id != target.id,
-            )
-        )
-        if not remaining_supers:
+        if not _remaining_active_supers(db, target.id):
             _audit_role_change(
                 db,
                 request,
@@ -456,6 +520,111 @@ def update_admin_user_role(
         target.id,
         "success",
         _role_change_summary(old_role=old_role, new_role=new_role),
+    )
+    db.commit()
+    return _admin_user_payload(target)
+
+
+@router.put("/admin-users/{admin_user_id}/status")
+def update_admin_user_status(
+    admin_user_id: int,
+    payload: AdminStatusUpdateRequest,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    """启用/停用后台账号（《41、管理端账号管理范围裁决》§2）。
+
+    停用不删除任何历史数据：审计记录、内容关联全部原样保留，随时可以再启用。
+    """
+    require_csrf(request)
+    actor = current_admin(request, db)
+    new_status = payload.status
+    target = db.get(AdminUser, admin_user_id)
+
+    if not is_super(actor):
+        _audit_status_change(
+            db,
+            request,
+            actor.id,
+            admin_user_id,
+            "failure",
+            _status_change_summary(
+                old_status=target.status if target else None,
+                new_status=new_status,
+                reason_code="forbidden",
+            ),
+        )
+        db.commit()
+        raise HTTPException(403, "仅超级管理员可变更后台账号状态。")
+
+    target = db.scalar(
+        select(AdminUser).where(AdminUser.id == admin_user_id).with_for_update()
+    )
+    if target is None:
+        _audit_status_change(
+            db,
+            request,
+            actor.id,
+            admin_user_id,
+            "failure",
+            _status_change_summary(new_status=new_status, reason_code="not_found"),
+        )
+        db.commit()
+        raise HTTPException(404, "后台账号不存在。")
+    if target.status == new_status:
+        _audit_status_change(
+            db,
+            request,
+            actor.id,
+            target.id,
+            "failure",
+            _status_change_summary(
+                old_status=target.status,
+                new_status=new_status,
+                reason_code="conflict",
+            ),
+        )
+        db.commit()
+        raise HTTPException(409, "目标账号已经是该状态。")
+
+    # 停用最后一名活跃超管与降级同源：都会让角色管理彻底失去可操作的人。
+    if new_status == DISABLED_STATUS and target.role == SUPER_ROLE:
+        if not _remaining_active_supers(db, target.id):
+            _audit_status_change(
+                db,
+                request,
+                actor.id,
+                target.id,
+                "failure",
+                _status_change_summary(
+                    old_status=target.status,
+                    new_status=new_status,
+                    reason_code="invalid_state",
+                ),
+            )
+            db.commit()
+            raise HTTPException(409, "系统必须至少保留一名启用状态的超级管理员。")
+
+    old_status = target.status
+    target.status = new_status
+    if new_status == DISABLED_STATUS:
+        # current_admin() 已按 status 拦住（401），停用本身就即时生效；显式吊销
+        # 是让 admin_sessions 的记录与事实一致，便于审计复盘，不是安全兜底。
+        db.execute(
+            update(AdminSession)
+            .where(
+                AdminSession.admin_user_id == target.id,
+                AdminSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=utcnow(), revocation_reason="account_disabled")
+        )
+    _audit_status_change(
+        db,
+        request,
+        actor.id,
+        target.id,
+        "success",
+        _status_change_summary(old_status=old_status, new_status=new_status),
     )
     db.commit()
     return _admin_user_payload(target)
