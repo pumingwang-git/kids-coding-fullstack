@@ -60,6 +60,9 @@ def _role_login(app, role: str) -> tuple[TestClient, dict]:
     resp = client.post("/api/admin/login", headers=headers,
                        json={"username": f"scope-{role}", "password": ADMIN_PASSWORD})
     assert resp.status_code == 200, resp.text
+    # 登录成功会下发**新的** admin_csrf_token，必须重新取：沿用登录前那个会让所有
+    # 写操作停在 require_csrf 的 403 上，看起来像被权限拦住，其实根本没走到权限判断。
+    headers = {"X-CSRF-Token": client.cookies.get("admin_csrf_token")}
     return client, headers
 
 
@@ -119,8 +122,9 @@ def test_editor_has_no_global_submission_scope(tmp_path: Path):
                           params={"keyword": username[:4]}, headers=headers)
     assert searched.status_code == 200, searched.text
     assert searched.json()["total"] == 0
+    # 范围闸一律 404，与「不存在」不可区分（《39》§3.2）。
     for path in _read_paths(sid)[1:]:
-        assert client.get(path, headers=headers).status_code == 403
+        assert client.get(path, headers=headers).status_code == 404
 
 
 def test_teacher_empty_scope_covers_all_six_submission_endpoints(tmp_path: Path):
@@ -130,12 +134,13 @@ def test_teacher_empty_scope_covers_all_six_submission_endpoints(tmp_path: Path)
     listed = client.get("/api/admin/scratch/submissions", headers=headers)
     assert listed.status_code == 200
     assert listed.json()["items"] == []
+    # 教师通过了功能闸（能批改），卡在范围闸 → 404，不得暴露这条提交存在。
     for path in _read_paths(sid)[1:]:
-        assert client.get(path, headers=headers).status_code == 403
+        assert client.get(path, headers=headers).status_code == 404
     assert client.post(f"/api/admin/scratch/submissions/{sid}/review", headers=headers,
-                       json={"verdict": "failed", "comment": ""}).status_code == 403
+                       json={"verdict": "failed", "comment": ""}).status_code == 404
     assert client.post(f"/api/admin/scratch/submissions/{sid}/return", headers=headers,
-                       json={"comment": "请修改后重交"}).status_code == 403
+                       json={"comment": "请修改后重交"}).status_code == 404
 
 
 def test_nonempty_scope_filters_list_and_submission_ids(tmp_path: Path, monkeypatch):
@@ -164,16 +169,40 @@ def test_nonempty_scope_filters_list_and_submission_ids(tmp_path: Path, monkeypa
     assert listed["items"][0]["student_id"] == visible_id
     assert client.get(f"/api/admin/scratch/submissions/{submission_ids[0]}",
                       headers=headers).status_code == 200
-    assert client.get(f"/api/admin/scratch/submissions/{submission_ids[1]}",
-                      headers=headers).status_code == 403
+    # 越界的提交与不存在的提交必须逐字同响应（《39》§3.2）：只要两者可区分，
+    # 遍历 ID 就能枚举出全站有哪些学生提交过作品。
+    denied = client.get(f"/api/admin/scratch/submissions/{submission_ids[1]}",
+                        headers=headers)
+    missing = client.get("/api/admin/scratch/submissions/99999", headers=headers)
+    assert denied.status_code == missing.status_code == 404
+    assert denied.json() == missing.json()
+
     assert client.get(f"/api/admin/scratch/submissions/{submission_ids[1]}/project.sb3",
-                      headers=headers).status_code == 403
+                      headers=headers).status_code == 404
     assert client.post(f"/api/admin/scratch/submissions/{submission_ids[1]}/review",
                        headers=headers,
-                       json={"verdict": "failed", "comment": ""}).status_code == 403
+                       json={"verdict": "failed", "comment": ""}).status_code == 404
     assert client.post(f"/api/admin/scratch/submissions/{submission_ids[1]}/return",
                        headers=headers,
-                       json={"comment": "请修改后重交"}).status_code == 403
+                       json={"comment": "请修改后重交"}).status_code == 404
+
+
+def test_scope_denial_is_logged_without_student_identity(tmp_path: Path, monkeypatch, caplog):
+    """《39》§6：范围拒绝要留痕，但日志里不得出现学生姓名或用户名。"""
+    app, sid, username = _submitted(tmp_path)
+    monkeypatch.setattr(admin_scratch, "visible_student_ids", lambda _admin, _db: set())
+    client, headers = _role_login(app, "teacher")
+
+    with caplog.at_level("WARNING", logger="app.permissions"):
+        assert client.get(f"/api/admin/scratch/submissions/{sid}",
+                          headers=headers).status_code == 404
+
+    denials = [r for r in caplog.records if "scope_denied" in r.getMessage()]
+    assert len(denials) == 1
+    message = denials[0].getMessage()
+    assert "role=teacher" in message
+    assert f"scratch_submission:{sid}" in message
+    assert username not in message
 
 
 def test_super_admin_still_reads_submissions(tmp_path: Path):

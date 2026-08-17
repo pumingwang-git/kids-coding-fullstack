@@ -53,6 +53,7 @@ from ..permissions import (
     ASSISTANT_ROLE,
     TEACHER_ROLE,
     is_editor,
+    log_scope_denial,
     visible_student_ids,
 )
 from ..scratch_rules import KNOWN_TYPES, UNSUPPORTED, checklist, parse_rules
@@ -145,10 +146,25 @@ def _require_submission_reader(request: Request, db: Session):
     return admin
 
 
-def _require_visible_submission(submission: ScratchSubmission,
-                                student_ids: set[int] | None) -> None:
-    if student_ids is not None and submission.user_id not in student_ids:
-        raise HTTPException(403, "没有查看或批改该学生作品的权限。")
+def _load_visible_submission(db: Session, admin, submission_id: int,
+                             student_ids: set[int] | None) -> ScratchSubmission:
+    """按 ID 取一份学生作品；越界与不存在返回**完全相同**的 404。
+
+    《39、API错误码与分页排序规范》§3.2：范围闸不能用 403——那等于告诉调用方
+    「这条记录存在，只是不归你管」，靠遍历 ID 就能枚举出全站有哪些提交。
+    两种情况共用下面这一处 raise，正是为了防止文案日后漂移出差别。
+    """
+    submission = db.get(ScratchSubmission, submission_id)
+    out_of_scope = (
+        submission is not None
+        and student_ids is not None
+        and submission.user_id not in student_ids
+    )
+    if out_of_scope:
+        log_scope_denial(admin, "scratch_submission", submission_id)
+    if submission is None or out_of_scope:
+        raise HTTPException(404, "提交记录不存在。")
+    return submission
 
 
 def _validate_rules(rules: list[dict]) -> list[dict]:
@@ -1039,10 +1055,7 @@ def get_submission(submission_id: int, request: Request, db: Session = Depends(d
     """单份提交详情；角色闸与学生范围校验都先于响应序列化。"""
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
-    submission = db.get(ScratchSubmission, submission_id)
-    if submission is None:
-        raise HTTPException(404, "提交记录不存在。")
-    _require_visible_submission(submission, student_ids)
+    submission = _load_visible_submission(db, admin, submission_id, student_ids)
     return _submission_row(db, submission, detail=True)
 
 
@@ -1058,10 +1071,7 @@ def download_submission_project(submission_id: int, request: Request,
     """
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
-    submission = db.get(ScratchSubmission, submission_id)
-    if submission is None:
-        raise HTTPException(404, "提交记录不存在。")
-    _require_visible_submission(submission, student_ids)
+    submission = _load_visible_submission(db, admin, submission_id, student_ids)
     revision = db.get(ScratchProjectRevision, submission.project_revision_id)
     data = read_sb3(revision.sb3_key, request.app.state.settings) if revision else None
     if data is None:
@@ -1084,10 +1094,7 @@ def download_submission_project_json(submission_id: int, request: Request,
     """
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
-    submission = db.get(ScratchSubmission, submission_id)
-    if submission is None:
-        raise HTTPException(404, "提交记录不存在。")
-    _require_visible_submission(submission, student_ids)
+    submission = _load_visible_submission(db, admin, submission_id, student_ids)
     revision = db.get(ScratchProjectRevision, submission.project_revision_id)
     if revision is None:
         raise HTTPException(404, "作品快照文件丢失。")
@@ -1124,10 +1131,7 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
     require_csrf(request)
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
-    submission = db.get(ScratchSubmission, submission_id)
-    if submission is None:
-        raise HTTPException(404, "提交记录不存在。")
-    _require_visible_submission(submission, student_ids)
+    submission = _load_visible_submission(db, admin, submission_id, student_ids)
     challenge = db.get(ScratchChallenge, submission.challenge_id)
 
     rubric_result = _apply_rubric(challenge, payload.rubric) if challenge else None
@@ -1182,10 +1186,7 @@ def return_submission(submission_id: int, payload: ReturnPayload, request: Reque
     require_csrf(request)
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
-    submission = db.get(ScratchSubmission, submission_id)
-    if submission is None:
-        raise HTTPException(404, "提交记录不存在。")
-    _require_visible_submission(submission, student_ids)
+    submission = _load_visible_submission(db, admin, submission_id, student_ids)
     challenge = db.get(ScratchChallenge, submission.challenge_id)
 
     rubric_result = _apply_rubric(challenge, payload.rubric) if challenge else None

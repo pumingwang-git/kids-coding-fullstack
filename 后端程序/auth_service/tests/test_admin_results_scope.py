@@ -54,6 +54,7 @@ def test_teacher_empty_scope_covers_all_nine_results_endpoints(tmp_path):
     assert homework_overview.json()["items"] == []
 
     block_id = homework["block"]["id"]
+    # 范围为空的整体早退：拒绝理由与任何具体学生记录无关，保持 403（《39》§3.3）。
     denied_paths = [
         f"/api/admin/lesson-homework/{block_id}/results",
         f"/api/admin/lesson-homework/{block_id}/students/{user_id}/attempts",
@@ -61,11 +62,14 @@ def test_teacher_empty_scope_covers_all_nine_results_endpoints(tmp_path):
         f"/api/admin/lesson-homework/{block_id}/item-analysis",
         f"/api/admin/links/{env.link_id}/results",
         f"/api/admin/links/{env.link_id}/item-analysis",
-        f"/api/admin/attempts/{exam_attempt_id}/review",
     ]
     for path in denied_paths:
         response = teacher.get(path, headers=headers)
         assert response.status_code == 403, f"{path}: {response.status_code} {response.text}"
+
+    # 资源寻址型的学生记录：越界必须与「不存在」不可区分（《39》§3.2）。
+    review = teacher.get(f"/api/admin/attempts/{exam_attempt_id}/review", headers=headers)
+    assert review.status_code == 404, review.text
 
 
 def test_nonempty_scope_filters_aggregates_and_blocks_attempt_id_passthrough(tmp_path,
@@ -107,8 +111,14 @@ def test_nonempty_scope_filters_aggregates_and_blocks_attempt_id_passthrough(tmp
 
     assert env.admin.get(f"/api/admin/attempts/{learner_attempt}/review",
                          headers=env.admin_headers).status_code == 200
-    assert env.admin.get(f"/api/admin/attempts/{other_attempt}/review",
-                         headers=env.admin_headers).status_code == 403
+    # 越界的答卷与压根不存在的答卷必须逐字同响应，否则遍历 ID 就能枚举出
+    # 系统里有哪些作答记录（《39》§3.2、E1 验收标准第 6 条）。
+    denied = env.admin.get(f"/api/admin/attempts/{other_attempt}/review",
+                           headers=env.admin_headers)
+    missing = env.admin.get("/api/admin/attempts/99999/review",
+                            headers=env.admin_headers)
+    assert denied.status_code == missing.status_code == 404
+    assert denied.json() == missing.json()
 
 
 def test_nonempty_scope_reaches_scratch_homework_detail_history_and_record(tmp_path,
@@ -141,13 +151,26 @@ def test_nonempty_scope_reaches_scratch_homework_detail_history_and_record(tmp_p
     assert detail.status_code == 200, detail.text
     assert [row["user"]["id"] for row in detail.json()["students"]] == [users["visiblekid"]]
 
+    # 范围外的学员与「查无此记录」必须逐字同响应（《39》§3.2）：否则拿 user_id
+    # 遍历就能问出某个学员到底有没有交过这份作业。
     hidden_history = built["client"].get(
         f"/api/admin/lesson-homework/{block_id}/students/{users['hiddenkid']}/attempts",
         headers=built["headers"],
     )
-    assert hidden_history.status_code == 403
+    missing_history = built["client"].get(
+        f"/api/admin/lesson-homework/{block_id}/students/99999/attempts",
+        headers=built["headers"],
+    )
+    assert hidden_history.status_code == missing_history.status_code == 404
+    assert hidden_history.json() == missing_history.json()
+
     hidden_record = built["client"].get(
         f"/api/admin/lesson-homework/{block_id}/records/{submissions['hiddenkid']}",
         headers=built["headers"],
     )
-    assert hidden_record.status_code == 403
+    missing_record = built["client"].get(
+        f"/api/admin/lesson-homework/{block_id}/records/99999",
+        headers=built["headers"],
+    )
+    assert hidden_record.status_code == missing_record.status_code == 404
+    assert hidden_record.json() == missing_record.json()

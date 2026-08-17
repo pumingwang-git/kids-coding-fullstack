@@ -17,6 +17,10 @@ E1 先定义 `visible_class_ids()` 的签名并铺调用点：teacher / assistan
 """
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 SUPER_ROLE = "super_admin"
 EDITOR_ROLES = frozenset({"editor", "admin"})
 REVIEWER_ROLES = frozenset({"reviewer"})
@@ -94,6 +98,25 @@ def is_editor(admin) -> bool:
 def is_reviewer(admin) -> bool:
     """能审核。super_admin 豁免（单管理员环境下否则流程走不完，见 M2 决策）。"""
     return admin.role in REVIEWER_ROLES or is_super(admin)
+
+
+def log_scope_denial(admin, resource_type: str, resource_id: int) -> None:
+    """记录一次数据范围拒绝（《39、API错误码与分页排序规范》§6）。
+
+    **只记日志，不决定响应。** 响应必须与该端点「资源不存在」的分支逐字一致，
+    由调用点共用同一处 raise 抛出——返回 403 或换个文案，都等于告诉调用方
+    「这条记录存在，只是不归你管」，那正是 E1 验收标准第 6 条要堵的泄露。
+
+    不写 audit_events：一次 ID 遍历探测会产生成百上千条拒绝，写进审计表会淹没
+    真正的授权变更记录（规范 §6.1）。日志里不得出现学生姓名、用户名或原始 IP。
+    """
+    logger.warning(
+        "scope_denied role=%s admin_user_id=%s resource=%s:%s",
+        admin.role,
+        admin.id,
+        resource_type,
+        resource_id,
+    )
 
 
 def visible_class_ids(admin, db) -> set[int] | None:

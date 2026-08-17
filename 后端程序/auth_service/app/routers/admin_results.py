@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from ..attempt_source import SOURCE_LESSON_HOMEWORK, attempt_scope, from_lesson_homework
 from ..lesson_homework_kinds import (
     HomeworkFilters,
+    ScopeDenied,
     collect_rows,
     columns_for,
     filters_for,
@@ -54,7 +55,7 @@ from ..models import (
     Problem,
     User,
 )
-from ..permissions import visible_student_ids
+from ..permissions import log_scope_denial, visible_student_ids
 from ..results_common import (
     attempts_by_user as _attempts_by_user,
 )
@@ -170,10 +171,18 @@ def _homework_kind_or_404(db: Session, block_id: int):
     return kind
 
 
-def _dispatch(call, *args):
-    """把注册表抛出的领域异常翻成 HTTP。类型自己不认识 FastAPI，也不该认识。"""
+def _dispatch(call, *args, admin=None, resource_id: int | None = None):
+    """把注册表抛出的领域异常翻成 HTTP。类型自己不认识 FastAPI，也不该认识。
+
+    ScopeDenied 必须排在 LookupError 前面（它是 LookupError 的子类）：两者产生的
+    响应完全一样，分开只为给范围拒绝记一条日志（《39》§3.2、§6）。
+    """
     try:
         return call(*args)
+    except ScopeDenied as error:
+        if admin is not None:
+            log_scope_denial(admin, "lesson_homework_record", resource_id or 0)
+        raise HTTPException(404, str(error)) from error
     except PermissionError as error:
         raise HTTPException(403, str(error)) from error
     except LookupError as error:
@@ -277,7 +286,8 @@ def lesson_homework_student_attempts(block_id: int, user_id: int, request: Reque
     limit(request, "admin-results", client_ip(request), 60, 60)
     _require_nonempty_scope(student_ids)
     kind = _homework_kind_or_404(db, block_id)
-    return _dispatch(kind.student_history, db, block_id, user_id, student_ids)
+    return _dispatch(kind.student_history, db, block_id, user_id, student_ids,
+                     admin=admin, resource_id=user_id)
 
 
 @router.get("/lesson-homework/{block_id}/records/{record_id}")
@@ -295,7 +305,8 @@ def lesson_homework_record(block_id: int, record_id: int, request: Request,
     kind = _homework_kind_or_404(db, block_id)
     if kind.record is None:
         raise HTTPException(404, "该作业类型没有可单独查看的记录详情。")
-    return _dispatch(kind.record, db, block_id, record_id, student_ids)
+    return _dispatch(kind.record, db, block_id, record_id, student_ids,
+                     admin=admin, resource_id=record_id)
 
 
 @router.get("/lesson-homework/{block_id}/item-analysis")
@@ -446,10 +457,15 @@ def attempt_review(attempt_id: int, request: Request, db: Session = Depends(db_s
     limit(request, "admin-results", client_ip(request), 60, 60)
     attempt = db.get(PaperAttempt, attempt_id)
     paper = db.get(Paper, attempt.paper_id) if attempt else None
-    if not attempt or not paper:
+    # 越界与不存在必须共用这一处 raise，响应逐字一致（《39》§3.2）：
+    # 单独抛一个 403 等于告诉调用方「这份答卷存在，只是不归你管」。
+    out_of_scope = (
+        attempt is not None and student_ids is not None and attempt.user_id not in student_ids
+    )
+    if out_of_scope:
+        log_scope_denial(admin, "paper_attempt", attempt_id)
+    if not attempt or not paper or out_of_scope:
         raise HTTPException(404, "作答记录不存在。")
-    if student_ids is not None and attempt.user_id not in student_ids:
-        raise HTTPException(403, "没有查看该份答卷的权限。")
     if attempt.source_type == SOURCE_LESSON_HOMEWORK:
         _paper_context_or_404(db, attempt.source_id)
 

@@ -262,9 +262,20 @@ def _scope_students(stmt, student_column, student_ids: set[int] | None):
     return stmt
 
 
-def _require_visible_student(user_id: int, student_ids: set[int] | None) -> None:
+class ScopeDenied(LookupError):
+    """请求的学员不在调用方的数据范围内。
+
+    继承 ``LookupError`` 是刻意的：按《39、API错误码与分页排序规范》§3.2，范围闸
+    必须与「不存在」返回**逐字相同**的 404，否则遍历 user_id 就能问出某个学员
+    有没有作答记录。单独立一个类型只是为了让上层能记一条日志（§6）。
+    """
+
+
+def _require_visible_student(user_id: int, student_ids: set[int] | None,
+                             missing_message: str) -> None:
+    """范围外时抛出该端点自己的「不存在」文案，让两种情况无法区分。"""
     if student_ids is not None and user_id not in student_ids:
-        raise PermissionError("没有查看该学员数据的权限。")
+        raise ScopeDenied(missing_message)
 
 
 # ---------------------------------------------------------------------------
@@ -471,10 +482,12 @@ def _paper_student_row(block_id: int, student: dict) -> dict:
 
 def _paper_history(db: Session, block_id: int, user_id: int,
                    student_ids: set[int] | None) -> dict:
-    _require_visible_student(user_id, student_ids)
+    # 范围校验放在作业存在性之后：作业块本身是课程内容、存在与否不是秘密，
+    # 而「这名学员有没有作答」必须与「不在我范围内」不可区分。
     context = paper_context(db, block_id)
     if context is None:
         raise LookupError("课时作业不存在。")
+    _require_visible_student(user_id, student_ids, "该学员没有这份作业的作答记录。")
     block, detail, _paper, _lesson, _section, _course = context
     source = from_lesson_homework(block, detail)
     attempts = list(db.scalars(
@@ -808,10 +821,10 @@ SCRATCH_HISTORY_COLUMNS = (
 
 def _scratch_history(db: Session, block_id: int, user_id: int,
                      student_ids: set[int] | None) -> dict:
-    _require_visible_student(user_id, student_ids)
     context = scratch_context(db, block_id)
     if context is None:
         raise LookupError("课时作业不存在。")
+    _require_visible_student(user_id, student_ids, "该学员没有这份作业的提交记录。")
     block, *_ = context
     submissions = list(db.scalars(
         select(ScratchSubmission)
@@ -851,7 +864,7 @@ def _scratch_record(db: Session, block_id: int, record_id: int,
     submission = db.get(ScratchSubmission, record_id)
     if submission is None or submission.lesson_block_id != block.id:
         raise LookupError("提交记录不存在。")
-    _require_visible_student(submission.user_id, student_ids)
+    _require_visible_student(submission.user_id, student_ids, "提交记录不存在。")
     revision = db.get(ScratchProjectRevision, submission.project_revision_id)
     student = db.get(User, submission.user_id)
     label, _tone = SUBMISSION_STATUS.get(submission.status, (submission.status, "muted"))
