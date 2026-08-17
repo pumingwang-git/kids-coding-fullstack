@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from alembic import command
 from alembic.config import Config
@@ -49,9 +50,12 @@ def migration_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", url)
     get_settings.cache_clear()
 
-    # 三张班级表尚未进 models，create_all 不会建它们，正好留给 0055。
+    # 只预置 0055 之前的表；班级表虽已进入 models，仍必须由 0055 创建。
     engine = sa.create_engine(url)
-    Base.metadata.create_all(engine)
+    pre_class_tables = [
+        table for name, table in Base.metadata.tables.items() if name not in CLASS_TABLES
+    ]
+    Base.metadata.create_all(engine, tables=pre_class_tables)
     engine.dispose()
 
     config = alembic_config()
@@ -99,6 +103,182 @@ def test_empty_downgrade_removes_them_and_upgrade_stays_repeatable(migration_env
     # 再升一次：回滚若残留索引或约束，这一步会因重复创建而报错。
     command.upgrade(config, "head")
     assert set(CLASS_TABLES) <= table_names(url)
+
+
+# ==================== §2.3 班级关系唯一性与状态一致性 ====================
+
+
+def prepare_class(url: str) -> None:
+    execute(url, "INSERT INTO class_groups (name, course_id) VALUES ('三年级 A 班', 1)")
+
+
+def test_active_member_is_unique_per_class_and_student(migration_env):
+    config, url = migration_env
+    command.upgrade(config, "head")
+    prepare_class(url)
+
+    execute(url, "INSERT INTO class_members (class_id, student_id) VALUES (1, 1)")
+    with pytest.raises(IntegrityError):
+        execute(url, "INSERT INTO class_members (class_id, student_id) VALUES (1, 1)")
+
+
+def test_student_can_rejoin_after_old_membership_is_left(migration_env):
+    config, url = migration_env
+    command.upgrade(config, "head")
+    prepare_class(url)
+
+    execute(
+        url,
+        "INSERT INTO class_members (class_id, student_id, joined_at) "
+        "VALUES (1, 1, '2026-08-01 09:00:00')",
+    )
+    execute(
+        url,
+        "UPDATE class_members SET status = 'left', left_at = '2026-08-02 09:00:00' WHERE id = 1",
+    )
+    execute(
+        url,
+        "INSERT INTO class_members (class_id, student_id, joined_at) "
+        "VALUES (1, 1, '2026-08-03 09:00:00')",
+    )
+
+    engine = sa.create_engine(url)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(sa.text("SELECT COUNT(*) FROM class_members")).scalar() == 2
+    finally:
+        engine.dispose()
+
+
+def test_active_teacher_assignment_is_unique_per_class_and_admin(migration_env):
+    config, url = migration_env
+    command.upgrade(config, "head")
+    prepare_class(url)
+
+    execute(
+        url,
+        "INSERT INTO class_teachers (class_id, admin_user_id, role_in_class) "
+        "VALUES (1, 7, 'teacher')",
+    )
+    with pytest.raises(IntegrityError):
+        execute(
+            url,
+            "INSERT INTO class_teachers (class_id, admin_user_id, role_in_class) "
+            "VALUES (1, 7, 'teacher')",
+        )
+
+
+def test_teacher_cannot_also_be_active_assistant_in_same_class(migration_env):
+    config, url = migration_env
+    command.upgrade(config, "head")
+    prepare_class(url)
+
+    execute(
+        url,
+        "INSERT INTO class_teachers (class_id, admin_user_id, role_in_class) "
+        "VALUES (1, 7, 'teacher')",
+    )
+    with pytest.raises(IntegrityError):
+        execute(
+            url,
+            "INSERT INTO class_teachers (class_id, admin_user_id, role_in_class) "
+            "VALUES (1, 7, 'assistant')",
+        )
+
+
+def test_admin_can_change_class_role_after_ending_old_assignment(migration_env):
+    config, url = migration_env
+    command.upgrade(config, "head")
+    prepare_class(url)
+
+    execute(
+        url,
+        "INSERT INTO class_teachers "
+        "(class_id, admin_user_id, role_in_class, assigned_at) "
+        "VALUES (1, 7, 'teacher', '2026-08-01 09:00:00')",
+    )
+    execute(
+        url,
+        "UPDATE class_teachers SET ended_at = '2026-08-02 09:00:00' WHERE id = 1",
+    )
+    execute(
+        url,
+        "INSERT INTO class_teachers "
+        "(class_id, admin_user_id, role_in_class, assigned_at) "
+        "VALUES (1, 7, 'assistant', '2026-08-03 09:00:00')",
+    )
+
+    engine = sa.create_engine(url)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(sa.text("SELECT COUNT(*) FROM class_teachers")).scalar() == 2
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("status", "left_at"),
+    [("active", "'2026-08-02 09:00:00'"), ("left", "NULL")],
+)
+def test_member_status_and_left_at_must_match(migration_env, status, left_at):
+    config, url = migration_env
+    command.upgrade(config, "head")
+    prepare_class(url)
+
+    with pytest.raises(IntegrityError):
+        execute(
+            url,
+            "INSERT INTO class_members (class_id, student_id, status, left_at) "
+            f"VALUES (1, 1, '{status}', {left_at})",
+        )
+
+
+def test_models_match_migrated_class_table_structure(migration_env, tmp_path):
+    config, migration_url = migration_env
+    command.upgrade(config, "head")
+
+    model_url = f"sqlite:///{tmp_path / 'models.db'}"
+    model_engine = sa.create_engine(model_url)
+    try:
+        Base.metadata.create_all(model_engine)
+        migrated_engine = sa.create_engine(migration_url)
+        try:
+            for table_name in CLASS_TABLES:
+                model = sa.inspect(model_engine)
+                migrated = sa.inspect(migrated_engine)
+                model_columns = [
+                    (column["name"], str(column["type"]), column["nullable"])
+                    for column in model.get_columns(table_name)
+                ]
+                migrated_columns = [
+                    (column["name"], str(column["type"]), column["nullable"])
+                    for column in migrated.get_columns(table_name)
+                ]
+                assert model_columns == migrated_columns
+
+                model_indexes = sorted(
+                    (index["name"], index["unique"], tuple(index["column_names"]))
+                    for index in model.get_indexes(table_name)
+                )
+                migrated_indexes = sorted(
+                    (index["name"], index["unique"], tuple(index["column_names"]))
+                    for index in migrated.get_indexes(table_name)
+                )
+                assert model_indexes == migrated_indexes
+
+                model_checks = sorted(
+                    (check["name"], check["sqltext"])
+                    for check in model.get_check_constraints(table_name)
+                )
+                migrated_checks = sorted(
+                    (check["name"], check["sqltext"])
+                    for check in migrated.get_check_constraints(table_name)
+                )
+                assert model_checks == migrated_checks
+        finally:
+            migrated_engine.dispose()
+    finally:
+        model_engine.dispose()
 
 
 # ==================== §6.4 非空回滚必须被拒绝 ====================
