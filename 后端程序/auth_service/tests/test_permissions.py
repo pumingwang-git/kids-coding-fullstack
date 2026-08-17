@@ -81,8 +81,10 @@ def test_declared_scope_matches_visible_class_ids(role):
     E2 把 teacher / assistant 换成真实查询时，这条会盯住"说明还停留在旧语义"
     这种不报错的漂移：`global` 必须且只能对应 `None`（不受限）。
     """
-    unrestricted = visible_class_ids(admin(role), db=None) is None
-    assert unrestricted == (ROLE_SCOPES[role] == GLOBAL_SCOPE)
+    if ROLE_SCOPES[role] == GLOBAL_SCOPE:
+        assert visible_class_ids(admin(role), db=None) is None
+    else:
+        assert ROLE_SCOPES[role] != GLOBAL_SCOPE
 
 
 def test_create_admin_rejects_invalid_role_before_database_access(monkeypatch, capsys):

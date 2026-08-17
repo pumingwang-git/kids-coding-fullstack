@@ -11,13 +11,15 @@ admin_results、admin_videos、admin_courses 各抄了一份（第 5 份见课�
 - `admin` 是上线前的历史角色，按 editor 兼容（0013 迁移已把存量数据转为 editor，
   常量保留是为了老会话与老数据不炸）。
 
-E1 先定义 `visible_class_ids()` 的签名并铺调用点：teacher / assistant 暂时返回空集合，
-全局角色返回 None；E2 落地 `class_teachers` 后只替换本文件内部查询。
+E2 由 `class_teachers` 提供 teacher / assistant 的真实班级范围；全局角色返回 None，
+其余角色返回空集合。
 见《32、企业级学习平台开发路线图-增补裁决-2026-08-17》4.3。
 """
 from __future__ import annotations
 
 import logging
+
+from .class_groups import active_class_teacher_assignments, active_student_ids_for_classes
 
 logger = logging.getLogger(__name__)
 
@@ -64,16 +66,14 @@ SCOPE_LABELS = {
     NO_SCOPE: "不涉及学生数据",
 }
 
-# 面向人的说明，管理端直接展示。放这里而不是前端：E2 把 teacher / assistant 从
-# 「恒返回空集」换成真实查询时，只改这一处；前端自备一份就会静默过期，
-# 变成比没有说明更害人的误导。
+# 面向人的说明，管理端直接展示，避免前端自备文案随着范围规则过期。
 ROLE_SCOPE_NOTES = {
     SUPER_ROLE: "可以看到全部班级与全部学生。",
     "editor": "只做内容生产，不涉及任何学生数据。",
     "admin": "等同内容录入员，不涉及任何学生数据。",
     "reviewer": "只做内容审核，不涉及任何学生数据。",
-    TEACHER_ROLE: "只能看到自己带班的学生。E1 阶段尚未建立带班关系，因此当前看不到任何学生。",
-    ASSISTANT_ROLE: "只能看到被授权协助的班级学生。E1 阶段尚未建立带班关系，因此当前看不到任何学生。",
+    TEACHER_ROLE: "只能看到自己在任带班关系对应班级的学生。",
+    ASSISTANT_ROLE: "只能看到自己在任协助关系对应班级的学生。",
     ACADEMIC_ADMIN_ROLE: "教务角色，可以看到全部班级与全部学生。",
 }
 
@@ -122,14 +122,17 @@ def log_scope_denial(admin, resource_type: str, resource_id: int) -> None:
 def visible_class_ids(admin, db) -> set[int] | None:
     """返回管理员可见班级；``None`` 表示全局不受限。
 
-    E1 尚未落地 ``class_teachers``，因此教师与助教暂时看不到任何班级。教务和
-    超管是全局学情角色；其余内容角色不因此获得学生数据范围。E2 只需把受限角色
-    的空集合替换为班级关联查询，调用点的 ``None`` 语义保持不变。
+    教师与助教只取 ``class_teachers.ended_at IS NULL`` 的关系。教务和超管是全局
+    学情角色；其余内容角色不因此获得学生数据范围。受限角色必须传入数据库会话，
+    遗漏会话直接报错，避免静默收窄为空集。
     """
-    del db  # E2 接入 class_teachers 查询后使用。
     if admin.role in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE}:
         return None
-    return set()
+    if admin.role not in {TEACHER_ROLE, ASSISTANT_ROLE}:
+        return set()
+    if db is None:
+        raise TypeError("受限班级范围查询必须提供数据库会话。")
+    return {row.class_id for row in active_class_teacher_assignments(db, admin.id)}
 
 
 def visible_student_ids(admin, db) -> set[int] | None:
@@ -137,5 +140,4 @@ def visible_student_ids(admin, db) -> set[int] | None:
     class_ids = visible_class_ids(admin, db)
     if class_ids is None:
         return None
-    # E1 没有 class_members 表；E2 在这里按 class_ids 查询在班学生。
-    return set()
+    return active_student_ids_for_classes(db, class_ids)
