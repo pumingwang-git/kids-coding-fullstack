@@ -20,7 +20,16 @@ from test_admin_courses import (
 from test_exam import admin_login, build_app, scsrf, student_login
 from test_student_learning import seed_ready_video
 
-from app.models import AuditEvent, CourseLessonBlock, LessonPaperBlock, Paper, PaperAttempt, Problem, User
+import app.routers.admin_course_content as admin_course_content
+from app.models import (
+    AuditEvent,
+    CourseLessonBlock,
+    LessonPaperBlock,
+    Paper,
+    PaperAttempt,
+    Problem,
+    User,
+)
 
 # ---------- 辅助 ----------
 
@@ -390,7 +399,7 @@ def test_homework_block_delete_blocked_after_attempt_exists(tmp_path: Path):
         f"/api/admin/lessons/{lesson['id']}/blocks", headers=headers,
         json=block_payload("homework", paper_id=paper["paper_id"], mode="homework"),
     ).json()
-    student = student_login(app)
+    student_login(app)
     db = app.state.session_factory()
     try:
         user = db.query(User).filter_by(username="learner").one()
@@ -440,7 +449,6 @@ def test_homework_deadline_requires_explicit_extension_after_attempt(tmp_path: P
         attempt_id = attempt.id
     finally:
         db.close()
-
     ordinary = client.put(
         f"/api/admin/lesson-blocks/{block['id']}", headers=headers,
         json=block_payload("homework", paper_id=paper["paper_id"], mode="homework",
@@ -468,6 +476,88 @@ def test_homework_deadline_requires_explicit_extension_after_attempt(tmp_path: P
             event_type="admin_course_homework_deadline_extend", resource_id=block["id"], outcome="success"
         ).one()
         assert event is not None
+    finally:
+        db.close()
+
+
+def test_empty_student_scope_keeps_block_create_and_rejects_extension_before_write(
+        tmp_path: Path, monkeypatch):
+    app = build_app(tmp_path)
+    client, headers, course, _section, lesson = build_lesson_without_content(app)
+    paper = seed_paper(app, status="published")
+    old_due_at = datetime.now(UTC) + timedelta(days=1)
+    new_due_at = old_due_at + timedelta(days=1)
+    monkeypatch.setattr(admin_course_content, "visible_student_ids",
+                        lambda _admin, _db: set())
+
+    created = client.post(
+        f"/api/admin/lessons/{lesson['id']}/blocks", headers=headers,
+        json=block_payload("homework", paper_id=paper["paper_id"], mode="homework",
+                           due_at=old_due_at.isoformat()),
+    )
+    assert created.status_code == 201, created.text
+    block_id = created.json()["id"]
+    assert client.post(f"/api/admin/courses/{course['id']}/publish",
+                       headers=headers).status_code == 200
+
+    denied = client.post(
+        f"/api/admin/lesson-blocks/{block_id}/extend-deadline", headers=headers,
+        json={"due_at": new_due_at.isoformat()},
+    )
+    assert denied.status_code == 403, denied.text
+    db = app.state.session_factory()
+    try:
+        stored = db.get(LessonPaperBlock, block_id)
+        assert stored.due_at.replace(tzinfo=UTC) == old_due_at
+    finally:
+        db.close()
+
+
+def test_deadline_extension_updates_only_ongoing_attempts_in_nonempty_scope(
+        tmp_path: Path, monkeypatch):
+    app = build_app(tmp_path)
+    client, headers, course, _section, lesson = build_lesson_without_content(app)
+    paper = seed_paper(app, status="published")
+    old_due_at = datetime.now(UTC) + timedelta(days=1)
+    new_due_at = old_due_at + timedelta(days=1)
+    block = client.post(
+        f"/api/admin/lessons/{lesson['id']}/blocks", headers=headers,
+        json=block_payload("homework", paper_id=paper["paper_id"], mode="homework",
+                           due_at=old_due_at.isoformat()),
+    ).json()
+    student_login(app, "visible-student")
+    student_login(app, "hidden-student")
+    db = app.state.session_factory()
+    try:
+        visible = db.query(User).filter_by(username="visible-student").one()
+        hidden = db.query(User).filter_by(username="hidden-student").one()
+        attempts = [
+            PaperAttempt(source_type="lesson_homework", source_id=block["id"],
+                         exam_link_id=None, paper_id=paper["paper_id"], user_id=user.id,
+                         attempt_no=1, status="ongoing", deadline_at=old_due_at)
+            for user in (visible, hidden)
+        ]
+        db.add_all(attempts)
+        db.commit()
+        visible_id, hidden_id = visible.id, hidden.id
+    finally:
+        db.close()
+    monkeypatch.setattr(admin_course_content, "visible_student_ids",
+                        lambda _admin, _db: {visible_id})
+    assert client.post(f"/api/admin/courses/{course['id']}/publish",
+                       headers=headers).status_code == 200
+
+    extended = client.post(
+        f"/api/admin/lesson-blocks/{block['id']}/extend-deadline", headers=headers,
+        json={"due_at": new_due_at.isoformat()},
+    )
+    assert extended.status_code == 200, extended.text
+    assert extended.json()["updated_ongoing_attempts"] == 1
+    db = app.state.session_factory()
+    try:
+        by_user = {attempt.user_id: attempt for attempt in db.query(PaperAttempt).all()}
+        assert by_user[visible_id].deadline_at.replace(tzinfo=UTC) == new_due_at
+        assert by_user[hidden_id].deadline_at.replace(tzinfo=UTC) == old_due_at
     finally:
         db.close()
 

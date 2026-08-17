@@ -30,7 +30,6 @@ from sqlalchemy.orm import Session
 
 from .attempt_source import SOURCE_LESSON_HOMEWORK, attempt_scope, from_lesson_homework
 from .models import (
-    AdminUser,
     Course,
     CourseLesson,
     CourseLessonBlock,
@@ -44,7 +43,6 @@ from .models import (
     ScratchSubmission,
     User,
 )
-from .permissions import is_reviewer, is_super
 from .results_common import (
     attempts_by_user,
     build_students,
@@ -54,7 +52,7 @@ from .results_common import (
     full_score,
     score_summary,
 )
-from .routers.admin_papers import _as_utc, _can_read
+from .routers.admin_papers import _as_utc
 
 # ---------------------------------------------------------------------------
 # 呈现描述符
@@ -187,10 +185,10 @@ class HomeworkKind:
     statuses: tuple[Option, ...]
     detail_columns: tuple[Column, ...]
     detail_stats: tuple[Stat, ...]
-    collect: Callable[[Session, AdminUser, HomeworkFilters], list[dict]]
-    detail: Callable[[Session, AdminUser, int], dict]
-    student_history: Callable[[Session, AdminUser, int, int], dict]
-    record: Callable[[Session, AdminUser, int, int], dict] | None = None
+    collect: Callable[[Session, HomeworkFilters, set[int] | None], list[dict]]
+    detail: Callable[[Session, int, set[int] | None], dict]
+    student_history: Callable[[Session, int, int, set[int] | None], dict]
+    record: Callable[[Session, int, int, set[int] | None], dict] | None = None
     # 详情页顶部那句口径说明。措辞属于类型知识，不该由页面拼。
     insight: str = ""
     empty_hint: str = "还没有学员开始这份作业"
@@ -203,11 +201,6 @@ class HomeworkKind:
         if filters.status and filters.status not in {s.value for s in self.statuses}:
             return False
         return True
-
-
-def sees_all(admin: AdminUser) -> bool:
-    """超管与审核员看全部；其余按各自的内容范围收敛。"""
-    return is_super(admin) or is_reviewer(admin)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -262,17 +255,24 @@ def _percent(part: int, whole: int) -> int | None:
     return round(part / whole * 100) if whole else None
 
 
+def _scope_students(stmt, student_column, student_ids: set[int] | None):
+    """把 ``None``（不受限）与空集（稳定空结果）的区别集中在一处。"""
+    if student_ids is not None:
+        stmt = stmt.where(student_column.in_(student_ids))
+    return stmt
+
+
+def _require_visible_student(user_id: int, student_ids: set[int] | None) -> None:
+    if student_ids is not None and user_id not in student_ids:
+        raise PermissionError("没有查看该学员数据的权限。")
+
+
 # ---------------------------------------------------------------------------
 # 类型一：整卷作业（LessonPaperBlock）
 # ---------------------------------------------------------------------------
 
 
 PAPER_BLOCK_TYPE = "homework"
-
-
-def _paper_can_read(paper: Paper, course: Course, admin: AdminUser) -> bool:
-    """整卷作业成绩同时受试卷与课包两侧的读取范围约束。"""
-    return _can_read(paper, admin) and (sees_all(admin) or course.owner_id == admin.id)
 
 
 def _paper_deadline(detail: LessonPaperBlock) -> dict:
@@ -288,7 +288,7 @@ def _paper_deadline(detail: LessonPaperBlock) -> dict:
             "tone": "ok"}
 
 
-def paper_context(db: Session, block_id: int, admin: AdminUser):
+def paper_context(db: Session, block_id: int):
     block = db.get(CourseLessonBlock, block_id)
     detail = db.get(LessonPaperBlock, block_id)
     lesson = db.get(CourseLesson, block.lesson_id) if block else None
@@ -299,8 +299,6 @@ def paper_context(db: Session, block_id: int, admin: AdminUser):
             or course is None or paper is None or block.block_type != PAPER_BLOCK_TYPE
             or section.course_id != course.id):
         return None
-    if not _paper_can_read(paper, course, admin):
-        raise PermissionError("没有查看该课时作业成绩的权限。")
     return block, detail, paper, lesson, section, course
 
 
@@ -318,8 +316,8 @@ def _paper_row(block, detail, paper, lesson, section, course) -> dict:
     }
 
 
-def _collect_paper_rows(db: Session, admin: AdminUser,
-                        filters: HomeworkFilters) -> list[dict]:
+def _collect_paper_rows(db: Session, filters: HomeworkFilters,
+                        student_ids: set[int] | None) -> list[dict]:
     query = (
         _path_query(filters, PAPER_BLOCK_TYPE)
         .join(LessonPaperBlock, LessonPaperBlock.block_id == CourseLessonBlock.id)
@@ -333,8 +331,6 @@ def _collect_paper_rows(db: Session, admin: AdminUser,
 
     rows = []
     for block, lesson, section, course, detail, paper in db.execute(query).all():
-        if not _paper_can_read(paper, course, admin):
-            continue
         if not _matches_keyword(filters.keyword, block.title, lesson.title, paper.title,
                                 paper.paper_id_no):
             continue
@@ -342,7 +338,12 @@ def _collect_paper_rows(db: Session, admin: AdminUser,
         if filters.status and row["homework"]["status"] != filters.status:
             continue
         source = from_lesson_homework(block, detail)
-        attempts = list(db.scalars(select(PaperAttempt).where(*attempt_scope(source))))
+        attempt_query = select(PaperAttempt).where(*attempt_scope(source))
+        attempts = list(db.scalars(
+            _scope_students(attempt_query, PaperAttempt.user_id, student_ids)
+        ))
+        if student_ids is not None and not attempts:
+            continue
         submitted = [a for a in attempts if a.status == "submitted"]
         people = len(attempts_by_user(attempts))
         submitted_people = len({a.user_id for a in submitted})
@@ -376,15 +377,18 @@ def _collect_paper_rows(db: Session, admin: AdminUser,
     return rows
 
 
-def _paper_detail(db: Session, admin: AdminUser, block_id: int) -> dict:
-    context = paper_context(db, block_id, admin)
+def _paper_detail(db: Session, block_id: int, student_ids: set[int] | None) -> dict:
+    context = paper_context(db, block_id)
     if context is None:
         raise LookupError("课时作业不存在。")
     block, detail, paper, lesson, section, course = context
     source = from_lesson_homework(block, detail)
-    attempts = list(db.scalars(
+    attempt_query = (
         select(PaperAttempt).where(*attempt_scope(source))
         .order_by(PaperAttempt.started_at.desc(), PaperAttempt.id.desc())
+    )
+    attempts = list(db.scalars(
+        _scope_students(attempt_query, PaperAttempt.user_id, student_ids)
     ))
     full = full_score(db, paper.id)
     students = build_students(db, attempts, source.score_policy, include_history=False)
@@ -465,8 +469,10 @@ def _paper_student_row(block_id: int, student: dict) -> dict:
     }
 
 
-def _paper_history(db: Session, admin: AdminUser, block_id: int, user_id: int) -> dict:
-    context = paper_context(db, block_id, admin)
+def _paper_history(db: Session, block_id: int, user_id: int,
+                   student_ids: set[int] | None) -> dict:
+    _require_visible_student(user_id, student_ids)
+    context = paper_context(db, block_id)
     if context is None:
         raise LookupError("课时作业不存在。")
     block, detail, _paper, _lesson, _section, _course = context
@@ -558,12 +564,7 @@ SUBMISSION_STATUS = {
 }
 
 
-def _scratch_can_read(course: Course, admin: AdminUser) -> bool:
-    """Scratch 作业没有试卷侧范围，只受课包归属约束。"""
-    return sees_all(admin) or course.owner_id == admin.id
-
-
-def scratch_context(db: Session, block_id: int, admin: AdminUser):
+def scratch_context(db: Session, block_id: int):
     block = db.get(CourseLessonBlock, block_id)
     detail = db.get(LessonScratchBlock, block_id)
     lesson = db.get(CourseLesson, block.lesson_id) if block else None
@@ -574,8 +575,6 @@ def scratch_context(db: Session, block_id: int, admin: AdminUser):
             or course is None or challenge is None
             or block.block_type != SCRATCH_BLOCK_TYPE or section.course_id != course.id):
         return None
-    if not _scratch_can_read(course, admin):
-        raise PermissionError("没有查看该课时作业成绩的权限。")
     return block, detail, challenge, lesson, section, course
 
 
@@ -633,8 +632,8 @@ def _scratch_row(block, challenge, lesson, section, course) -> dict:
     }
 
 
-def _collect_scratch_rows(db: Session, admin: AdminUser,
-                          filters: HomeworkFilters) -> list[dict]:
+def _collect_scratch_rows(db: Session, filters: HomeworkFilters,
+                          student_ids: set[int] | None) -> list[dict]:
     query = (
         _path_query(filters, SCRATCH_BLOCK_TYPE)
         .join(LessonScratchBlock, LessonScratchBlock.block_id == CourseLessonBlock.id)
@@ -643,17 +642,19 @@ def _collect_scratch_rows(db: Session, admin: AdminUser,
     )
     rows = []
     for block, lesson, section, course, _detail, challenge in db.execute(query).all():
-        if not _scratch_can_read(course, admin):
-            continue
         if not _matches_keyword(filters.keyword, block.title, lesson.title, challenge.title):
             continue
         row = _scratch_row(block, challenge, lesson, section, course)
         if filters.status and row["homework"]["status"] != filters.status:
             continue
+        submission_query = select(ScratchSubmission).where(
+            ScratchSubmission.lesson_block_id == block.id
+        )
         submissions = list(db.scalars(
-            select(ScratchSubmission)
-            .where(ScratchSubmission.lesson_block_id == block.id)
+            _scope_students(submission_query, ScratchSubmission.user_id, student_ids)
         ))
+        if student_ids is not None and not submissions:
+            continue
         stats = _scratch_stats(submissions)
         row.update({
             "full_score": 100,
@@ -751,14 +752,17 @@ def _scratch_students(db: Session, block_id: int,
     return rows
 
 
-def _scratch_detail(db: Session, admin: AdminUser, block_id: int) -> dict:
-    context = scratch_context(db, block_id, admin)
+def _scratch_detail(db: Session, block_id: int, student_ids: set[int] | None) -> dict:
+    context = scratch_context(db, block_id)
     if context is None:
         raise LookupError("课时作业不存在。")
     block, _detail, challenge, lesson, section, course = context
-    submissions = list(db.scalars(
+    submission_query = (
         select(ScratchSubmission).where(ScratchSubmission.lesson_block_id == block.id)
         .order_by(ScratchSubmission.submitted_at.desc(), ScratchSubmission.id.desc())
+    )
+    submissions = list(db.scalars(
+        _scope_students(submission_query, ScratchSubmission.user_id, student_ids)
     ))
     stats = _scratch_stats(submissions)
     row = _scratch_row(block, challenge, lesson, section, course)
@@ -802,8 +806,10 @@ SCRATCH_HISTORY_COLUMNS = (
 )
 
 
-def _scratch_history(db: Session, admin: AdminUser, block_id: int, user_id: int) -> dict:
-    context = scratch_context(db, block_id, admin)
+def _scratch_history(db: Session, block_id: int, user_id: int,
+                     student_ids: set[int] | None) -> dict:
+    _require_visible_student(user_id, student_ids)
+    context = scratch_context(db, block_id)
     if context is None:
         raise LookupError("课时作业不存在。")
     block, *_ = context
@@ -835,15 +841,17 @@ def _scratch_history(db: Session, admin: AdminUser, block_id: int, user_id: int)
     }
 
 
-def _scratch_record(db: Session, admin: AdminUser, block_id: int, record_id: int) -> dict:
+def _scratch_record(db: Session, block_id: int, record_id: int,
+                    student_ids: set[int] | None) -> dict:
     """一次提交的快照与判定证据。字段成对下发，弹窗不认识 Scratch 的任何概念。"""
-    context = scratch_context(db, block_id, admin)
+    context = scratch_context(db, block_id)
     if context is None:
         raise LookupError("课时作业不存在。")
     block, _detail, challenge, *_ = context
     submission = db.get(ScratchSubmission, record_id)
     if submission is None or submission.lesson_block_id != block.id:
         raise LookupError("提交记录不存在。")
+    _require_visible_student(submission.user_id, student_ids)
     revision = db.get(ScratchProjectRevision, submission.project_revision_id)
     student = db.get(User, submission.user_id)
     label, _tone = SUBMISSION_STATUS.get(submission.status, (submission.status, "muted"))
@@ -931,8 +939,8 @@ def kind_for_block(db: Session, block_id: int) -> HomeworkKind | None:
     return kind_by_block_type(block.block_type) if block else None
 
 
-def collect_rows(db: Session, admin: AdminUser,
-                 filters: HomeworkFilters) -> tuple[list[dict], list[HomeworkKind]]:
+def collect_rows(db: Session, filters: HomeworkFilters,
+                 student_ids: set[int] | None) -> tuple[list[dict], list[HomeworkKind]]:
     """按注册表顺序收集全部类型的行，返回 (行, 真正参与了本次查询的类型)。"""
     rows: list[dict] = []
     used: list[HomeworkKind] = []
@@ -940,7 +948,7 @@ def collect_rows(db: Session, admin: AdminUser,
         if not kind.accepts(filters):
             continue
         used.append(kind)
-        rows += kind.collect(db, admin, filters)
+        rows += kind.collect(db, filters, student_ids)
     return rows, used
 
 

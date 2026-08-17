@@ -57,3 +57,25 @@ def is_editor(admin) -> bool:
 def is_reviewer(admin) -> bool:
     """能审核。super_admin 豁免（单管理员环境下否则流程走不完，见 M2 决策）。"""
     return admin.role in REVIEWER_ROLES or is_super(admin)
+
+
+def visible_class_ids(admin, db) -> set[int] | None:
+    """返回管理员可见班级；``None`` 表示全局不受限。
+
+    E1 尚未落地 ``class_teachers``，因此教师与助教暂时看不到任何班级。教务和
+    超管是全局学情角色；其余内容角色不因此获得学生数据范围。E2 只需把受限角色
+    的空集合替换为班级关联查询，调用点的 ``None`` 语义保持不变。
+    """
+    del db  # E2 接入 class_teachers 查询后使用。
+    if admin.role in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE}:
+        return None
+    return set()
+
+
+def visible_student_ids(admin, db) -> set[int] | None:
+    """返回管理员可见学生；由班级范围推导，``None`` 同样表示不受限。"""
+    class_ids = visible_class_ids(admin, db)
+    if class_ids is None:
+        return None
+    # E1 没有 class_members 表；E2 在这里按 class_ids 查询在班学生。
+    return set()

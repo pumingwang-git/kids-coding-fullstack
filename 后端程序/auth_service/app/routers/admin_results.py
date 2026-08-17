@@ -1,6 +1,7 @@
 """后台成绩查看：「组卷 → 发链接 → 看结果」动线的最后一步，全部只读。
 
-三个端点，权限复用试卷域的 _can_read（能看卷的人才能看这场成绩）：
+成绩与作答属于 ``class_scope``，不再复用试卷域的内容归属权限。所有聚合查询由
+``visible_student_ids()`` 收窄；按学生或作答 ID 读取的端点另做显式成员校验。
 
   GET /api/admin/exam-results               跨场次总览，运营 / 成绩统计页用
   GET /api/admin/links/{link_id}/results    单场明细 + 分数分布
@@ -26,7 +27,7 @@ import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..attempt_source import SOURCE_LESSON_HOMEWORK, attempt_scope, from_lesson_homework
@@ -42,52 +43,46 @@ from ..lesson_homework_kinds import (
     tree_for,
 )
 from ..models import (
-    AdminUser,
     AttemptAnswer,
     ChoiceOption,
     CodeSubmission,
-    Course,
-    CourseLesson,
-    CourseLessonBlock,
-    CourseSection,
     ExamLink,
     FillAnswer,
-    LessonPaperBlock,
     Paper,
     PaperAttempt,
     PaperQuestion,
     Problem,
     User,
 )
-from ..permissions import is_reviewer
+from ..permissions import visible_student_ids
+from ..results_common import (
+    attempts_by_user as _attempts_by_user,
+)
 from ..results_common import (
     build_item_analysis,
     build_students,
     build_summary,
-    counted_scores as _counted_scores,
     distribution_of,
     full_score,
-    attempts_by_user as _attempts_by_user,
+)
+from ..results_common import (
+    counted_scores as _counted_scores,
+)
+from ..results_common import (
     score_summary as _score_summary,
 )
 from ..scoring import parse_answer, parse_blank_alternatives
 from .admin_auth import client_ip, current_admin, db_session, limit
-from .admin_papers import _as_utc, _can_read, _link_phase
+from .admin_papers import _as_utc, _link_phase
 
 # 「哪一次算数」全系统只有这一个解释处。后台若自己写死"取最高一次"，配了
 # score_policy=last 的场次就会出现：老师看到 92 分、学员端候考页和排行榜按 78 分算。
-from .exam import counted_attempt
 
 router = APIRouter(prefix="/api/admin", tags=["admin-results"])
 
 def _iso(value: datetime | None) -> str | None:
     aware = _as_utc(value) if value is not None else None
     return aware.isoformat() if aware else None
-
-
-def _sees_all(admin: AdminUser) -> bool:
-    """与 _can_read 的 SQL 版：超管与审核员看全部，其余只看自己录入/负责的卷。"""
-    return is_reviewer(admin)
 
 
 def _full_score(db: Session, paper_id: int) -> int:
@@ -102,7 +97,18 @@ def _full_score(db: Session, paper_id: int) -> int:
 # ==================== 来源收集器 ====================
 
 
-def _collect_exam_link_rows(db: Session, admin: AdminUser, *,
+def _scope_students(stmt, student_column, student_ids: set[int] | None):
+    if student_ids is not None:
+        stmt = stmt.where(student_column.in_(student_ids))
+    return stmt
+
+
+def _require_nonempty_scope(student_ids: set[int] | None) -> None:
+    if student_ids is not None and not student_ids:
+        raise HTTPException(403, "当前没有可查看的学生范围。")
+
+
+def _collect_exam_link_rows(db: Session, student_ids: set[int] | None, *,
                             keyword: str, paper_type: str, subject: str) -> list[dict]:
     """考试链接来源的总览行。课包作业 / 练一练落地时按这个 DTO 形状各加一个收集器。"""
     query = (
@@ -110,8 +116,6 @@ def _collect_exam_link_rows(db: Session, admin: AdminUser, *,
         .join(Paper, Paper.id == ExamLink.paper_id)
         .order_by(ExamLink.id.desc())
     )
-    if not _sees_all(admin):
-        query = query.where((Paper.owner_id == admin.id) | (Paper.created_by == admin.id))
     if paper_type:
         query = query.where(Paper.paper_type == paper_type)
     if subject:
@@ -125,9 +129,12 @@ def _collect_exam_link_rows(db: Session, admin: AdminUser, *,
     now = datetime.now(UTC)
     rows = []
     for link, paper in db.execute(query).all():
+        attempt_query = select(PaperAttempt).where(PaperAttempt.exam_link_id == link.id)
         attempts = list(db.scalars(
-            select(PaperAttempt).where(PaperAttempt.exam_link_id == link.id)
+            _scope_students(attempt_query, PaperAttempt.user_id, student_ids)
         ))
+        if student_ids is not None and not attempts:
+            continue
         by_user = _attempts_by_user(attempts)
         submitted_attempts = [a for a in attempts if a.status == "submitted"]
         # 人数与人次分开报。练习卷允许反复作答，一个学员考 100 次时
@@ -173,9 +180,9 @@ def _dispatch(call, *args):
         raise HTTPException(404, str(error)) from error
 
 
-def _paper_context_or_404(db: Session, block_id: int, admin: AdminUser):
+def _paper_context_or_404(db: Session, block_id: int):
     """逐题分析只对整卷作业成立（Scratch 没有题目），故不走通用分派。"""
-    context = _dispatch(paper_context, db, block_id, admin)
+    context = _dispatch(paper_context, db, block_id)
     if context is None:
         raise HTTPException(404, "课时作业不存在。")
     return context
@@ -191,6 +198,7 @@ def list_exam_results(request: Request, keyword: str = "", paper_type: str = "",
                       db: Session = Depends(db_session)):
     """跨场次总览。source 为空 = 全部已实现的来源；未知的来源值是 422 不是空列表。"""
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     known_sources = {"exam_link"}  # lesson / practice 落地时加进来
     if source and source not in known_sources:
@@ -198,7 +206,7 @@ def list_exam_results(request: Request, keyword: str = "", paper_type: str = "",
 
     rows = []
     if source in ("", "exam_link"):
-        rows += _collect_exam_link_rows(db, admin, keyword=keyword, paper_type=paper_type,
+        rows += _collect_exam_link_rows(db, student_ids, keyword=keyword, paper_type=paper_type,
                                         subject=subject)
     rows.sort(key=lambda row: row["link"]["id"], reverse=True)
     total = len(rows)
@@ -223,13 +231,14 @@ def list_lesson_homework_results(request: Request, keyword: str = "", paper_type
     生成表头、统计卡和下拉框，因此前端不持有任何作业类型的业务白名单。
     """
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     if kind and kind not in {meta["key"] for meta in kinds_meta()}:
         raise HTTPException(422, f"未知的作业类型：{kind}")
     filters = HomeworkFilters(keyword=keyword, course_id=course_id, section_id=section_id,
                               lesson_id=lesson_id, kind=kind, status=status,
                               paper_type=paper_type, subject=subject)
-    rows, _used = collect_rows(db, admin, filters)
+    rows, _used = collect_rows(db, filters, student_ids)
     return {
         "items": rows[(page - 1) * size: page * size],
         "total": len(rows), "page": page, "size": size,
@@ -247,9 +256,11 @@ def lesson_homework_results(block_id: int, request: Request,
                             db: Session = Depends(db_session)):
     """单份课时作业成绩详情。哪一种作业由块类型决定，路由不认识具体类型。"""
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
+    _require_nonempty_scope(student_ids)
     kind = _homework_kind_or_404(db, block_id)
-    payload = _dispatch(kind.detail, db, admin, block_id)
+    payload = _dispatch(kind.detail, db, block_id, student_ids)
     return {**payload,
             "columns": [column.as_dict() for column in kind.detail_columns],
             "insight": kind.insight,
@@ -262,9 +273,11 @@ def lesson_homework_student_attempts(block_id: int, user_id: int, request: Reque
                                     db: Session = Depends(db_session)):
     """按需返回一位学员在这份作业上的全部记录，避免详情页为每人预传历史。"""
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
+    _require_nonempty_scope(student_ids)
     kind = _homework_kind_or_404(db, block_id)
-    return _dispatch(kind.student_history, db, admin, block_id, user_id)
+    return _dispatch(kind.student_history, db, block_id, user_id, student_ids)
 
 
 @router.get("/lesson-homework/{block_id}/records/{record_id}")
@@ -276,11 +289,13 @@ def lesson_homework_record(block_id: int, record_id: int, request: Request,
     `record` 只由需要它的类型声明；没声明的类型这里是 404，不是空壳弹窗。
     """
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
+    _require_nonempty_scope(student_ids)
     kind = _homework_kind_or_404(db, block_id)
     if kind.record is None:
         raise HTTPException(404, "该作业类型没有可单独查看的记录详情。")
-    return _dispatch(kind.record, db, admin, block_id, record_id)
+    return _dispatch(kind.record, db, block_id, record_id, student_ids)
 
 
 @router.get("/lesson-homework/{block_id}/item-analysis")
@@ -288,10 +303,15 @@ def lesson_homework_item_analysis(block_id: int, request: Request,
                                   db: Session = Depends(db_session)):
     """课时作业逐题分析。只对整卷作业成立：Scratch 作业没有题目可逐题看。"""
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
-    block, detail, paper, lesson, section, course = _paper_context_or_404(db, block_id, admin)
+    _require_nonempty_scope(student_ids)
+    block, detail, paper, lesson, section, course = _paper_context_or_404(db, block_id)
     source = from_lesson_homework(block, detail)
-    attempts = list(db.scalars(select(PaperAttempt).where(*attempt_scope(source))))
+    attempt_query = select(PaperAttempt).where(*attempt_scope(source))
+    attempts = list(db.scalars(
+        _scope_students(attempt_query, PaperAttempt.user_id, student_ids)
+    ))
     grouping, items = build_item_analysis(db, paper, attempts, source.score_policy)
     return {
         "source": source.source_type, "source_id": block.id,
@@ -318,17 +338,19 @@ def link_results(link_id: int, request: Request, db: Session = Depends(db_sessio
     排行榜同一个函数——三处口径必须一致，否则老师和学员对着不同的分数说话。
     """
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     link = db.get(ExamLink, link_id)
     paper = db.get(Paper, link.paper_id) if link else None
     if not link or not paper:
         raise HTTPException(404, "考试链接不存在。")
-    if not _can_read(paper, admin):
-        raise HTTPException(403, "没有查看该场成绩的权限。")
-
-    attempts = list(db.scalars(
+    _require_nonempty_scope(student_ids)
+    attempt_query = (
         select(PaperAttempt).where(PaperAttempt.exam_link_id == link.id)
         .order_by(PaperAttempt.started_at.desc(), PaperAttempt.id.desc())
+    )
+    attempts = list(db.scalars(
+        _scope_students(attempt_query, PaperAttempt.user_id, student_ids)
     ))
 
     full = _full_score(db, paper.id)
@@ -395,16 +417,17 @@ def link_item_analysis(link_id: int, request: Request, db: Session = Depends(db_
       - `all_low`：得分率极低且高分组也没做对——先查题，再谈讲评。
     """
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     link = db.get(ExamLink, link_id)
     paper = db.get(Paper, link.paper_id) if link else None
     if not link or not paper:
         raise HTTPException(404, "考试链接不存在。")
-    if not _can_read(paper, admin):
-        raise HTTPException(403, "没有查看该场成绩的权限。")
-
+    _require_nonempty_scope(student_ids)
+    attempt_query = select(PaperAttempt).where(PaperAttempt.exam_link_id == link.id)
     attempts = list(db.scalars(
-        select(PaperAttempt).where(PaperAttempt.exam_link_id == link.id)))
+        _scope_students(attempt_query, PaperAttempt.user_id, student_ids)
+    ))
     grouping, items = build_item_analysis(db, paper, attempts, link.score_policy)
 
     return {
@@ -419,16 +442,16 @@ def attempt_review(attempt_id: int, request: Request, db: Session = Depends(db_s
     """单份答卷逐题回看。管理员本就能 preview 整卷答案，所以这里不下发限制：
     正确答案、学员答案、编程题代码与逐测试点结果全给——这是老师复核成绩的工作台。"""
     admin = current_admin(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     attempt = db.get(PaperAttempt, attempt_id)
     paper = db.get(Paper, attempt.paper_id) if attempt else None
     if not attempt or not paper:
         raise HTTPException(404, "作答记录不存在。")
-    if attempt.source_type == SOURCE_LESSON_HOMEWORK:
-        # 课时作业的答卷额外受课包侧范围约束，口径与作业成绩页同一处实现。
-        _paper_context_or_404(db, attempt.source_id, admin)
-    elif not _can_read(paper, admin):
+    if student_ids is not None and attempt.user_id not in student_ids:
         raise HTTPException(403, "没有查看该份答卷的权限。")
+    if attempt.source_type == SOURCE_LESSON_HOMEWORK:
+        _paper_context_or_404(db, attempt.source_id)
 
     rows = list(db.scalars(
         select(PaperQuestion).where(PaperQuestion.paper_id == paper.id)

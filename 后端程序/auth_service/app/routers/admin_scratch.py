@@ -48,7 +48,13 @@ from ..models import (
     User,
     Video,
 )
-from ..permissions import is_editor
+from ..permissions import (
+    ACADEMIC_ADMIN_ROLE,
+    ASSISTANT_ROLE,
+    TEACHER_ROLE,
+    is_editor,
+    visible_student_ids,
+)
 from ..scratch_rules import KNOWN_TYPES, UNSUPPORTED, checklist, parse_rules
 from ..scratch_sb3 import Sb3Invalid, inspect_sb3, read_project_json, read_sb3, store_sb3
 from ..security import utcnow
@@ -131,28 +137,18 @@ def _require_editor(request: Request, db: Session):
 
 
 def _require_submission_reader(request: Request, db: Session):
-    """学生作品（提交列表 / 详情 / .sb3 / project.json）的读闸。
+    """学生作品与批改端点的功能闸；数据范围由调用点另行收窄。"""
+    admin = current_admin(request, db)
+    grading_roles = {TEACHER_ROLE, ASSISTANT_ROLE, ACADEMIC_ADMIN_ROLE}
+    if not is_editor(admin) and admin.role not in grading_roles:
+        raise HTTPException(403, "没有查看或批改学生作品的权限。")
+    return admin
 
-    **这是过渡措施。E2 落地 `class_teachers` 后，这里应换成 `class_scope`
-    （`permissions.visible_class_ids()`）。**
 
-    口径刻意与写端点（`/review`、`/return` 的 `_require_editor`）拉平。这四条原先
-    只调 `current_admin(request, db)`、连返回值都不接——只做了身份认证、没有任何
-    授权，任何后台登录态（包括只该审题的 reviewer）都能列出并下载**全站**学生的
-    作品源文件；`keyword` 那条 `User.username.like()` 更等于把全站学生姓名搜索开给
-    了所有角色。读写口径不一致本身就是遗漏的证据：能看全站作品的人比能改一条判定
-    的人还多，说不通。
-
-    **为什么现在只能做到角色闸**：真正该有的是数据范围——老师只看自己带的班。但
-    班级归属表 `class_teachers` 要到 E2 才建，库里现在没有任何能把管理员映射到学生
-    集合的事实，此刻写出来的"范围"只会是假的（要么恒空、要么恒全量），不如先把闸门
-    拉平、把限制写在明处。E2 的替换点就是本函数与它的四个调用点：列表端点按可见班级
-    收窄 where 条件，三个按 id 取单条的端点还要显式校验该提交的学生在可见集内——否则
-    列表收窄了，仍能靠逐个试 submission_id 穿透（同 admin_results 第 4 条的教训）。
-
-    详见《32、E0-权限矩阵与数据范围对账-2026-08-17》§3.2 与 §5 问题 1、2。
-    """
-    return _require_editor(request, db)
+def _require_visible_submission(submission: ScratchSubmission,
+                                student_ids: set[int] | None) -> None:
+    if student_ids is not None and submission.user_id not in student_ids:
+        raise HTTPException(403, "没有查看或批改该学生作品的权限。")
 
 
 def _validate_rules(rules: list[dict]) -> list[dict]:
@@ -992,12 +988,15 @@ def list_submissions(request: Request, db: Session = Depends(db_session),
     （批改队列用——一个学生交五次就只排一条）。默认 false，保持"学生作品"只读列表
     看完整历史的行为不变。
 
-    `keyword` 是**全站**学生用户名模糊搜索，所以这条与 `.sb3` 下载同级，卡
-    `_require_submission_reader`（过渡期 = editor 级；E2 后按可见班级收窄）。
+    `keyword` 是学生用户名模糊搜索，所以这条与 `.sb3` 下载同级：先过功能角色闸，
+    再由 `visible_student_ids()` 把查询收窄到当前可见学生。
     """
-    _require_submission_reader(request, db)
+    admin = _require_submission_reader(request, db)
+    student_ids = visible_student_ids(admin, db)
     limit_size = page_size or size
     stmt = select(ScratchSubmission)
+    if student_ids is not None:
+        stmt = stmt.where(ScratchSubmission.user_id.in_(student_ids))
     if challenge_id:
         stmt = stmt.where(ScratchSubmission.challenge_id == challenge_id)
     if lesson_id:
@@ -1037,12 +1036,13 @@ def list_submissions(request: Request, db: Session = Depends(db_session),
 
 @router.get("/submissions/{submission_id}")
 def get_submission(submission_id: int, request: Request, db: Session = Depends(db_session)):
-    """单份提交详情。鉴权见 `_require_submission_reader`——E2 之后这里还要补一条
-    "该提交的学生是否在可见班级内"，否则按 id 逐个试仍能穿透。"""
-    _require_submission_reader(request, db)
+    """单份提交详情；角色闸与学生范围校验都先于响应序列化。"""
+    admin = _require_submission_reader(request, db)
+    student_ids = visible_student_ids(admin, db)
     submission = db.get(ScratchSubmission, submission_id)
     if submission is None:
         raise HTTPException(404, "提交记录不存在。")
+    _require_visible_submission(submission, student_ids)
     return _submission_row(db, submission, detail=True)
 
 
@@ -1056,10 +1056,12 @@ def download_submission_project(submission_id: int, request: Request,
 
     这是本模块泄露面最大的一条（整份作品源文件），鉴权见 `_require_submission_reader`。
     """
-    _require_submission_reader(request, db)
+    admin = _require_submission_reader(request, db)
+    student_ids = visible_student_ids(admin, db)
     submission = db.get(ScratchSubmission, submission_id)
     if submission is None:
         raise HTTPException(404, "提交记录不存在。")
+    _require_visible_submission(submission, student_ids)
     revision = db.get(ScratchProjectRevision, submission.project_revision_id)
     data = read_sb3(revision.sb3_key, request.app.state.settings) if revision else None
     if data is None:
@@ -1080,10 +1082,12 @@ def download_submission_project_json(submission_id: int, request: Request,
     整包 `.sb3` 含素材，动辄几 MB；这里只解出 `project.json` 一个条目，前端不必
     再引 JSZip 自己解压。鉴权口径与 `.sb3` 下载一致：卡 `_require_submission_reader`。
     """
-    _require_submission_reader(request, db)
+    admin = _require_submission_reader(request, db)
+    student_ids = visible_student_ids(admin, db)
     submission = db.get(ScratchSubmission, submission_id)
     if submission is None:
         raise HTTPException(404, "提交记录不存在。")
+    _require_visible_submission(submission, student_ids)
     revision = db.get(ScratchProjectRevision, submission.project_revision_id)
     if revision is None:
         raise HTTPException(404, "作品快照文件丢失。")
@@ -1118,10 +1122,12 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
     进 `rubric_snapshot`。
     """
     require_csrf(request)
-    admin = _require_editor(request, db)
+    admin = _require_submission_reader(request, db)
+    student_ids = visible_student_ids(admin, db)
     submission = db.get(ScratchSubmission, submission_id)
     if submission is None:
         raise HTTPException(404, "提交记录不存在。")
+    _require_visible_submission(submission, student_ids)
     challenge = db.get(ScratchChallenge, submission.challenge_id)
 
     rubric_result = _apply_rubric(challenge, payload.rubric) if challenge else None
@@ -1174,10 +1180,12 @@ def return_submission(submission_id: int, payload: ReturnPayload, request: Reque
     幂等：对已是 `returned` 的行再调一次，覆盖评语和时间，不报错。
     """
     require_csrf(request)
-    admin = _require_editor(request, db)
+    admin = _require_submission_reader(request, db)
+    student_ids = visible_student_ids(admin, db)
     submission = db.get(ScratchSubmission, submission_id)
     if submission is None:
         raise HTTPException(404, "提交记录不存在。")
+    _require_visible_submission(submission, student_ids)
     challenge = db.get(ScratchChallenge, submission.challenge_id)
 
     rubric_result = _apply_rubric(challenge, payload.rubric) if challenge else None

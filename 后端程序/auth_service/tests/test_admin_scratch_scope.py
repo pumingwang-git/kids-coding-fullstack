@@ -1,4 +1,4 @@
-"""Scratch 提交读端点的角色闸（E0 对账文档 §3.2 / §5 问题 1、2 的修复验证）。
+"""Scratch 提交六端点的角色闸与 class_scope 验证。
 
 背景：`/api/admin/scratch/submissions` 及其三条子路径原先只调 `current_admin`，
 只做身份认证、没有任何授权——任何后台登录态都能列出并下载全站学生的作品源文件，
@@ -6,12 +6,10 @@
 `_require_editor`，读写口径不一致说明这是遗漏。本文件钉死修复后的口径：
 
 - reviewer（只该审题）→ 四条读端点一律 403；
-- editor / super_admin → 照常 200（回归，别把闸门收得比写端点还紧）；
+- editor 没有班级范围 → 列表为空、按 ID 访问 403；
+- teacher 的 E1 过渡范围为空，六端点不得返回任何学生数据；
+- super_admin → 照常 200；
 - 未登录 → 401（认证仍先于授权，不能因为加了角色闸就把匿名也报成 403）。
-
-**本期只到角色闸。** 数据范围（老师只看自己带的班）要等 E2 的 `class_teachers`，
-届时这里应补"teacher 看不到他班学生"的用例，见 `_require_submission_reader` 注释与
-《32、E0-权限矩阵与数据范围对账-2026-08-17》§6.2。
 """
 from pathlib import Path
 
@@ -27,7 +25,8 @@ from test_scratch import (
     submit,
 )
 
-from app.models import AdminUser
+import app.routers.admin_scratch as admin_scratch
+from app.models import AdminUser, User
 from app.security import password_hash
 
 
@@ -47,12 +46,11 @@ def _submitted(tmp_path: Path):
     return app, sid, "scopekid"
 
 
-def _editor_login(app) -> tuple[TestClient, dict]:
-    """普通 editor（不是 super_admin）：确认闸门放行的是角色本身，不是超管豁免。"""
+def _role_login(app, role: str) -> tuple[TestClient, dict]:
     db = app.state.session_factory()
     try:
-        db.add(AdminUser(username="editor1", password_hash=password_hash.hash(ADMIN_PASSWORD),
-                         display_name="editor", role="editor"))
+        db.add(AdminUser(username=f"scope-{role}", password_hash=password_hash.hash(ADMIN_PASSWORD),
+                         display_name=role, role=role))
         db.commit()
     finally:
         db.close()
@@ -60,7 +58,7 @@ def _editor_login(app) -> tuple[TestClient, dict]:
     client.get("/api/admin/csrf")
     headers = {"X-CSRF-Token": client.cookies.get("admin_csrf_token")}
     resp = client.post("/api/admin/login", headers=headers,
-                       json={"username": "editor1", "password": ADMIN_PASSWORD})
+                       json={"username": f"scope-{role}", "password": ADMIN_PASSWORD})
     assert resp.status_code == 200, resp.text
     return client, headers
 
@@ -108,31 +106,74 @@ def test_reviewer_cannot_search_students_by_keyword(tmp_path: Path):
     assert resp.status_code == 403, resp.text
 
 
-def test_editor_still_reads_submissions(tmp_path: Path):
-    """回归：普通 editor 是批改台的正常使用者，四条读端点须照常放行。"""
+def test_editor_has_no_global_submission_scope(tmp_path: Path):
+    """editor 只有内容权限，不因旧批改台角色闸获得全站学生范围。"""
     app, sid, username = _submitted(tmp_path)
-    client, headers = _editor_login(app)
+    client, headers = _role_login(app, "editor")
 
     listed = client.get("/api/admin/scratch/submissions", headers=headers)
     assert listed.status_code == 200, listed.text
-    assert listed.json()["total"] >= 1
+    assert listed.json()["total"] == 0
 
     searched = client.get("/api/admin/scratch/submissions",
                           params={"keyword": username[:4]}, headers=headers)
     assert searched.status_code == 200, searched.text
-    assert searched.json()["total"] >= 1
+    assert searched.json()["total"] == 0
+    for path in _read_paths(sid)[1:]:
+        assert client.get(path, headers=headers).status_code == 403
 
-    detail = client.get(f"/api/admin/scratch/submissions/{sid}", headers=headers)
-    assert detail.status_code == 200, detail.text
-    assert detail.json()["id"] == sid
 
-    sb3 = client.get(f"/api/admin/scratch/submissions/{sid}/project.sb3", headers=headers)
-    assert sb3.status_code == 200, sb3.text
-    assert sb3.content[:2] == b"PK"  # 真的是 zip，不是被闸门吞成空响应
+def test_teacher_empty_scope_covers_all_six_submission_endpoints(tmp_path: Path):
+    app, sid, _ = _submitted(tmp_path)
+    client, headers = _role_login(app, "teacher")
 
-    pjson = client.get(f"/api/admin/scratch/submissions/{sid}/project.json", headers=headers)
-    assert pjson.status_code == 200, pjson.text
-    assert "targets" in pjson.json()
+    listed = client.get("/api/admin/scratch/submissions", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()["items"] == []
+    for path in _read_paths(sid)[1:]:
+        assert client.get(path, headers=headers).status_code == 403
+    assert client.post(f"/api/admin/scratch/submissions/{sid}/review", headers=headers,
+                       json={"verdict": "failed", "comment": ""}).status_code == 403
+    assert client.post(f"/api/admin/scratch/submissions/{sid}/return", headers=headers,
+                       json={"comment": "请修改后重交"}).status_code == 403
+
+
+def test_nonempty_scope_filters_list_and_submission_ids(tmp_path: Path, monkeypatch):
+    app = scratch_env(tmp_path)
+    built = build_scratch_lesson(app)
+    block_id = built["block_ids"][0]
+
+    submission_ids = []
+    for username in ("visiblekid", "hiddenkid"):
+        student = student_login(app, username)
+        project_id = open_block(student, block_id).json()["project"]["id"]
+        save_project(student, project_id, sb3_bytes())
+        submission_ids.append(submit(student, block_id).json()["submission_id"])
+
+    db = app.state.session_factory()
+    try:
+        visible_id = db.query(User).filter_by(username="visiblekid").one().id
+    finally:
+        db.close()
+    monkeypatch.setattr(admin_scratch, "visible_student_ids",
+                        lambda _admin, _db: {visible_id})
+    client, headers = _role_login(app, "academic_admin")
+
+    listed = client.get("/api/admin/scratch/submissions", headers=headers).json()
+    assert listed["total"] == 1
+    assert listed["items"][0]["student_id"] == visible_id
+    assert client.get(f"/api/admin/scratch/submissions/{submission_ids[0]}",
+                      headers=headers).status_code == 200
+    assert client.get(f"/api/admin/scratch/submissions/{submission_ids[1]}",
+                      headers=headers).status_code == 403
+    assert client.get(f"/api/admin/scratch/submissions/{submission_ids[1]}/project.sb3",
+                      headers=headers).status_code == 403
+    assert client.post(f"/api/admin/scratch/submissions/{submission_ids[1]}/review",
+                       headers=headers,
+                       json={"verdict": "failed", "comment": ""}).status_code == 403
+    assert client.post(f"/api/admin/scratch/submissions/{submission_ids[1]}/return",
+                       headers=headers,
+                       json={"comment": "请修改后重交"}).status_code == 403
 
 
 def test_super_admin_still_reads_submissions(tmp_path: Path):

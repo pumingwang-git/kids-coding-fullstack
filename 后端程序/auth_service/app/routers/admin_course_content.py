@@ -27,6 +27,8 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
+from ..attempt_source import SOURCE_LESSON_HOMEWORK, attempt_count_for
+from ..course_access import UNLOCK_RULES  # 解锁规则枚举只有一份，不在本文件另立
 from ..models import (
     AdminUser,
     Course,
@@ -48,9 +50,7 @@ from ..models import (
     Video,
     VideoVariant,
 )
-from ..course_access import UNLOCK_RULES  # 解锁规则枚举只有一份，不在本文件另立
-from ..permissions import is_editor
-from ..attempt_source import SOURCE_LESSON_HOMEWORK, attempt_count_for
+from ..permissions import is_editor, visible_student_ids
 from .admin_auth import audit, client_ip, current_admin, db_session, require_csrf
 
 router = APIRouter(prefix="/api/admin", tags=["admin-course-content"])
@@ -571,6 +571,9 @@ def extend_homework_deadline(block_id: int, payload: HomeworkDeadlineExtensionPa
     admin = current_admin(request, db)
     if not is_editor(admin):
         raise HTTPException(403, "没有编辑课程内容的权限。")
+    student_ids = visible_student_ids(admin, db)
+    if student_ids is not None and not student_ids:
+        raise HTTPException(403, "当前没有可管理的学生范围。")
     block = db.get(CourseLessonBlock, block_id)
     if block is None or block.block_type != "homework":
         raise HTTPException(404, "课时作业块不存在。")
@@ -593,13 +596,14 @@ def extend_homework_deadline(block_id: int, payload: HomeworkDeadlineExtensionPa
         raise HTTPException(400, "新的作业截止时间必须晚于当前时间。")
 
     detail.due_at = new_due_at
-    ongoing = db.scalars(
-        select(PaperAttempt).where(
-            PaperAttempt.source_type == SOURCE_LESSON_HOMEWORK,
-            PaperAttempt.source_id == block_id,
-            PaperAttempt.status == "ongoing",
-        )
-    ).all()
+    ongoing_query = select(PaperAttempt).where(
+        PaperAttempt.source_type == SOURCE_LESSON_HOMEWORK,
+        PaperAttempt.source_id == block_id,
+        PaperAttempt.status == "ongoing",
+    )
+    if student_ids is not None:
+        ongoing_query = ongoing_query.where(PaperAttempt.user_id.in_(student_ids))
+    ongoing = db.scalars(ongoing_query).all()
     for attempt in ongoing:
         attempt.deadline_at = new_due_at
     audit(db, request.app.state.settings, "course_homework_deadline_extend", "success",
