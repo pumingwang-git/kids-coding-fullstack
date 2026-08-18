@@ -90,8 +90,8 @@ Desktop.ini
 # Playwright 复核截图：每次跑页面核对都会重新生成一批，属于产物不是素材。
 /output/
 # Playwright CLI 自己的抓取缓存（console-*.log 会被 *.log 收掉，
-# 但 page-*.yml 不会，所以整个目录挡掉）。
-/.playwright-cli/
+# 但 page-*.yml 不会，所以任意子项目下的整个目录都挡掉）。
+**/.playwright-cli/
 
 # Local-only style preview harness for the exam pages: it mounts a single
 # component against fixture data so layout can be eyeballed without a backend.
