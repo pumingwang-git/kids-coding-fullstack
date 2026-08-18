@@ -24,7 +24,7 @@ function renderList() {
     <tr class="class-row" data-id="${row.id}">
       <td><a class="class-name-link" href="classes.html?id=${row.id}">${escapeHtml(row.name)}</a></td>
       <td class="class-code">${row.course_id}</td>
-      <td><span class="${statusClass(row.status)}">${escapeHtml(row.status)}</span></td>
+      <td><span class="${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td>
       <td>${escapeHtml(fmtTime(row.start_at) || "未设置")}</td>
       <td>${escapeHtml(fmtTime(row.end_at) || "未设置")}</td>
       <td><a class="btn-text" href="classes.html?id=${row.id}">查看详情</a></td>
@@ -36,7 +36,7 @@ function renderDetail(row) {
   $("classDetailFields").innerHTML = [
     ["班级 ID", row.id],
     ["课包 ID", row.course_id],
-    ["状态", row.status],
+    ["状态", row.status_label],
     ["开始时间", fmtTime(row.start_at) || "未设置"],
     ["结束时间", fmtTime(row.end_at) || "未设置"],
     ["更新时间", fmtTime(row.updated_at) || "未设置"],

@@ -95,6 +95,7 @@ def test_class_crud_archive_and_delete_guard(tmp_path: Path):
     assert created.status_code == 201, created.text
     class_id = created.json()["id"]
     assert created.json()["status"] == "draft"
+    assert created.json()["status_label"] == "草稿"
 
     updated = client.put(
         f"/api/admin/classes/{class_id}",
@@ -273,6 +274,7 @@ def test_teacher_assignment_unassignment_and_failure_audit(tmp_path: Path):
         json={"admin_user_id": teacher_id, "role_in_class": "teacher"},
     )
     assert assigned.status_code == 201, assigned.text
+    assert assigned.json()["role_in_class_label"] == "主讲教师"
     assignment_id = assigned.json()["id"]
 
     db = app.state.session_factory()

@@ -24,6 +24,15 @@ from .admin_auth import audit, client_ip, current_admin, db_session, require_csr
 router = APIRouter(prefix="/api/admin/classes", tags=["admin-classes"])
 MANAGER_ROLES = frozenset({ACADEMIC_ADMIN_ROLE, SUPER_ROLE})
 READER_ROLES = MANAGER_ROLES | frozenset({TEACHER_ROLE, ASSISTANT_ROLE})
+CLASS_STATUS_LABELS = {
+    "draft": "草稿",
+    "active": "进行中",
+    "archived": "已归档",
+}
+CLASS_ROLE_LABELS = {
+    "teacher": "主讲教师",
+    "assistant": "助教",
+}
 
 
 class ClassPayload(BaseModel):
@@ -90,6 +99,7 @@ def _serialize_class(row: ClassGroup) -> dict:
         "start_at": row.start_at,
         "end_at": row.end_at,
         "status": row.status,
+        "status_label": CLASS_STATUS_LABELS[row.status],
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -106,6 +116,7 @@ def _serialize_teacher(row: ClassTeacher) -> dict:
         "class_id": row.class_id,
         "admin_user_id": row.admin_user_id,
         "role_in_class": row.role_in_class,
+        "role_in_class_label": CLASS_ROLE_LABELS[row.role_in_class],
         "assigned_at": row.assigned_at,
         "ended_at": row.ended_at,
     }
