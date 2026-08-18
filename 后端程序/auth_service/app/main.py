@@ -55,6 +55,7 @@ from .routers.scratch import router as scratch_router
 from .routers.scratch_works import router as scratch_works_router
 from .routers.student_mistakes import router as student_mistakes_router
 from .routers.student_profile import router as student_profile_router
+from .routers.student_tasks import router as student_tasks_router
 from .routers.typing import router as typing_router
 from .routers.video_play import play_router as video_play_stream_router
 from .routers.video_play import router as video_play_router
@@ -190,6 +191,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(scratch_works_router)
     app.include_router(focus_router)
     app.include_router(student_mistakes_router)
+    app.include_router(student_tasks_router)
     app.include_router(student_profile_router)
     app.include_router(typing_router)
     app.include_router(math_games_router)
