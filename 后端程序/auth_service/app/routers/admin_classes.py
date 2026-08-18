@@ -15,6 +15,7 @@ from ..permissions import (
     ASSISTANT_ROLE,
     SUPER_ROLE,
     TEACHER_ROLE,
+    log_scope_denial,
     visible_class_ids,
 )
 from ..security import as_utc, utcnow
@@ -69,6 +70,7 @@ def _require_class_reader(
         raise HTTPException(403, "没有查看班级关系的权限。")
     class_ids = visible_class_ids(admin, db)
     if class_id is not None and class_ids is not None and class_id not in class_ids:
+        log_scope_denial(admin, "class_group", class_id)
         raise HTTPException(404, "班级不存在。")
     return admin, class_ids
 

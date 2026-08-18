@@ -161,7 +161,9 @@ def test_only_academic_admin_and_super_admin_can_manage_classes(tmp_path: Path):
     assert response.status_code == 201, response.text
 
 
-def test_teacher_class_reads_are_scoped_and_out_of_scope_is_not_found(tmp_path: Path):
+def test_teacher_class_reads_are_scoped_and_out_of_scope_is_not_found(
+    tmp_path: Path, caplog
+):
     app = build_app(tmp_path)
     admin_client, admin_headers = admin_login(app)
     seed_student(app)
@@ -192,14 +194,20 @@ def test_teacher_class_reads_are_scoped_and_out_of_scope_is_not_found(tmp_path: 
     assert own_members.status_code == 200
     assert [row["student_id"] for row in own_members.json()["items"]] == [1]
 
-    foreign = teacher.get(f"/api/admin/classes/{class_b}", headers=teacher_headers)
+    with caplog.at_level("WARNING", logger="app.permissions"):
+        foreign = teacher.get(f"/api/admin/classes/{class_b}", headers=teacher_headers)
     missing = teacher.get("/api/admin/classes/99999", headers=teacher_headers)
     assert foreign.status_code == missing.status_code == 404
     assert foreign.json() == missing.json()
-
-    foreign_members = teacher.get(
-        f"/api/admin/classes/{class_b}/members", headers=teacher_headers
+    assert any(
+        record.getMessage().startswith(f"scope_denied role=teacher admin_user_id=2 resource=class_group:{class_b}")
+        for record in caplog.records
     )
+
+    with caplog.at_level("WARNING", logger="app.permissions"):
+        foreign_members = teacher.get(
+            f"/api/admin/classes/{class_b}/members", headers=teacher_headers
+        )
     missing_members = teacher.get(
         "/api/admin/classes/99999/members", headers=teacher_headers
     )

@@ -1,8 +1,11 @@
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app import create_admin
+from app.models import Base
 from app.permissions import (
     ACADEMIC_ADMIN_ROLE,
     ASSISTANT_ROLE,
@@ -22,7 +25,7 @@ from app.permissions import (
 
 
 def admin(role: str):
-    return SimpleNamespace(role=role)
+    return SimpleNamespace(id=1, role=role)
 
 
 def test_known_roles_include_e1_roles_and_legacy_admin():
@@ -78,13 +81,22 @@ def test_every_role_declares_a_scope_and_a_note(role):
 def test_declared_scope_matches_visible_class_ids(role):
     """展示用的 scope 不能与真正生效的范围函数分叉。
 
-    E2 把 teacher / assistant 换成真实查询时，这条会盯住"说明还停留在旧语义"
-    这种不报错的漂移：`global` 必须且只能对应 `None`（不受限）。
+    全局角色必须返回 `None`（不受限），其余角色必须返回集合；受限角色
+    在空库上的真实查询也必须成功，不能靠缺失 db 参数的静默逃生口通过。
     """
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    try:
+        with session_factory() as db:
+            actual = visible_class_ids(admin(role), db)
+    finally:
+        engine.dispose()
+
     if ROLE_SCOPES[role] == GLOBAL_SCOPE:
-        assert visible_class_ids(admin(role), db=None) is None
+        assert actual is None
     else:
-        assert ROLE_SCOPES[role] != GLOBAL_SCOPE
+        assert actual == set()
 
 
 def test_create_admin_rejects_invalid_role_before_database_access(monkeypatch, capsys):
