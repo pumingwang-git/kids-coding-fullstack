@@ -872,6 +872,44 @@ class Course(Base):
     )
 
 
+class Enrollment(Base):
+    """学员的课程开通记录。
+
+    ``opened_at`` / ``expires_at`` 是访问资格的权威时间窗；``status`` 只表示
+    管理端是否停用这条记录。实际访问判断必须集中在 ``course_access._enrolled``。
+    ``source`` 在 E3a 只由后台写入 ``admin``，E3b 再增加班级来源。
+    """
+
+    __tablename__ = "enrollments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("courses.id", ondelete="RESTRICT"), index=True
+    )
+    class_id: Mapped[int | None] = mapped_column(
+        ForeignKey("class_groups.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    source: Mapped[str] = mapped_column(String(32), default="admin", index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    __table_args__ = (
+        Index(
+            "ix_enrollments_student_course_source_opened",
+            "student_id",
+            "course_id",
+            "source",
+            "opened_at",
+        ),
+    )
+
+
 class CourseSection(Base):
     """章节：课包下的第一层目录，拥有课时列表。
 

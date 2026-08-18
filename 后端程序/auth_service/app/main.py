@@ -25,6 +25,7 @@ from .routers.admin_course_content import router as admin_course_content_router
 from .routers.admin_courses import router as admin_courses_router
 from .routers.admin_dryrun import router as admin_dryrun_router
 from .routers.admin_dryrun import run_dry_run
+from .routers.admin_enrollments import router as admin_enrollments_router
 from .routers.admin_material_imports import (
     router as admin_material_imports_router,
 )
@@ -38,6 +39,7 @@ from .routers.admin_papers import router as admin_papers_router
 from .routers.admin_questions import router as admin_questions_router
 from .routers.admin_results import router as admin_results_router
 from .routers.admin_scratch import router as admin_scratch_router
+from .routers.admin_students import router as admin_students_router
 from .routers.admin_videos import router as admin_videos_router
 from .routers.auth_secure import router
 from .routers.courses import router as student_courses_router
@@ -165,6 +167,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.trusted_proxies)
     app.include_router(admin_router)
     app.include_router(admin_classes_router)
+    app.include_router(admin_students_router)
+    app.include_router(admin_enrollments_router)
     app.include_router(admin_courses_router)
     app.include_router(admin_learning_catalog_router)
     app.include_router(admin_course_content_router)

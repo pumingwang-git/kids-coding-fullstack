@@ -4,7 +4,7 @@
 解锁规则依次改写。只要它散落在 routers/courses.py 与 routers/video_play.py 里各写一份，
 接 enrollments 那天就一定会漏掉其中一个入口——漏掉的那个不会报错，只会静默放行。
 
-当前阶段的规则（enrollments 表尚未落地）：
+当前阶段的规则：
 1. 课包必须 published。draft / off_shelf 对学生一律**不存在**（404，不是 403——
    不泄露「有这么个课包但你看不了」）；
 2. 开放策略（open_policy，2026-08-10 定稿替代 is_trial 复选框）：
@@ -17,24 +17,26 @@
 收紧难，而收紧的那天不会有人重新审一遍所有入口。代价是本阶段演示需要把课时勾上
 「试看」——一个复选框换一条不会忘记关的门。
 
-E3a 落地个人开通记录时**只改本文件**：在 `_enrolled` 里查有效开通记录，并实时比较
-`opened_at` 与 `expires_at`（实时判定而非依赖 status 物化，理由见《7、…-补丁说明》
-补丁五）。E3b 只补班级来源，不改本判定入口；调用方签名不变，一处都不用动。
+E3a 的个人开通记录在 `_enrolled` 里统一查询，并实时比较 `opened_at` 与 `expires_at`
+（实时判定而非依赖 status 物化，理由见《7、…-补丁说明》补丁五）。E3b 只补班级
+来源，不改本判定入口；调用方签名不变，一处都不用动。
 """
 from __future__ import annotations
 
 from enum import Enum
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .models import (
     Course,
     CourseLesson,
     CourseLessonBlock,
+    Enrollment,
     LessonBlockCompletion,
     User,
 )
+from .security import utcnow
 
 OPEN_POLICIES = {"closed", "whole", "first_n", "video_minutes"}
 UNLOCK_RULES = {"free", "sequential"}
@@ -61,10 +63,22 @@ def lesson_policy(lesson: CourseLesson) -> str:
 def _enrolled(db: Session, user: User | None, course: Course) -> bool:
     """是否已开通该课包。
 
-    TODO(E3a)：个人 enrollment 落地后在这里查询有效开通记录，并实时比较 opened_at /
-    expires_at。E3b 只补班级来源，不改本判定入口；这是整个系统里唯一需要改的地方。
+    资格始终按请求时刻实时判断，不能依赖异步任务把过期记录物化为 expired。
+    E3a 的个人开通记录来自 ``enrollments``；E3b 只会新增来源记录，这里按任一
+    有效记录授权，调用方不需要改签名。
     """
-    return False
+    if user is None:
+        return False
+    now = utcnow()
+    return db.scalar(
+        select(Enrollment.id).where(
+            Enrollment.student_id == user.id,
+            Enrollment.course_id == course.id,
+            Enrollment.status == "active",
+            Enrollment.opened_at <= now,
+            or_(Enrollment.expires_at.is_(None), Enrollment.expires_at >= now),
+        )
+    ) is not None
 
 
 def lesson_access(db: Session, user: User | None, lesson: CourseLesson) -> Access:

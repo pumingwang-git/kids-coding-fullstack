@@ -141,3 +141,13 @@ def visible_student_ids(admin, db) -> set[int] | None:
     if class_ids is None:
         return None
     return active_student_ids_for_classes(db, class_ids)
+
+
+def can_read_students(admin) -> bool:
+    """判断角色是否具备学员数据读取能力；范围收窄由 ``visible_student_ids`` 负责。"""
+    return ROLE_SCOPES.get(admin.role, NO_SCOPE) != NO_SCOPE
+
+
+def can_manage_enrollments(admin) -> bool:
+    """课程开通属于教务动作，内容编辑角色不因此获得资格管理权。"""
+    return admin.role in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE}

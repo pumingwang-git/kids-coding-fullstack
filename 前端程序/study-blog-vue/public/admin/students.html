@@ -1,27 +1,129 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>学员管理 · 后台</title>
-  <link rel="stylesheet" href="admin.css" />
-</head>
-<body>
-<div class="app">
-  <aside class="sidebar" id="sidebar"></aside>
-  <div class="main">
-    <header class="topbar" id="topbar"></header>
-    <main class="content">
-      <div class="page-head"><div><h1>学员管理</h1><p>模块建设中，按开发大纲顺序推进。</p></div></div>
-      <div class="card"><div class="empty"><p style="font-size:34px;margin:0 0 12px">🚧</p>学员管理 建设中<br /><span class="muted">接入接口后替换本页</span></div></div>
-    </main>
-  </div>
-</div>
-<script type="module" src="admin-api.js"></script>
-<script type="module" src="admin-layout.js"></script>
-<script type="module">
-  import { initLayout } from "./admin-layout.js";
-  initLayout();
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>学员管理 · 后台</title>
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body class="admin-students">
+    <!--
+      THESIS: 学员管理先呈现范围内真实名单，再提供轻量检索和稳定翻页。
+      OWN-WORLD: 延续后台纸白工作台、薄荷绿动作色与高密度表格语言。
+      STORY: 操作者查找一位可见学员，确认其账号与注册状态。
+      FIRST VIEWPORT: 页头、检索和名单表格连续排列，刷新动作位于页头右侧。
+      FORM: 既有后台运营列表的延伸，使用单张工作卡与原生分页控件。
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
+    <div class="app">
+      <aside class="sidebar" id="sidebar"></aside>
+      <div class="main">
+        <header class="topbar" id="topbar"></header>
+        <main class="content student-page">
+          <div class="page-head">
+            <div>
+              <h1>学员管理</h1>
+              <p>查看当前数据范围内的学员账号</p>
+            </div>
+            <div class="head-actions">
+              <button class="btn" id="refreshStudents" type="button">刷新列表</button>
+            </div>
+          </div>
+
+          <section class="card student-list-card" aria-labelledby="studentListTitle">
+            <div class="student-section-head">
+              <div>
+                <h2 id="studentListTitle">学员列表</h2>
+                <p class="muted" id="studentListMeta" aria-live="polite">加载中</p>
+              </div>
+              <form class="student-search" id="studentSearchForm">
+                <label for="studentSearch">搜索学员</label>
+                <div class="student-search-control">
+                  <input
+                    id="studentSearch"
+                    type="search"
+                    placeholder="学员 ID、用户名或邮箱"
+                    autocomplete="off"
+                  />
+                  <button class="btn" type="submit">搜索</button>
+                </div>
+              </form>
+            </div>
+            <div class="table-wrap student-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>学员 ID</th>
+                    <th>用户名</th>
+                    <th>邮箱</th>
+                    <th>账号状态</th>
+                    <th>注册时间</th>
+                  </tr>
+                </thead>
+                <tbody id="studentRows"></tbody>
+              </table>
+            </div>
+            <div class="empty" id="studentEmpty" hidden>当前范围内暂无学员</div>
+            <div class="list-error" id="studentError" hidden>
+              <span id="studentErrorText">学员列表加载失败。</span>
+              <button class="btn" id="retryStudents" type="button">重新加载</button>
+            </div>
+            <nav class="pager" id="studentPager" aria-label="学员列表分页" hidden>
+              <button class="btn" id="previousStudentPage" type="button">上一页</button>
+              <span id="studentPageMeta"></span>
+              <span class="spacer"></span>
+              <button class="btn" id="nextStudentPage" type="button">下一页</button>
+            </nav>
+          </section>
+
+          <section class="card enrollment-card" aria-labelledby="enrollmentTitle">
+            <div class="student-section-head">
+              <div>
+                <h2 id="enrollmentTitle">课程开通</h2>
+                <p class="muted" id="enrollmentMeta" aria-live="polite">加载开通记录</p>
+              </div>
+            </div>
+            <form class="enrollment-form" id="enrollmentGrantForm">
+              <div id="enrollmentStudentPicker"></div>
+              <label>
+                <span>已发布课程</span>
+                <select id="enrollmentCourse" required>
+                  <option value="">加载中</option>
+                </select>
+              </label>
+              <label>
+                <span>开始时间（可选）</span>
+                <input id="enrollmentOpenedAt" type="datetime-local" />
+              </label>
+              <label>
+                <span>到期时间（可选）</span>
+                <input id="enrollmentExpiresAt" type="datetime-local" />
+              </label>
+              <button class="btn" type="submit">开通课程</button>
+            </form>
+            <div class="table-wrap enrollment-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>学员</th>
+                    <th>课程</th>
+                    <th>开通窗口</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="enrollmentRows"></tbody>
+              </table>
+            </div>
+            <div class="empty" id="enrollmentEmpty" hidden>暂无课程开通记录</div>
+            <div class="list-error" id="enrollmentError" hidden>
+              <span id="enrollmentErrorText">开通记录加载失败。</span>
+              <button class="btn" id="retryEnrollments" type="button">重新加载</button>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script type="module" src="students.js"></script>
+  </body>
 </html>
