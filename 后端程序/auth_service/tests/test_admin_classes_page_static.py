@@ -1,7 +1,11 @@
 """班级管理页的状态与班内角色文案必须由后端下发。"""
 from pathlib import Path
 
-from app.routers.admin_classes import CLASS_ROLE_LABELS, CLASS_STATUS_LABELS
+from app.routers.admin_classes import (
+    CLASS_ROLE_LABELS,
+    CLASS_STATUS_LABELS,
+    MEMBER_STATUS_LABELS,
+)
 
 ADMIN_DIR = Path(__file__).resolve().parents[3] / "前端程序" / "study-blog-vue" / "public" / "admin"
 
@@ -11,7 +15,11 @@ def test_classes_page_does_not_hardcode_backend_status_or_class_role_labels():
         (ADMIN_DIR / name).read_text(encoding="utf-8")
         for name in ("classes.js", "classes.html")
     )
-    for label in (*CLASS_STATUS_LABELS.values(), *CLASS_ROLE_LABELS.values()):
+    for label in (
+        *CLASS_STATUS_LABELS.values(),
+        *CLASS_ROLE_LABELS.values(),
+        *MEMBER_STATUS_LABELS.values(),
+    ):
         assert label not in source, f"班级文案 {label} 被硬编码进前端"
 
 

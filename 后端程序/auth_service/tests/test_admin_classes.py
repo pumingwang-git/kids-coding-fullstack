@@ -347,6 +347,7 @@ def test_enroll_withdraw_and_transfer_have_atomic_audit_contract(tmp_path: Path,
         json={"student_id": 1},
     )
     assert enrolled.status_code == 201, enrolled.text
+    assert enrolled.json()["status_label"] == "在读"
     member_id = enrolled.json()["id"]
 
     transferred = client.post(
@@ -381,6 +382,7 @@ def test_enroll_withdraw_and_transfer_have_atomic_audit_contract(tmp_path: Path,
     )
     assert withdrawn.status_code == 200
     assert withdrawn.json()["status"] == "left"
+    assert withdrawn.json()["status_label"] == "已退班"
 
     # A failure after both relationship mutations have been flushed must roll back all three writes.
     seed_student(app, student_id=2)

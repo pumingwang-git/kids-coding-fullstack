@@ -29,9 +29,14 @@ CLASS_STATUS_LABELS = {
     "active": "进行中",
     "archived": "已归档",
 }
+# 班内角色与后台账号角色是两个维度；取值恰好同名也不共享常量，避免一边改值污染另一边。
 CLASS_ROLE_LABELS = {
     "teacher": "主讲教师",
     "assistant": "助教",
+}
+MEMBER_STATUS_LABELS = {
+    "active": "在读",
+    "left": "已退班",
 }
 
 
@@ -130,6 +135,7 @@ def _serialize_member(row: ClassMember) -> dict:
         "joined_at": row.joined_at,
         "left_at": row.left_at,
         "status": row.status,
+        "status_label": MEMBER_STATUS_LABELS[row.status],
     }
 
 
