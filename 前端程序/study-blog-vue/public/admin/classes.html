@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>班级管理 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body class="admin-classes">
+<!--
+  THESIS: 班级管理把范围事实放在列表第一位，拒绝把教师权限再复制成前端规则。
+  OWN-WORLD: 纸白工作台、薄荷绿动作色、深绿文字与细线表格，详情是同一张工作台的延伸。
+  STORY: 管理员扫描班级，教师只看到后端允许的班级，点击一行核对班级主数据。
+  FIRST VIEWPORT: 标题与刷新动作在上，检索条和全宽列表紧随其后，详情从列表行进入。
+  FORM: 既有后台运营表格的延伸，采用原生表格与窄详情栏，不引入新的卡片体系。
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content class-page">
+      <div class="page-head">
+        <div>
+          <h1>班级管理</h1>
+          <p>班级主数据与可见范围</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn" id="refreshClasses" type="button">刷新列表</button>
+        </div>
+      </div>
+
+      <section class="card class-list-card" aria-labelledby="classListTitle">
+        <div class="class-section-head">
+          <div>
+            <h2 id="classListTitle">班级列表</h2>
+            <p class="muted" id="classListMeta">加载中…</p>
+          </div>
+          <label class="class-search">
+            <span>筛选名称</span>
+            <input id="classSearch" type="search" placeholder="输入班级名称" autocomplete="off" />
+          </label>
+        </div>
+        <div class="table-wrap class-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>班级</th>
+                <th>课包 ID</th>
+                <th>状态</th>
+                <th>开始时间</th>
+                <th>结束时间</th>
+                <th class="class-action-col">操作</th>
+              </tr>
+            </thead>
+            <tbody id="classRows"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="classEmpty" hidden>暂无可见班级</div>
+        <div class="list-error" id="classError" hidden>
+          <span id="classErrorText">班级列表加载失败。</span>
+          <button class="btn" id="retryClasses" type="button">重新加载</button>
+        </div>
+      </section>
+
+      <section class="card class-detail-card" id="classDetail" aria-labelledby="classDetailTitle" hidden>
+        <div class="class-section-head">
+          <div>
+            <p class="class-detail-kicker">班级详情</p>
+            <h2 id="classDetailTitle">班级</h2>
+          </div>
+          <button class="btn" id="closeDetail" type="button">返回列表</button>
+        </div>
+        <dl class="class-detail-grid" id="classDetailFields"></dl>
+        <div class="class-detail-error" id="classDetailError" hidden></div>
+      </section>
+    </main>
+  </div>
+</div>
+<script type="module" src="admin-api.js"></script>
+<script type="module" src="admin-layout.js"></script>
+<script type="module" src="classes.js"></script>
+</body>
+</html>

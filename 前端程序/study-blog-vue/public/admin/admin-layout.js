@@ -39,6 +39,7 @@ export const MENU = [
     icon: "🛠",
     children: [
       { label: "学员管理", page: "students.html", crumb: "运营 / 学员管理" },
+      { label: "班级管理", page: "classes.html", crumb: "运营 / 班级管理" },
       { label: "成绩统计", page: "reports.html", crumb: "运营 / 成绩统计" },
       { label: "课时作业成绩", page: "homework-results.html", crumb: "运营 / 课时作业成绩" },
       // superOnly：ADR-001 §2.4 规定变更 AdminUser.role 仅限 super_admin，
