@@ -12,7 +12,7 @@ from test_scratch import (
 )
 
 import app.routers.admin_results as admin_results
-from app.models import AdminUser, User
+from app.models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, User
 from app.security import password_hash
 
 
@@ -70,6 +70,59 @@ def test_teacher_empty_scope_covers_all_nine_results_endpoints(tmp_path):
     # 资源寻址型的学生记录：越界必须与「不存在」不可区分（《39》§3.2）。
     review = teacher.get(f"/api/admin/attempts/{exam_attempt_id}/review", headers=headers)
     assert review.status_code == 404, review.text
+
+
+def test_teacher_results_scope_uses_real_class_relationships(tmp_path):
+    env = build_exam(tmp_path, only=["choice"])
+    learner_attempt = start(env)
+    other = _second_student(env)
+    other_started = other.post(f"/api/exam/{env.token}/start", headers=scsrf(other))
+    assert other_started.status_code == 201, other_started.text
+    other_attempt = other_started.json()["attempt_id"]
+    teacher_client, headers = _role_login(env.app, "teacher")
+
+    db = env.app.state.session_factory()
+    try:
+        learner_id = db.query(User).filter_by(username="learner").one().id
+        other_id = db.query(User).filter_by(username="learner2").one().id
+        teacher = db.query(AdminUser).filter_by(username="scope-teacher").one()
+        course = Course(title="范围测试课包")
+        db.add(course)
+        db.flush()
+        own_class = ClassGroup(name="教师本班", course_id=course.id, status="active")
+        other_class = ClassGroup(name="教师外班", course_id=course.id, status="active")
+        db.add_all([own_class, other_class])
+        db.flush()
+        db.add_all([
+            ClassTeacher(
+                class_id=own_class.id,
+                admin_user_id=teacher.id,
+                role_in_class="teacher",
+            ),
+            ClassMember(class_id=own_class.id, student_id=learner_id),
+            ClassMember(class_id=other_class.id, student_id=other_id),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    overview = teacher_client.get("/api/admin/exam-results", headers=headers)
+    assert overview.status_code == 200, overview.text
+    assert overview.json()["total"] == 1
+    row = overview.json()["items"][0]
+    assert row["participants"] == 1
+    assert row["attempts"] == 1
+
+    own_review = teacher_client.get(
+        f"/api/admin/attempts/{learner_attempt}/review", headers=headers
+    )
+    assert own_review.status_code == 200, own_review.text
+    denied = teacher_client.get(
+        f"/api/admin/attempts/{other_attempt}/review", headers=headers
+    )
+    missing = teacher_client.get("/api/admin/attempts/99999/review", headers=headers)
+    assert denied.status_code == missing.status_code == 404
+    assert denied.json() == missing.json()
 
 
 def test_nonempty_scope_filters_aggregates_and_blocks_attempt_id_passthrough(tmp_path,
