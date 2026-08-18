@@ -11,14 +11,14 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .attempt_source import AttemptSource
+from .attempt_source import AttemptSource, from_exam_link
 from .course_access import (
     Access, block_gate, completed_block_ids, enrolled_course_ids, lesson_access,
 )
 from .lesson_homework_kinds import KINDS
 from .models import (
-    Course, CourseLesson, CourseLessonBlock, LessonBlockCompletion,
-    LessonProblemAttempt, LessonProblemBlock, PaperAttempt, User,
+    ClassMember, Course, CourseLesson, CourseLessonBlock, ExamAssignment, ExamLink,
+    LessonBlockCompletion, LessonProblemAttempt, LessonProblemBlock, Paper, PaperAttempt, User,
 )
 from .routers.exam import _phase
 from .security import as_utc
@@ -51,6 +51,9 @@ EXAM_PHASE_LABELS = {
     "running": "进行中",
     "ended": "已结束",
 }
+
+DUE_SOON_HOURS = 72
+TASK_GROUP_LIMIT = 5
 
 
 @dataclass(frozen=True)
@@ -219,3 +222,40 @@ def build_practice_item(candidate: dict, phase: str) -> dict:
 def exam_phase(source: AttemptSource, now: datetime) -> str:
     """把考试入口的四态时间窗归并为任务中心的三态。"""
     return EXAM_PHASE_GROUPS[_phase(source, now)]
+
+
+def collect_exam_candidates(db: Session, user: User) -> list[tuple[AttemptSource, Paper, str]]:
+    """返回班级与直接指派的并集；退班立即失去班级指派可见性。"""
+    from sqlalchemy import or_
+    class_ids = set(db.scalars(select(ClassMember.class_id).where(
+        ClassMember.student_id == user.id, ClassMember.status == "active",
+        ClassMember.left_at.is_(None),
+    )).all())
+    assignments = db.scalars(select(ExamAssignment).where(
+        ExamAssignment.status == "active",
+        or_((ExamAssignment.target_type == "student") &
+             (ExamAssignment.target_id == user.id),
+            (ExamAssignment.target_type == "class") &
+             ExamAssignment.target_id.in_(class_ids or [0])),
+    ).order_by(ExamAssignment.exam_link_id, ExamAssignment.id)).all()
+    link_ids = {row.exam_link_id for row in assignments}
+    if not link_ids:
+        return []
+    links = db.scalars(select(ExamLink).where(
+        ExamLink.id.in_(link_ids), ExamLink.status == "active")).all()
+    papers = {paper.id: paper for paper in db.scalars(select(Paper).where(
+        Paper.id.in_({link.paper_id for link in links}), Paper.status == "published")).all()}
+    return [(from_exam_link(link), papers[link.paper_id], link.access_token)
+            for link in sorted(links, key=lambda row: row.id)
+            if link.paper_id in papers]
+
+
+def build_exam_item(source: AttemptSource, phase: str, token: str) -> dict:
+    return {
+        "source_type": source.source_type, "source_id": source.source_id,
+        "scope": {"key": f"{source.source_type}:{source.source_id}", "title": source.label},
+        "phase": phase, "phase_label": EXAM_PHASE_LABELS[phase],
+        "open_at": _iso(source.open_at), "close_at": _iso(source.close_at),
+        "duration_minutes": source.duration_minutes, "attempt_limit": source.attempt_limit,
+        "entry": {"kind": source.source_type, "token": token},
+    }

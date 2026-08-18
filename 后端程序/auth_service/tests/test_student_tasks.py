@@ -9,10 +9,10 @@ from test_enrollments import set_enrollment
 from test_exam import build_app, student_login
 from test_lesson_block_unlock import build_lesson_with_blocks, complete
 from test_lesson_problem_blocks import seed_paper
-from test_lesson_practice import build_practice, seed_choice_problem
+from test_lesson_practice import answer, build_practice, seed_choice_problem
 from test_scratch import build_scratch_lesson
 
-from app.models import User
+from app.models import LessonPaperBlock, Problem, ProblemTag, Tag, User
 from app.routers.exam import _phase
 from app.student_tasks import (
     EXAM_PHASE_GROUPS,
@@ -282,14 +282,18 @@ def test_practice_endpoint_has_three_phases_and_no_problem_identity(tmp_path: Pa
     try:
         for lesson in built:
             set_enrollment(app, student_id=user.id, course_id=lesson["course_id"])
-        from app.models import LessonBlockCompletion, LessonProblemAttempt
+        from app.models import LessonProblemAttempt
         db.add(LessonProblemAttempt(user_id=user.id, block_id=built[1]["block_ids"][-1],
                                     lesson_id=built[1]["lesson_id"], tries=1))
-        db.add(LessonBlockCompletion(user_id=user.id, block_id=built[2]["block_ids"][-1],
-                                     lesson_id=built[2]["lesson_id"], source="practice"))
         db.commit()
     finally:
         db.close()
+
+    # done 必须由真实作答链路产生：提交会在同一事务中写 tries 和 completion。
+    # 手工只写 completion 会构造线上不可能出现的 completed=True, tries=0，
+    # 从而测不到 practice_phase 的两个分支顺序。
+    done = answer(student, built[2]["lesson_id"], built[2]["block_ids"][-1], {"picked": "A"})
+    assert done.status_code == 200, done.text
     response = student.get("/api/student/practice")
     assert response.status_code == 200, response.text
     body = response.json()
@@ -304,6 +308,82 @@ def test_practice_endpoint_has_three_phases_and_no_problem_identity(tmp_path: Pa
             for child in value:
                 yield from walk(child)
     list(walk(body))
+
+
+def test_practice_endpoint_excludes_unenrolled_and_sequentially_locked_blocks(tmp_path: Path):
+    app = build_app(tmp_path)
+    student = student_login(app)
+    enrolled_problem = seed_choice_problem(app, problem_id_no="Q310001")["problem_id_no"]
+    locked_problem = seed_choice_problem(app, problem_id_no="Q310002")["problem_id_no"]
+    hidden_problem = seed_choice_problem(app, problem_id_no="Q310003")["problem_id_no"]
+    enrolled = build_practice(app, problem_id_no=enrolled_problem)
+    locked = build_lesson_with_blocks(app, [
+        {"block_type": "markdown", "title": "前置", "required": True},
+        {"block_type": "practice", "problem_id_no": locked_problem,
+         "unlock_rule": "sequential"},
+    ])
+    unenrolled = build_practice(app, problem_id_no=hidden_problem)
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=enrolled["course_id"])
+    set_enrollment(app, student_id=user.id, course_id=locked["course_id"])
+
+    body = student.get("/api/student/practice").json()
+    assert [item["source_id"] for item in body["items"]] == [enrolled["block_ids"][-1]]
+    assert unenrolled["block_ids"][-1] not in {item["source_id"] for item in body["items"]}
+
+    assert complete(student, locked["lesson_id"], locked["block_ids"][0]).status_code == 200
+    body = student.get("/api/student/practice").json()
+    assert {item["source_id"] for item in body["items"]} == {
+        enrolled["block_ids"][-1], locked["block_ids"][-1],
+    }
+
+
+def test_practice_endpoint_filters_knowledge_course_and_lesson(tmp_path: Path):
+    app = build_app(tmp_path)
+    student = student_login(app)
+    matching_no = seed_choice_problem(app, problem_id_no="Q320001")["problem_id_no"]
+    other_no = seed_choice_problem(app, problem_id_no="Q320002")["problem_id_no"]
+    matching = build_practice(app, problem_id_no=matching_no)
+    other = build_practice(app, problem_id_no=other_no)
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=matching["course_id"])
+    set_enrollment(app, student_id=user.id, course_id=other["course_id"])
+    db = app.state.session_factory()
+    try:
+        problem = db.scalar(select(Problem).where(Problem.problem_id_no == matching_no))
+        tag = Tag(name="任务中心知识点", category="knowledge")
+        db.add(tag)
+        db.flush()
+        db.add(ProblemTag(problem_id=problem.id, tag_id=tag.id))
+        db.commit()
+    finally:
+        db.close()
+
+    for query in (
+        "knowledge=%E4%BB%BB%E5%8A%A1%E4%B8%AD%E5%BF%83%E7%9F%A5%E8%AF%86%E7%82%B9",
+        f"course_id={matching['course_id']}",
+        f"lesson_id={matching['lesson_id']}",
+    ):
+        body = student.get(f"/api/student/practice?{query}").json()
+        assert [item["source_id"] for item in body["items"]] == [matching["block_ids"][-1]]
+
+
+def test_practice_endpoint_paginates_second_page_and_keeps_total(tmp_path: Path):
+    app = build_app(tmp_path)
+    student = student_login(app)
+    specs = []
+    for index in range(25):
+        problem_id_no = seed_choice_problem(app, problem_id_no=f"Q330{index:03d}")["problem_id_no"]
+        specs.append({"block_type": "practice", "title": f"练习 {index}",
+                      "problem_id_no": problem_id_no, "score": 10, "display_no": str(index + 1)})
+    built = build_lesson_with_blocks(app, specs, open_policy="closed")
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=built["course_id"])
+
+    body = student.get("/api/student/practice?page=2").json()
+    assert body["total"] == 25
+    assert body["page"] == 2 and body["page_size"] == 20
+    assert [item["source_id"] for item in body["items"]] == built["block_ids"][20:]
 
 
 def test_exam_phase_groups_every_existing_exam_window():
@@ -322,3 +402,46 @@ def test_exam_phase_groups_every_existing_exam_window():
     assert {exam_phase(source, instant) for instant in windows.values()} == {
         "upcoming", "running", "ended"
     }
+
+
+def test_tasks_overview_empty_student_has_five_empty_groups(tmp_path: Path):
+    app = build_app(tmp_path)
+    student = student_login(app)
+
+    response = student.get("/api/student/tasks/overview")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert set(body) == {"in_progress", "due_soon", "to_review", "unfinished", "next_up"}
+    assert all(group == {"items": [], "total": 0} for group in body.values())
+
+
+def test_tasks_overview_due_soon_uses_homework_dto_and_72_hour_boundary(tmp_path: Path):
+    app = build_app(tmp_path)
+    student = student_login(app)
+    paper_id = seed_paper(app)["paper_id"]
+    built = build_lesson_with_blocks(app, [
+        {"block_type": "homework", "title": "窗内", "paper_id": paper_id},
+        {"block_type": "homework", "title": "窗外", "paper_id": paper_id},
+    ], open_policy="closed")
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=built["course_id"])
+    db = app.state.session_factory()
+    try:
+        rows = list(db.scalars(
+            select(LessonPaperBlock).where(LessonPaperBlock.block_id.in_(built["block_ids"]))
+        ))
+        due_by_block = {row.block_id: row for row in rows}
+        now = datetime.now(UTC)
+        due_by_block[built["block_ids"][0]].due_at = now + timedelta(hours=71)
+        due_by_block[built["block_ids"][1]].due_at = now + timedelta(hours=73)
+        db.commit()
+    finally:
+        db.close()
+
+    homework = student.get("/api/student/homework").json()["items"]
+    overview = student.get("/api/student/tasks/overview").json()
+    due_soon = overview["due_soon"]
+    assert due_soon["total"] == 1
+    assert [item["source_id"] for item in due_soon["items"]] == [built["block_ids"][0]]
+    listed = next(item for item in homework if item["source_id"] == built["block_ids"][0])
+    assert due_soon["items"][0] == listed
