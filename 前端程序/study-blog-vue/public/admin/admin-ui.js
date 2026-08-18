@@ -238,7 +238,7 @@ function openDialog({ title, bodyHtml, confirmText = "确定", cancelText = "取
 
     requestAnimationFrame(() => {
       mask.classList.add("show");
-      (dialog.querySelector("textarea, input") || dialog.querySelector('[data-role="confirm"]'))?.focus();
+      (dialog.querySelector("textarea, input, select") || dialog.querySelector('[data-role="confirm"]'))?.focus();
     });
   });
 }
@@ -252,7 +252,24 @@ export function confirmDialog({ title, message, detail = "", confirmText = "确�
   }).then((value) => value === true);
 }
 
-export function promptDialog({ title, message = "", label, placeholder = "", maxLength = 500, confirmText = "提交", danger = false }) {
+export function promptDialog({
+  title,
+  message = "",
+  label,
+  placeholder = "",
+  maxLength = 500,
+  confirmText = "提交",
+  danger = false,
+  selectOptions = null,
+}) {
+  const inputHtml = Array.isArray(selectOptions)
+    ? `<select data-role="input" required>${selectOptions
+        .map(
+          (option) =>
+            `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`,
+        )
+        .join("")}</select>`
+    : `<textarea data-role="input" rows="3" maxlength="${maxLength}" placeholder="${escapeHtml(placeholder)}"></textarea>`;
   return openDialog({
     title,
     danger,
@@ -260,7 +277,7 @@ export function promptDialog({ title, message = "", label, placeholder = "", max
     bodyHtml: `
       ${message ? `<p>${escapeHtml(message)}</p>` : ""}
       <label class="field full">${escapeHtml(label)}
-        <textarea data-role="input" rows="3" maxlength="${maxLength}" placeholder="${escapeHtml(placeholder)}"></textarea>
+        ${inputHtml}
         <small class="field-error" data-role="error" hidden></small>
       </label>`,
     onMount(dialog) {

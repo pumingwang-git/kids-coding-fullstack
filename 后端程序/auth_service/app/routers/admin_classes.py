@@ -1,15 +1,25 @@
 """班级主数据管理：创建、修改、归档和受保护的物理删除。"""
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, User
+from ..class_enrollment import (
+    CLASS_BATCH_SOURCE,
+    grant_for_membership,
+    has_effective_class_enrollment,
+    revoke_for_membership,
+    sync_class_window,
+)
+from ..models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, Enrollment, User
+from .admin_enrollments import ENROLLMENT_STATUS_LABELS
 from ..permissions import (
     ACADEMIC_ADMIN_ROLE,
     ASSISTANT_ROLE,
@@ -65,6 +75,10 @@ class MemberPayload(BaseModel):
     student_id: int = Field(gt=0)
 
 
+class BulkMemberPayload(BaseModel):
+    student_ids: list[int]
+
+
 class TransferPayload(BaseModel):
     to_class_id: int = Field(gt=0)
 
@@ -115,11 +129,12 @@ def _utc_iso(value: datetime) -> str:
     return as_utc(value).isoformat().replace("+00:00", "Z")
 
 
-def _serialize_teacher(row: ClassTeacher) -> dict:
+def _serialize_teacher(row: ClassTeacher, admin_user: AdminUser | None = None) -> dict:
     return {
         "id": row.id,
         "class_id": row.class_id,
         "admin_user_id": row.admin_user_id,
+        "teacher_name": admin_user.display_name if admin_user else None,
         "role_in_class": row.role_in_class,
         "role_in_class_label": CLASS_ROLE_LABELS[row.role_in_class],
         "assigned_at": row.assigned_at,
@@ -127,16 +142,43 @@ def _serialize_teacher(row: ClassTeacher) -> dict:
     }
 
 
-def _serialize_member(row: ClassMember) -> dict:
+def _serialize_member(
+    row: ClassMember, student: User | None = None, enrollment: Enrollment | None = None
+) -> dict:
     return {
         "id": row.id,
         "class_id": row.class_id,
         "student_id": row.student_id,
+        "student_name": student.username if student else None,
         "joined_at": row.joined_at,
         "left_at": row.left_at,
         "status": row.status,
         "status_label": MEMBER_STATUS_LABELS[row.status],
+        "enrollment_status": enrollment.status if enrollment else None,
+        "enrollment_status_label": ENROLLMENT_STATUS_LABELS[enrollment.status] if enrollment else None,
     }
+
+
+def _csv_cell(value: object | None) -> object:
+    """Keep exported user-controlled text from becoming an Excel formula."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return _utc_iso(value)
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
+
+
+def _class_export_base(row: ClassGroup) -> list[object]:
+    return [
+        row.id,
+        row.name,
+        row.course_id,
+        row.status,
+        row.start_at,
+        row.end_at,
+    ]
 
 
 def _audit_failure(
@@ -228,7 +270,110 @@ def list_classes(request: Request, db: Session = Depends(db_session)):
     if class_ids is not None:
         statement = statement.where(ClassGroup.id.in_(class_ids))
     rows = db.scalars(statement.order_by(ClassGroup.id)).all()
-    return {"items": [_serialize_class(row) for row in rows]}
+    return {
+        "items": [_serialize_class(row) for row in rows],
+        "role_options": [
+            {"value": value, "label": label}
+            for value, label in CLASS_ROLE_LABELS.items()
+        ],
+    }
+
+
+@router.get("/export")
+def export_class_relationships(
+    request: Request, db: Session = Depends(db_session)
+):
+    """Export all visible member and teacher relationship history as CSV."""
+    _, class_ids = _require_class_reader(request, db)
+    class_filter = [] if class_ids is None else [ClassGroup.id.in_(class_ids)]
+    members = db.execute(
+        select(ClassGroup, ClassMember, User)
+        .join(ClassMember, ClassMember.class_id == ClassGroup.id)
+        .join(User, User.id == ClassMember.student_id)
+        .where(*class_filter)
+        .order_by(ClassGroup.id, ClassMember.joined_at, ClassMember.id)
+    ).all()
+    teachers = db.execute(
+        select(ClassGroup, ClassTeacher, AdminUser)
+        .join(ClassTeacher, ClassTeacher.class_id == ClassGroup.id)
+        .join(AdminUser, AdminUser.id == ClassTeacher.admin_user_id)
+        .where(*class_filter)
+        .order_by(ClassGroup.id, ClassTeacher.assigned_at, ClassTeacher.id)
+    ).all()
+
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+
+    def write_row(row: list[object]) -> None:
+        writer.writerow([_csv_cell(value) for value in row])
+
+    write_row(
+        [
+            "关系类型",
+            "班级ID",
+            "班级名称",
+            "课包ID",
+            "班级状态",
+            "班级开始时间",
+            "班级结束时间",
+            "成员关系ID",
+            "学员ID",
+            "学员账号",
+            "入班时间",
+            "退班时间",
+            "成员状态",
+            "带班关系ID",
+            "后台账号ID",
+            "后台账号",
+            "班内角色",
+            "指派时间",
+            "结束带班时间",
+        ]
+    )
+    for class_group, member, student in members:
+        write_row(
+            [
+                "成员",
+                *_class_export_base(class_group),
+                member.id,
+                student.id,
+                student.username,
+                member.joined_at,
+                member.left_at,
+                member.status,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
+    for class_group, teacher, admin_user in teachers:
+        write_row(
+            [
+                "带班",
+                *_class_export_base(class_group),
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                teacher.id,
+                admin_user.id,
+                admin_user.username,
+                teacher.role_in_class,
+                teacher.assigned_at,
+                teacher.ended_at,
+            ]
+        )
+
+    return Response(
+        content=("\ufeff" + output.getvalue()).encode("utf-8"),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="class-relationships.csv"'},
+    )
 
 
 @router.post("", status_code=201)
@@ -267,18 +412,23 @@ def update_class(
     db: Session = Depends(db_session),
 ):
     require_csrf(request)
-    _require_manager(request, db)
+    admin = _require_manager(request, db)
     row = db.get(ClassGroup, class_id)
     if row is None:
         raise HTTPException(404, "班级不存在。")
     if row.status == "archived":
         raise HTTPException(409, "已归档班级不可修改。")
     _course_or_404(db, payload.course_id)
+    old_end_at = as_utc(row.end_at) if row.end_at else None
+    new_end_at = as_utc(payload.end_at) if payload.end_at else None
+    window_changed = old_end_at != new_end_at
     row.name = payload.name
     row.course_id = payload.course_id
     row.start_at = payload.start_at
     row.end_at = payload.end_at
     row.updated_at = utcnow()
+    if window_changed:
+        sync_class_window(db, class_group=row, admin_id=admin.id, request=request)
     db.commit()
     db.refresh(row)
     return _serialize_class(row)
@@ -324,12 +474,15 @@ def list_class_teachers(class_id: int, request: Request, db: Session = Depends(d
     _require_class_reader(request, db, class_id)
     if db.get(ClassGroup, class_id) is None:
         raise HTTPException(404, "班级不存在。")
-    rows = db.scalars(
-        select(ClassTeacher)
+    rows = db.execute(
+        select(ClassTeacher, AdminUser)
+        .outerjoin(AdminUser, AdminUser.id == ClassTeacher.admin_user_id)
         .where(ClassTeacher.class_id == class_id)
         .order_by(ClassTeacher.assigned_at, ClassTeacher.id)
     ).all()
-    return {"items": [_serialize_teacher(row) for row in rows]}
+    return {
+        "items": [_serialize_teacher(row, admin_user) for row, admin_user in rows],
+    }
 
 
 @router.post("/{class_id}/teachers", status_code=201)
@@ -390,7 +543,7 @@ def assign_class_teacher(
     )
     db.commit()
     db.refresh(row)
-    return _serialize_teacher(row)
+    return _serialize_teacher(row, db.get(AdminUser, row.admin_user_id))
 
 
 def _unassign_class_teacher(
@@ -434,7 +587,7 @@ def _unassign_class_teacher(
     )
     db.commit()
     db.refresh(row)
-    return _serialize_teacher(row)
+    return _serialize_teacher(row, db.get(AdminUser, row.admin_user_id))
 
 
 @router.post("/{class_id}/teachers/{assignment_id}/unassign")
@@ -462,12 +615,71 @@ def list_class_members(class_id: int, request: Request, db: Session = Depends(db
     _require_class_reader(request, db, class_id)
     if db.get(ClassGroup, class_id) is None:
         raise HTTPException(404, "班级不存在。")
-    rows = db.scalars(
-        select(ClassMember)
+    rows = db.execute(
+        select(ClassMember, User)
+        .outerjoin(User, User.id == ClassMember.student_id)
         .where(ClassMember.class_id == class_id)
         .order_by(ClassMember.joined_at, ClassMember.id)
     ).all()
-    return {"items": [_serialize_member(row) for row in rows]}
+    result = []
+    for row, student in rows:
+        enrollment = db.scalar(
+            select(Enrollment).where(
+                Enrollment.student_id == row.student_id,
+                Enrollment.source == CLASS_BATCH_SOURCE,
+                Enrollment.class_id == class_id,
+            ).order_by(Enrollment.id.desc())
+        )
+        if (
+            enrollment is not None
+            and enrollment.status == "active"
+            and enrollment.expires_at is not None
+            and as_utc(enrollment.expires_at) < utcnow()
+        ):
+            enrollment.status = "expired"
+        result.append(_serialize_member(row, student, enrollment))
+    return {"items": result}
+
+
+def _enroll_class_member(
+    class_id: int, student_id: int, request: Request, db: Session, admin: AdminUser
+):
+    """Create one membership through the shared validation and audit path."""
+    class_group = _class_for_relation_change(db, class_id)
+    if db.get(User, student_id) is None:
+        raise HTTPException(404, "学员不存在。")
+    if db.scalar(
+        select(ClassMember.id).where(
+            ClassMember.class_id == class_id,
+            ClassMember.student_id == student_id,
+            ClassMember.status == "active",
+        )
+    ) is not None:
+        raise HTTPException(409, "该学员已在此班级。")
+    joined_at = utcnow()
+    row = ClassMember(class_id=class_id, student_id=student_id, joined_at=joined_at)
+    db.add(row)
+    db.flush()
+    grant_for_membership(
+        db, class_group=class_group, student_id=student_id, admin_id=admin.id, request=request
+    )
+    _audit_success(
+        db,
+        request,
+        "class_member_enroll",
+        admin.id,
+        resource_type="class_member",
+        resource_id=row.id,
+        summary={
+            "schema_version": 1,
+            "student_user_id": row.student_id,
+            "class_id": row.class_id,
+            "joined_at": _utc_iso(joined_at),
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _serialize_member(row, db.get(User, row.student_id))
 
 
 @router.post("/{class_id}/members", status_code=201)
@@ -485,38 +697,50 @@ def enroll_class_member(
         resource_type="class_member",
         summary={"schema_version": 1, "reason_code": "forbidden"},
     )
-    _class_for_relation_change(db, class_id)
-    if db.get(User, payload.student_id) is None:
-        raise HTTPException(404, "学员不存在。")
-    if db.scalar(
-        select(ClassMember.id).where(
-            ClassMember.class_id == class_id,
-            ClassMember.student_id == payload.student_id,
-            ClassMember.status == "active",
-        )
-    ) is not None:
-        raise HTTPException(409, "该学员已在此班级。")
-    joined_at = utcnow()
-    row = ClassMember(class_id=class_id, student_id=payload.student_id, joined_at=joined_at)
-    db.add(row)
-    db.flush()
-    _audit_success(
-        db,
+    return _enroll_class_member(class_id, payload.student_id, request, db, admin)
+
+
+@router.post("/{class_id}/members/bulk")
+def bulk_enroll_class_members(
+    class_id: int,
+    payload: BulkMemberPayload,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    admin = _require_relation_manager(
         request,
+        db,
         "class_member_enroll",
-        admin.id,
         resource_type="class_member",
-        resource_id=row.id,
-        summary={
-            "schema_version": 1,
-            "student_user_id": row.student_id,
-            "class_id": row.class_id,
-            "joined_at": _utc_iso(joined_at),
-        },
+        summary={"schema_version": 1, "reason_code": "forbidden"},
     )
-    db.commit()
-    db.refresh(row)
-    return _serialize_member(row)
+    if not payload.student_ids:
+        raise HTTPException(400, "请至少选择一名学员。")
+    if len(payload.student_ids) > 500:
+        raise HTTPException(400, "单次最多导入 500 名学员。")
+
+    # Reject archived classes before the row loop: no partial batch may be created.
+    _class_for_relation_change(db, class_id)
+    succeeded = []
+    failed = []
+    for student_id in payload.student_ids:
+        try:
+            succeeded.append(
+                _enroll_class_member(class_id, student_id, request, db, admin)
+            )
+        except HTTPException as error:
+            # Each successful row committed inside the shared path. Failed rows must not
+            # affect the rows before or after them.
+            db.rollback()
+            if error.status_code == 404:
+                reason_code = "not_found"
+            elif error.status_code == 409:
+                reason_code = "conflict"
+            else:
+                raise
+            failed.append({"student_id": student_id, "reason_code": reason_code})
+    return {"succeeded": succeeded, "failed": failed}
 
 
 def _withdraw_class_member(
@@ -531,7 +755,7 @@ def _withdraw_class_member(
         resource_id=member_id,
         summary={"schema_version": 1, "reason_code": "forbidden"},
     )
-    _class_for_relation_change(db, class_id, allow_archived=True)
+    class_group = _class_for_relation_change(db, class_id, allow_archived=True)
     row = db.scalar(
         select(ClassMember).where(ClassMember.id == member_id, ClassMember.class_id == class_id)
     )
@@ -542,6 +766,9 @@ def _withdraw_class_member(
     left_at = utcnow()
     row.status = "left"
     row.left_at = left_at
+    revoke_for_membership(
+        db, class_group=class_group, student_id=row.student_id, admin_id=admin.id, request=request
+    )
     _audit_success(
         db,
         request,
@@ -558,7 +785,7 @@ def _withdraw_class_member(
     )
     db.commit()
     db.refresh(row)
-    return _serialize_member(row)
+    return _serialize_member(row, db.get(User, row.student_id))
 
 
 @router.post("/{class_id}/members/{member_id}/withdraw")
@@ -600,8 +827,8 @@ def transfer_class_member(
     )
     if payload.to_class_id == class_id:
         raise HTTPException(409, "转入班级不能与原班级相同。")
-    _class_for_relation_change(db, class_id, allow_archived=True)
-    _class_for_relation_change(db, payload.to_class_id)
+    source_class = _class_for_relation_change(db, class_id, allow_archived=True)
+    target_class = _class_for_relation_change(db, payload.to_class_id)
     row = db.scalar(
         select(ClassMember).where(ClassMember.id == member_id, ClassMember.class_id == class_id)
     )
@@ -629,6 +856,12 @@ def transfer_class_member(
     db.add(new_row)
     try:
         db.flush()
+        revoke_for_membership(
+            db, class_group=source_class, student_id=row.student_id, admin_id=admin.id, request=request
+        )
+        grant_for_membership(
+            db, class_group=target_class, student_id=row.student_id, admin_id=admin.id, request=request
+        )
         _audit_success(
             db,
             request,
@@ -651,4 +884,28 @@ def transfer_class_member(
         db.rollback()
         raise
     db.refresh(new_row)
-    return _serialize_member(new_row)
+    return _serialize_member(new_row, db.get(User, new_row.student_id))
+
+
+@router.post("/{class_id}/enrollments/sync")
+def sync_class_enrollments(class_id: int, request: Request, db: Session = Depends(db_session)):
+    require_csrf(request)
+    admin = _require_manager(request, db)
+    class_group = _class_for_relation_change(db, class_id, allow_archived=True)
+    student_ids = db.scalars(
+        select(ClassMember.student_id).where(
+            ClassMember.class_id == class_id, ClassMember.status == "active"
+        )
+    ).all()
+    granted = 0
+    skipped = 0
+    for student_id in student_ids:
+        if has_effective_class_enrollment(db, class_group=class_group, student_id=student_id):
+            skipped += 1
+            continue
+        grant_for_membership(
+            db, class_group=class_group, student_id=student_id, admin_id=admin.id, request=request
+        )
+        granted += 1
+    db.commit()
+    return {"granted": granted, "skipped": skipped}

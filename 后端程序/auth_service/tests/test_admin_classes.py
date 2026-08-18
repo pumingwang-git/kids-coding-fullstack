@@ -1,4 +1,7 @@
+import csv
+import io
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -147,7 +150,7 @@ def test_class_with_relationships_cannot_be_physically_deleted(tmp_path: Path):
 def test_only_academic_admin_and_super_admin_can_manage_classes(tmp_path: Path):
     app = build_app(tmp_path)
     client, headers = login_as_role(app, "teacher")
-    assert client.get("/api/admin/classes", headers=headers).json() == {"items": []}
+    assert client.get("/api/admin/classes", headers=headers).json()["items"] == []
     assert client.post(
         "/api/admin/classes", headers=headers,
         json={"name": "越权班", "course_id": 1},
@@ -214,6 +217,146 @@ def test_teacher_class_reads_are_scoped_and_out_of_scope_is_not_found(
     )
     assert foreign_members.status_code == missing_members.status_code == 404
     assert foreign_members.json() == missing_members.json()
+
+
+def test_relationship_export_includes_history_with_bom_and_download_headers(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    student_id = seed_student(app)
+    teacher_id = seed_teacher(app)
+    course_id = seed_course(app)
+    class_id = client.post(
+        "/api/admin/classes", headers=headers,
+        json={"name": "历史导出班", "course_id": course_id},
+    ).json()["id"]
+    joined_at = datetime(2026, 8, 1, 8, 0, tzinfo=UTC)
+    ended_at = joined_at + timedelta(days=7)
+    db = app.state.session_factory()
+    try:
+        db.add(
+            ClassMember(
+                class_id=class_id,
+                student_id=student_id,
+                joined_at=joined_at,
+                left_at=ended_at,
+                status="left",
+            )
+        )
+        db.add(
+            ClassTeacher(
+                class_id=class_id,
+                admin_user_id=teacher_id,
+                role_in_class="assistant",
+                assigned_at=joined_at,
+                ended_at=ended_at,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/admin/classes/export", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/csv")
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="class-relationships.csv"'
+    )
+    assert response.content.startswith(b"\xef\xbb\xbf")
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+    assert {row["关系类型"] for row in rows} == {"成员", "带班"}
+    member = next(row for row in rows if row["关系类型"] == "成员")
+    assert member["班级ID"] == str(class_id)
+    assert member["学员ID"] == str(student_id)
+    assert member["成员状态"] == "left"
+    assert member["退班时间"] == "2026-08-08T08:00:00Z"
+    teacher = next(row for row in rows if row["关系类型"] == "带班")
+    assert teacher["后台账号ID"] == str(teacher_id)
+    assert teacher["班内角色"] == "assistant"
+    assert teacher["结束带班时间"] == "2026-08-08T08:00:00Z"
+    assert all("organization" not in key.lower() for key in rows[0])
+    assert all("tenant" not in key.lower() for key in rows[0])
+    assert all("campus" not in key.lower() for key in rows[0])
+
+
+def test_relationship_payloads_include_names_and_global_role_options(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    student_id = seed_student(app)
+    teacher_id = seed_teacher(app)
+    course_id = seed_course(app)
+    class_id = client.post(
+        "/api/admin/classes", headers=headers,
+        json={"name": "姓名展示班", "course_id": course_id},
+    ).json()["id"]
+
+    member = client.post(
+        f"/api/admin/classes/{class_id}/members",
+        headers=headers,
+        json={"student_id": student_id},
+    )
+    assert member.status_code == 201, member.text
+    assert member.json()["student_name"] == "student-1"
+
+    teacher = client.post(
+        f"/api/admin/classes/{class_id}/teachers",
+        headers=headers,
+        json={"admin_user_id": teacher_id, "role_in_class": "teacher"},
+    )
+    assert teacher.status_code == 201, teacher.text
+    assert teacher.json()["teacher_name"] == "班级教师"
+
+    classes = client.get("/api/admin/classes", headers=headers).json()
+    assert {option["value"] for option in classes["role_options"]} == {"teacher", "assistant"}
+    teachers = client.get(
+        f"/api/admin/classes/{class_id}/teachers", headers=headers
+    ).json()
+    assert "role_options" not in teachers
+    assert teachers["items"][0]["teacher_name"] == "班级教师"
+
+
+def test_relationship_export_is_limited_to_current_teacher_classes(tmp_path: Path):
+    app = build_app(tmp_path)
+    admin_client, admin_headers = admin_login(app)
+    student_id = seed_student(app)
+    course_id = seed_course(app)
+    own_class_id = admin_client.post(
+        "/api/admin/classes", headers=admin_headers,
+        json={"name": "教师可导班", "course_id": course_id},
+    ).json()["id"]
+    foreign_class_id = admin_client.post(
+        "/api/admin/classes", headers=admin_headers,
+        json={"name": "教师不可导班", "course_id": course_id},
+    ).json()["id"]
+    teacher, teacher_headers = login_as_role(app, "teacher", admin_id=2)
+    db = app.state.session_factory()
+    try:
+        db.add(ClassMember(class_id=own_class_id, student_id=student_id))
+        db.add(ClassMember(class_id=foreign_class_id, student_id=student_id))
+        db.add(
+            ClassTeacher(
+                class_id=own_class_id,
+                admin_user_id=2,
+                role_in_class="teacher",
+            )
+        )
+        db.add(
+            ClassTeacher(
+                class_id=foreign_class_id,
+                admin_user_id=2,
+                role_in_class="teacher",
+                assigned_at=datetime(2026, 7, 31, tzinfo=UTC),
+                ended_at=datetime(2026, 8, 1, tzinfo=UTC),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = teacher.get("/api/admin/classes/export", headers=teacher_headers)
+    assert response.status_code == 200, response.text
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+    assert rows
+    assert {row["班级ID"] for row in rows} == {str(own_class_id)}
 
 
 def test_archived_class_allows_withdraw_and_transfer_out_only(tmp_path: Path):
@@ -419,5 +562,124 @@ def test_enroll_withdraw_and_transfer_have_atomic_audit_contract(tmp_path: Path,
                 AuditEvent.resource_id != new_member_id,
             )
         ) is None
+    finally:
+        db.close()
+
+
+def test_bulk_member_import_keeps_rows_independent_and_reuses_enroll_audit(
+    tmp_path: Path,
+):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    seed_student(app, student_id=1)
+    seed_student(app, student_id=2)
+    course_id = seed_course(app)
+    class_id = client.post(
+        "/api/admin/classes",
+        headers=headers,
+        json={"name": "批量导入班", "course_id": course_id},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/admin/classes/{class_id}/members/bulk",
+        headers=headers,
+        json={"student_ids": [1, 9999, 2, 1]},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [row["student_id"] for row in payload["succeeded"]] == [1, 2]
+    assert payload["failed"] == [
+        {"student_id": 9999, "reason_code": "not_found"},
+        {"student_id": 1, "reason_code": "conflict"},
+    ]
+
+    db = app.state.session_factory()
+    try:
+        active_members = db.scalars(
+            select(ClassMember).where(
+                ClassMember.class_id == class_id,
+                ClassMember.status == "active",
+            )
+        ).all()
+        assert {row.student_id for row in active_members} == {1, 2}
+        enroll_events = db.scalars(
+            select(AuditEvent).where(
+                AuditEvent.event_type == "admin_class_member_enroll",
+                AuditEvent.outcome == "success",
+            )
+        ).all()
+        assert len(enroll_events) == 2
+    finally:
+        db.close()
+
+
+def test_bulk_member_import_rejects_archived_batch_and_enforces_limit(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    seed_student(app)
+    course_id = seed_course(app)
+    class_id = client.post(
+        "/api/admin/classes",
+        headers=headers,
+        json={"name": "归档导入班", "course_id": course_id},
+    ).json()["id"]
+
+    assert client.post(f"/api/admin/classes/{class_id}/archive", headers=headers).status_code == 200
+    archived = client.post(
+        f"/api/admin/classes/{class_id}/members/bulk",
+        headers=headers,
+        json={"student_ids": [1]},
+    )
+    assert archived.status_code == 409
+    assert client.get(
+        f"/api/admin/classes/{class_id}/members", headers=headers
+    ).json()["items"] == []
+
+    active_class_id = client.post(
+        "/api/admin/classes",
+        headers=headers,
+        json={"name": "上限导入班", "course_id": course_id},
+    ).json()["id"]
+    limit = client.post(
+        f"/api/admin/classes/{active_class_id}/members/bulk",
+        headers=headers,
+        json={"student_ids": list(range(1, 502))},
+    )
+    assert limit.status_code == 400
+    assert client.get(
+        f"/api/admin/classes/{active_class_id}/members", headers=headers
+    ).json()["items"] == []
+
+
+def test_bulk_member_import_denial_persists_existing_enroll_failure_audit(tmp_path: Path):
+    app = build_app(tmp_path)
+    manager, manager_headers = admin_login(app)
+    course_id = seed_course(app)
+    class_id = manager.post(
+        "/api/admin/classes",
+        headers=manager_headers,
+        json={"name": "无权导入班", "course_id": course_id},
+    ).json()["id"]
+    teacher, teacher_headers = login_as_role(app, "teacher")
+
+    denied = teacher.post(
+        f"/api/admin/classes/{class_id}/members/bulk",
+        headers=teacher_headers,
+        json={"student_ids": [1]},
+    )
+    assert denied.status_code == 403
+    db = app.state.session_factory()
+    try:
+        failure = db.scalar(
+            select(AuditEvent)
+            .where(
+                AuditEvent.event_type == "admin_class_member_enroll",
+                AuditEvent.outcome == "failure",
+            )
+            .order_by(AuditEvent.id.desc())
+        )
+        assert failure is not None
+        assert failure.admin_user_id == 2
+        assert json.loads(failure.summary_json)["reason_code"] == "forbidden"
     finally:
         db.close()
