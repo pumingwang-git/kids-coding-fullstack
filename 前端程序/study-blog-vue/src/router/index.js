@@ -4,6 +4,9 @@ import LearningAreas from "../views/LearningAreas.vue";
 import ProjectHome from "../views/ProjectHome.vue";
 import BlogHome from "../views/BlogPlanning.vue";
 import TasksHome from "../views/TasksHome.vue";
+import PracticeCenter from "../views/PracticeCenter.vue";
+import HomeworkCenter from "../views/HomeworkCenter.vue";
+import ExamCenter from "../views/ExamCenter.vue";
 import ExploreHome from "../views/ExploreHome.vue";
 import PlanningPage from "../views/PlanningPage.vue";
 import AuthView from "../views/AuthView.vue";
@@ -119,10 +122,25 @@ const router = createRouter({
       component: AreaModulePage,
       meta: { requiresAuth: true, shell: "learning" },
     },
+    {
+      path: "/areas/:areaKey/tasks/practice",
+      name: "area-practice",
+      component: PracticeCenter,
+      meta: { requiresAuth: true, shell: "learning" },
+    },
+    {
+      path: "/areas/:areaKey/tasks/homework",
+      name: "area-homework",
+      component: HomeworkCenter,
+      meta: { requiresAuth: true, shell: "learning" },
+    },
+    {
+      path: "/areas/:areaKey/tasks/exams",
+      name: "area-exams",
+      component: ExamCenter,
+      meta: { requiresAuth: true, shell: "learning" },
+    },
     ...[
-      ["practice", "练一练", "从课程内容出发完成即时练习，巩固刚学会的知识。", "tasks"],
-      ["homework", "我的作业", "集中查看老师布置的作业、提交状态与反馈。", "tasks"],
-      ["exams", "我的考试", "普通考试与课程测验会在这里统一管理。", "tasks"],
       ["activities", "活动", "主题活动与创作挑战将在准备完成后开放。", "explore"],
       ["competitions", "竞赛", "竞赛报名、作品提交与结果查询将归在这里。", "explore"],
       ["live", "直播", "直播课程尚在规划中，目前不会展示虚构场次。", "explore"],

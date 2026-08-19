@@ -1995,6 +1995,72 @@ label small {
   background: var(--kids-blue);
   border-color: var(--kids-blue);
 }
+
+/* 学习任务中心：四页共用一套紧凑任务行，状态文字只使用接口的 phase_label。 */
+.student-task-page,
+.tasks-dashboard-page {
+  max-width: 1060px;
+}
+.student-task-heading,
+.tasks-dashboard-heading {
+  position: relative;
+  min-height: 220px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 36px clamp(24px, 5vw, 52px);
+  border-radius: 24px 8px 24px 8px;
+  background: var(--area-surface);
+  color: #203c5b;
+}
+.homework-heading { background: color-mix(in srgb, var(--kids-coral) 13%, var(--kids-panel)); }
+.exam-heading { background: color-mix(in srgb, var(--kids-sky) 76%, var(--kids-panel)); }
+.student-task-heading > div,
+.tasks-dashboard-heading > div { position: relative; z-index: 1; max-width: 620px; }
+.student-task-heading h1,
+.tasks-dashboard-heading h1 { margin: 0; font: 900 42px/1.2 var(--font-display); letter-spacing: 0; }
+.student-task-heading p,
+.tasks-dashboard-heading p { margin: 12px 0 0; color: #54708d; line-height: 1.7; }
+.student-task-heading img,
+.tasks-dashboard-heading img { position: absolute; right: 4%; bottom: -34px; width: 220px; height: 240px; object-fit: contain; }
+.student-task-message { margin: 20px 0 0; padding: 26px; border: 1px solid var(--line); border-radius: 8px; background: var(--kids-panel); color: var(--muted); text-align: center; }
+.student-task-error { color: var(--danger); }
+.student-task-error .button { margin-top: 10px; }
+.student-task-empty,
+.tasks-dashboard-empty { margin-top: 20px; min-height: 190px; border: 1px solid var(--line); border-radius: 8px; background: var(--kids-panel); }
+.tasks-dashboard-empty .primary-action { display: inline-flex; margin-top: 14px; }
+.student-task-list { display: grid; gap: 10px; margin-top: 20px; }
+.student-task-list > a,
+.task-group-item { display: grid; grid-template-columns: minmax(0, 1fr) max-content 20px; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid rgba(55, 87, 123, 0.14); border-radius: 8px; background: var(--kids-panel); color: inherit; }
+.student-task-list > a:hover,
+.task-group-item:hover { border-color: var(--kids-blue); box-shadow: 0 8px 18px rgba(34, 43, 40, 0.08); }
+.task-phase { display: inline-flex; min-height: 22px; align-items: center; padding: 2px 8px; border-radius: 999px; background: var(--mint); color: var(--accent); font-size: 12px; font-weight: 800; }
+.student-task-list h2,
+.task-group-item h2 { margin: 8px 0 4px; font-size: 17px; overflow-wrap: anywhere; }
+.student-task-list p,
+.task-group-item p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.task-due,
+.task-tries { color: var(--muted); font-size: 12px; text-align: right; }
+.tasks-dashboard-groups { display: grid; gap: 24px; margin-top: 22px; }
+.task-group { display: grid; gap: 9px; }
+.task-group > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.task-group > header span { display: inline-flex; align-items: center; gap: 8px; font: 800 21px/1.3 var(--font-display); }
+.task-group > header a { color: var(--kids-blue); font-size: 13px; font-weight: 800; }
+.task-group-item { grid-template-columns: minmax(0, 1fr) 20px; padding: 16px 18px; }
+@media (max-width: 800px) {
+  .student-task-heading,
+  .tasks-dashboard-heading { min-height: 205px; padding: 28px 24px; }
+  .student-task-heading h1,
+  .tasks-dashboard-heading h1 { font-size: 34px; }
+  .student-task-heading img,
+  .tasks-dashboard-heading img { right: -24px; width: 175px; opacity: 0.28; }
+}
+@media (max-width: 520px) {
+  .student-task-list > a { grid-template-columns: minmax(0, 1fr) 18px; gap: 12px; }
+  .task-due,
+  .task-tries { grid-column: 1 / -1; grid-row: 2; text-align: left; }
+  .student-task-list > a > .app-icon { grid-column: 2; grid-row: 1; }
+}
 /* —— 继续学习卡片（学习端首页，聚合接口返回的真实最近学习记录） —— */
 .continue-items {
   display: grid;
