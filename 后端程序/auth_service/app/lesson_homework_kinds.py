@@ -179,6 +179,7 @@ class HomeworkKind:
     # 学生任务中心的来源身份和事实收集同样是类型能力，调用方不得按 kind 分支。
     student_source_type: str
     student_facts: Callable[[Session, User, list[int]], dict[int, TaskFacts]]
+    class_facts: Callable[[Session, int, set[int]], dict[int, TaskFacts]]
     # 详情页的呈现形态。前端按它选渲染器与行为，不按 key 猜。
     detail_view: str
     column_keys: tuple[str, ...]
@@ -327,6 +328,51 @@ def _paper_student_facts(db: Session, user: User, block_ids: list[int]) -> dict[
                      key=lambda row: (row.submitted_at or row.created_at, row.id), default=None)
         facts[block_id] = TaskFacts(
             due_at=due_by_block.get(block_id),
+            has_open_attempt=any(_attempt_is_open(row, now) for row in rows),
+            submitted_at=latest.submitted_at if latest else None,
+            grading_done=(all(status != "pending" for status in answer_statuses[latest.id])
+                          if latest else False),
+        )
+    return facts
+
+
+def _paper_class_facts(db: Session, block_id: int,
+                       user_ids: set[int]) -> dict[int, TaskFacts]:
+    """Collect one homework block's facts for a whole class in bounded queries."""
+    from .student_tasks import TaskFacts, _attempt_is_open
+
+    if not user_ids:
+        return {}
+    due_at = db.scalar(
+        select(LessonPaperBlock.due_at).where(LessonPaperBlock.block_id == block_id)
+    )
+    attempts = list(db.scalars(
+        select(PaperAttempt).where(
+            PaperAttempt.source_type == SOURCE_LESSON_HOMEWORK,
+            PaperAttempt.source_id == block_id,
+            PaperAttempt.user_id.in_(user_ids),
+        )
+    ))
+    submitted = [attempt for attempt in attempts if attempt.status == "submitted"]
+    answer_statuses: dict[int, list[str]] = {attempt.id: [] for attempt in submitted}
+    if answer_statuses:
+        for attempt_id, judge_status in db.execute(
+            select(AttemptAnswer.attempt_id, AttemptAnswer.judge_status)
+            .where(AttemptAnswer.attempt_id.in_(answer_statuses))
+        ):
+            answer_statuses[attempt_id].append(judge_status)
+    by_user: dict[int, list[PaperAttempt]] = {}
+    for attempt in attempts:
+        by_user.setdefault(attempt.user_id, []).append(attempt)
+    now = datetime.now(UTC)
+    facts = {}
+    for user_id in user_ids:
+        rows = by_user.get(user_id, [])
+        latest = max((row for row in rows if row.status == "submitted"),
+                     key=lambda row: (row.submitted_at or row.created_at, row.id),
+                     default=None)
+        facts[user_id] = TaskFacts(
+            due_at=due_at,
             has_open_attempt=any(_attempt_is_open(row, now) for row in rows),
             submitted_at=latest.submitted_at if latest else None,
             grading_done=(all(status != "pending" for status in answer_statuses[latest.id])
@@ -586,6 +632,7 @@ PAPER_KIND = HomeworkKind(
     block_type=PAPER_BLOCK_TYPE,
     student_source_type=SOURCE_LESSON_HOMEWORK,
     student_facts=_paper_student_facts,
+    class_facts=_paper_class_facts,
     detail_view="attempts",
     column_keys=("homework", "path", "deadline", "people", "submitted", "attempts",
                  "avg", "pass_rate", "actions"),
@@ -641,6 +688,36 @@ def _scratch_student_facts(db: Session, user: User, block_ids: list[int]) -> dic
     for block_id in block_ids:
         latest = latest_by_block.get(block_id)
         facts[block_id] = TaskFacts(
+            due_at=None,
+            has_open_attempt=latest is not None and latest.status in {"evaluating", "returned"},
+            submitted_at=latest.submitted_at if latest else None,
+            grading_done=(latest is not None and (latest.reviewed_at is not None
+                                                  or latest.status in {"passed", "failed"})),
+        )
+    return facts
+
+
+def _scratch_class_facts(db: Session, block_id: int,
+                         user_ids: set[int]) -> dict[int, TaskFacts]:
+    """Collect Scratch facts for a whole class with one submissions query."""
+    from .student_tasks import TaskFacts
+
+    if not user_ids:
+        return {}
+    submissions = list(db.scalars(
+        select(ScratchSubmission).where(
+            ScratchSubmission.lesson_block_id == block_id,
+            ScratchSubmission.user_id.in_(user_ids),
+        )
+    ))
+    by_user: dict[int, list[ScratchSubmission]] = {}
+    for submission in submissions:
+        by_user.setdefault(submission.user_id, []).append(submission)
+    facts = {}
+    for user_id in user_ids:
+        rows = by_user.get(user_id, [])
+        latest = max(rows, key=lambda row: (row.submitted_at, row.id), default=None)
+        facts[user_id] = TaskFacts(
             due_at=None,
             has_open_attempt=latest is not None and latest.status in {"evaluating", "returned"},
             submitted_at=latest.submitted_at if latest else None,
@@ -984,6 +1061,7 @@ SCRATCH_KIND = HomeworkKind(
     block_type=SCRATCH_BLOCK_TYPE,
     student_source_type="lesson_scratch",
     student_facts=_scratch_student_facts,
+    class_facts=_scratch_class_facts,
     detail_view="submissions",
     column_keys=("homework", "path", "deadline", "people", "passed", "pending",
                  "attempts", "avg", "pass_rate", "actions"),
