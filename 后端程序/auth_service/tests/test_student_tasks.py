@@ -94,6 +94,33 @@ def test_attempt_without_deadline_remains_open():
     assert _attempt_is_open(attempt, NOW) is True
 
 
+def test_homework_endpoint_ignores_stale_ongoing_attempt(tmp_path: Path):
+    """任务中心不能依赖 cron 把已超时的作答物化为终态。"""
+    app = build_app(tmp_path)
+    student = student_login(app)
+    paper_id = seed_paper(app)["paper_id"]
+    built = build_lesson_with_blocks(
+        app, [{"block_type": "homework", "paper_id": paper_id}], open_policy="closed"
+    )
+    user = _learner(app)
+    block_id = built["block_ids"][0]
+    set_enrollment(app, student_id=user.id, course_id=built["course_id"])
+    db = app.state.session_factory()
+    try:
+        db.add(PaperAttempt(
+            source_type="lesson_homework", source_id=block_id, paper_id=paper_id,
+            user_id=user.id, attempt_no=1, status="ongoing",
+            deadline_at=datetime.now(UTC) - timedelta(seconds=1),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = student.get("/api/student/homework")
+    assert response.status_code == 200, response.text
+    assert response.json()["items"][0]["phase"] == "todo"
+
+
 def test_paper_empty_submission_is_explicitly_grading_done():
     """空卷没有待判题；这不是依赖 Python all() 的偶然行为。"""
     attempt = SimpleNamespace(id=11, source_id=7, status="submitted", submitted_at=NOW,
