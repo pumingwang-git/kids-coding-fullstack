@@ -24,6 +24,7 @@ from app.student_tasks import (
     exam_phase,
     homework_phase,
 )
+import app.routers.student_tasks as student_tasks_router
 from app.lesson_homework_kinds import PAPER_KIND, SCRATCH_KIND
 
 
@@ -445,3 +446,41 @@ def test_tasks_overview_due_soon_uses_homework_dto_and_72_hour_boundary(tmp_path
     assert [item["source_id"] for item in due_soon["items"]] == [built["block_ids"][0]]
     listed = next(item for item in homework if item["source_id"] == built["block_ids"][0])
     assert due_soon["items"][0] == listed
+
+
+def test_tasks_overview_group_limit_is_five():
+    assert student_tasks_router._group([{} for _ in range(8)]) == {
+        "items": [{}, {}, {}, {}, {}], "total": 8,
+    }
+
+
+def test_tasks_overview_includes_running_exam_and_classifies_remaining_groups(tmp_path: Path, monkeypatch):
+    app = build_app(tmp_path)
+    student = student_login(app)
+    now = datetime.now(UTC)
+
+    def candidate(block_id, phase, due=None):
+        return ({"source_id": block_id, "facts": TaskFacts(
+            due_at=due, has_open_attempt=False, submitted_at=now if phase == "graded" else None,
+            grading_done=phase == "graded"), "completed": False, "tries": 0}, phase)
+
+    homework = [candidate(1, "graded"), candidate(2, "overdue", now - timedelta(hours=1))]
+    practice = [{"source_id": 3, "completed": False, "tries": 1}]
+    monkeypatch.setattr(student_tasks_router, "collect_homework_candidates",
+                        lambda db, user: [row[0] for row in homework])
+    monkeypatch.setattr(student_tasks_router, "collect_practice_candidates",
+                        lambda db, user: practice)
+    monkeypatch.setattr(student_tasks_router, "homework_phase",
+                        lambda facts, now: next(row[1] for row in homework if row[0]["facts"] is facts))
+    monkeypatch.setattr(student_tasks_router, "build_homework_item",
+                        lambda candidate, phase: {"id": candidate["source_id"], "phase": phase})
+    monkeypatch.setattr(student_tasks_router, "build_practice_item",
+                        lambda candidate, phase: {"id": candidate["source_id"], "phase": phase})
+    monkeypatch.setattr(student_tasks_router, "_exam_rows",
+                        lambda db, user, now: [({"source_id": 9, "phase": "running"}, "running")])
+    body = student.get("/api/student/tasks/overview").json()
+    assert body["in_progress"]["items"] == [{"source_id": 9, "phase": "running"}]
+    assert body["to_review"]["items"] == [{"id": 1, "phase": "graded"}]
+    assert body["unfinished"]["items"] == [
+        {"id": 3, "phase": "in_progress"}, {"id": 2, "phase": "overdue"}
+    ]
