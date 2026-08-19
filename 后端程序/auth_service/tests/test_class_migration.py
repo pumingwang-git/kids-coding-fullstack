@@ -23,6 +23,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_FILE = SERVICE_ROOT / "alembic" / "versions" / "0055_class_groups.py"
 CLASS_TABLES = ("class_groups", "class_members", "class_teachers")
 PREVIOUS_HEAD = "0054_math_games"
+CLASS_REVISION = "0055_class_groups"
 
 
 def alembic_config() -> Config:
@@ -89,19 +90,19 @@ def execute(url: str, statement: str) -> None:
 
 def test_upgrade_creates_the_three_class_tables(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     assert set(CLASS_TABLES) <= table_names(url)
 
 
 def test_empty_downgrade_removes_them_and_upgrade_stays_repeatable(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
 
     command.downgrade(config, PREVIOUS_HEAD)
     assert not (set(CLASS_TABLES) & table_names(url))
 
     # 再升一次：回滚若残留索引或约束，这一步会因重复创建而报错。
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     assert set(CLASS_TABLES) <= table_names(url)
 
 
@@ -114,7 +115,7 @@ def prepare_class(url: str) -> None:
 
 def test_active_member_is_unique_per_class_and_student(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     prepare_class(url)
 
     execute(url, "INSERT INTO class_members (class_id, student_id) VALUES (1, 1)")
@@ -124,7 +125,7 @@ def test_active_member_is_unique_per_class_and_student(migration_env):
 
 def test_student_can_rejoin_after_old_membership_is_left(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     prepare_class(url)
 
     execute(
@@ -152,7 +153,7 @@ def test_student_can_rejoin_after_old_membership_is_left(migration_env):
 
 def test_active_teacher_assignment_is_unique_per_class_and_admin(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     prepare_class(url)
 
     execute(
@@ -170,7 +171,7 @@ def test_active_teacher_assignment_is_unique_per_class_and_admin(migration_env):
 
 def test_teacher_cannot_also_be_active_assistant_in_same_class(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     prepare_class(url)
 
     execute(
@@ -188,7 +189,7 @@ def test_teacher_cannot_also_be_active_assistant_in_same_class(migration_env):
 
 def test_admin_can_change_class_role_after_ending_old_assignment(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     prepare_class(url)
 
     execute(
@@ -222,7 +223,7 @@ def test_admin_can_change_class_role_after_ending_old_assignment(migration_env):
 )
 def test_member_status_and_left_at_must_match(migration_env, status, left_at):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     prepare_class(url)
 
     with pytest.raises(IntegrityError):
@@ -235,7 +236,7 @@ def test_member_status_and_left_at_must_match(migration_env, status, left_at):
 
 def test_models_match_migrated_class_table_structure(migration_env, tmp_path):
     config, migration_url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
 
     model_url = f"sqlite:///{tmp_path / 'models.db'}"
     model_engine = sa.create_engine(model_url)
@@ -297,7 +298,7 @@ NON_EMPTY_ROWS = {
 @pytest.mark.parametrize("table", CLASS_TABLES)
 def test_downgrade_refuses_and_keeps_everything_when_a_table_has_data(migration_env, table):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     execute(url, NON_EMPTY_ROWS[table])
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -320,7 +321,7 @@ def test_downgrade_refuses_and_keeps_everything_when_a_table_has_data(migration_
 def test_active_member_and_teacher_relationships_are_unique(migration_env):
     """历史关系可保留，但同一时刻不能重复入班或重复带班。"""
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, CLASS_REVISION)
     execute(url, "INSERT INTO class_groups (id, name, course_id) VALUES (1, '三年级 A 班', 1)")
 
     execute(url, "INSERT INTO class_members (class_id, student_id) VALUES (1, 1)")
@@ -385,10 +386,10 @@ def test_postgres_round_trip(monkeypatch):
     get_settings.cache_clear()
     config = alembic_config()
     try:
-        command.upgrade(config, "head")
+        command.upgrade(config, CLASS_REVISION)
         assert set(CLASS_TABLES) <= table_names(url)
         command.downgrade(config, PREVIOUS_HEAD)
         assert not (set(CLASS_TABLES) & table_names(url))
-        command.upgrade(config, "head")
+        command.upgrade(config, CLASS_REVISION)
     finally:
         get_settings.cache_clear()
