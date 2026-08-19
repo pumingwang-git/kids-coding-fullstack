@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import ClassGroup, ClassMember, Enrollment
+from .course_access import enrollment_predicates
 from .security import as_utc, utcnow
 from .routers.admin_auth import audit, client_ip
 
@@ -60,6 +61,7 @@ def grant_for_membership(
 def revoke_for_membership(
     db: Session, *, class_group: ClassGroup, student_id: int, admin_id: int, request
 ) -> int:
+    # 退班必须撤销所有 active 班级记录，包括尚未到 opened_at 的记录；否则未来开通会复活资格。
     rows = db.scalars(
         select(Enrollment).where(
             Enrollment.student_id == student_id,
@@ -101,11 +103,7 @@ def has_effective_class_enrollment(db: Session, *, class_group: ClassGroup, stud
             Enrollment.student_id == student_id,
             Enrollment.source == CLASS_BATCH_SOURCE,
             Enrollment.class_id == class_group.id,
-            Enrollment.status == "active",
+            *enrollment_predicates(now),
         )
     ).all()
-    return any(
-        as_utc(row.opened_at) <= now
-        and (row.expires_at is None or as_utc(row.expires_at) >= now)
-        for row in rows
-    )
+    return bool(rows)

@@ -23,6 +23,7 @@ E3a 的个人开通记录在 `_enrolled` 里统一查询，并实时比较 `open
 """
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import or_, select
@@ -60,6 +61,15 @@ def lesson_policy(lesson: CourseLesson) -> str:
     return policy
 
 
+def enrollment_predicates(now: datetime):
+    """开通资格的唯一谓词，单条与集合查询必须共用。"""
+    return (
+        Enrollment.status == "active",
+        Enrollment.opened_at <= now,
+        or_(Enrollment.expires_at.is_(None), Enrollment.expires_at >= now),
+    )
+
+
 def _enrolled(db: Session, user: User | None, course: Course) -> bool:
     """是否已开通该课包。
 
@@ -74,11 +84,22 @@ def _enrolled(db: Session, user: User | None, course: Course) -> bool:
         select(Enrollment.id).where(
             Enrollment.student_id == user.id,
             Enrollment.course_id == course.id,
-            Enrollment.status == "active",
-            Enrollment.opened_at <= now,
-            or_(Enrollment.expires_at.is_(None), Enrollment.expires_at >= now),
+            *enrollment_predicates(now),
         )
     ) is not None
+
+
+def enrolled_course_ids(db: Session, user: User | None) -> set[int]:
+    """返回该学生当前已开通的全部课包 id，资格口径与 ``_enrolled`` 一致。"""
+    if user is None:
+        return set()
+    now = utcnow()
+    return set(db.scalars(
+        select(Enrollment.course_id).where(
+            Enrollment.student_id == user.id,
+            *enrollment_predicates(now),
+        )
+    ).all())
 
 
 def lesson_access(db: Session, user: User | None, lesson: CourseLesson) -> Access:
@@ -97,14 +118,17 @@ def lesson_access(db: Session, user: User | None, lesson: CourseLesson) -> Acces
 
 
 def lesson_block_open(db: Session, user: User | None, lesson: CourseLesson,
-                      block_sort_order: int) -> bool:
+                      block_sort_order: int, granted: bool | None = None) -> bool:
     """内容块级访问判定（排序是 0..n-1 连续压实，见 0030 迁移与 reorder 接口）。
 
     完整解锁（整节试看 / 已开通）→ 全块开放；
     试看前 N 块（first_n）→ 前 trial_block_count 块开放，其余拒绝；
     其余策略（含 video_minutes 二期）→ 拒绝。
     """
-    if lesson_access(db, user, lesson) is Access.GRANTED:
+    # ``granted`` 是调用方按课时缓存的真实 Gate A 结论；传错会静默放行，不能猜测。
+    if granted is None:
+        granted = lesson_access(db, user, lesson) is Access.GRANTED
+    if granted:
         return True
     if lesson_policy(lesson) == "first_n":
         count = lesson.trial_block_count or 0
@@ -143,7 +167,7 @@ def completed_block_ids(db: Session, user: User | None, lesson_id: int) -> set[i
 
 def block_unlocked(db: Session, user: User | None, lesson: CourseLesson,
                    block: CourseLessonBlock, ordered_blocks: list[CourseLessonBlock],
-                   completed_ids: set[int]) -> bool:
+                   completed_ids: set[int], granted: bool | None = None) -> bool:
     """Gate B：unlock_rule=sequential 的块要求前面所有「必修且有权限」的块已完成。
 
     ordered_blocks 必须是本课时按 sort_order 升序的全部块（调用方已经查过一次，
@@ -172,7 +196,7 @@ def block_unlocked(db: Session, user: User | None, lesson: CourseLesson,
             break
         if not prev.required:
             continue  # 坑 1：选学块不阻塞
-        if not lesson_block_open(db, user, lesson, prev.sort_order):
+        if not (granted or lesson_block_open(db, user, lesson, prev.sort_order, granted)):
             continue  # 坑 2：没权限的块不能当前置条件
         if prev.id not in completed_ids:
             return False
@@ -194,8 +218,8 @@ def block_gate(db: Session, user: User | None, lesson: CourseLesson,
     """
     if granted is None:
         granted = lesson_access(db, user, lesson) is Access.GRANTED
-    can_access = granted or lesson_block_open(db, user, lesson, block.sort_order)
-    is_unlocked = block_unlocked(db, user, lesson, block, ordered_blocks, completed_ids)
+    can_access = granted or lesson_block_open(db, user, lesson, block.sort_order, granted)
+    is_unlocked = block_unlocked(db, user, lesson, block, ordered_blocks, completed_ids, granted)
     if not can_access:
         reason = "not_enrolled"
     elif not is_unlocked:

@@ -34,6 +34,7 @@ from .models import (
     CourseLesson,
     CourseLessonBlock,
     CourseSection,
+    AttemptAnswer,
     LessonPaperBlock,
     LessonScratchBlock,
     Paper,
@@ -175,6 +176,9 @@ class HomeworkKind:
     key: str
     label: str
     block_type: str
+    # 学生任务中心的来源身份和事实收集同样是类型能力，调用方不得按 kind 分支。
+    student_source_type: str
+    student_facts: Callable[[Session, User, list[int]], dict[int, TaskFacts]]
     # 详情页的呈现形态。前端按它选渲染器与行为，不按 key 猜。
     detail_view: str
     column_keys: tuple[str, ...]
@@ -284,6 +288,51 @@ def _require_visible_student(user_id: int, student_ids: set[int] | None,
 
 
 PAPER_BLOCK_TYPE = "homework"
+
+
+def _paper_student_facts(db: Session, user: User, block_ids: list[int]) -> dict[int, TaskFacts]:
+    """批量收集整卷作业的运行事实；空答卷的 all([]) 有意视为已判完。"""
+    from .student_tasks import TaskFacts, _attempt_is_open
+
+    if not block_ids:
+        return {}
+    due_by_block = dict(db.execute(
+        select(LessonPaperBlock.block_id, LessonPaperBlock.due_at)
+        .where(LessonPaperBlock.block_id.in_(block_ids))
+    ).all())
+    attempts = list(db.scalars(
+        select(PaperAttempt).where(
+            PaperAttempt.source_type == SOURCE_LESSON_HOMEWORK,
+            PaperAttempt.source_id.in_(block_ids),
+            PaperAttempt.user_id == user.id,
+        )
+    ))
+    submitted = [attempt for attempt in attempts if attempt.status == "submitted"]
+    answer_statuses: dict[int, list[str]] = {attempt.id: [] for attempt in submitted}
+    if answer_statuses:
+        for attempt_id, judge_status in db.execute(
+            select(AttemptAnswer.attempt_id, AttemptAnswer.judge_status)
+            .where(AttemptAnswer.attempt_id.in_(answer_statuses))
+        ):
+            answer_statuses[attempt_id].append(judge_status)
+
+    by_block: dict[int, list[PaperAttempt]] = {}
+    for attempt in attempts:
+        by_block.setdefault(attempt.source_id, []).append(attempt)
+    now = datetime.now(UTC)
+    facts = {}
+    for block_id in block_ids:
+        rows = by_block.get(block_id, [])
+        latest = max((row for row in rows if row.status == "submitted"),
+                     key=lambda row: (row.submitted_at or row.created_at, row.id), default=None)
+        facts[block_id] = TaskFacts(
+            due_at=due_by_block.get(block_id),
+            has_open_attempt=any(_attempt_is_open(row, now) for row in rows),
+            submitted_at=latest.submitted_at if latest else None,
+            grading_done=(all(status != "pending" for status in answer_statuses[latest.id])
+                          if latest else False),
+        )
+    return facts
 
 
 def _paper_deadline(detail: LessonPaperBlock) -> dict:
@@ -535,6 +584,8 @@ PAPER_KIND = HomeworkKind(
     key="paper",
     label="试卷作业",
     block_type=PAPER_BLOCK_TYPE,
+    student_source_type=SOURCE_LESSON_HOMEWORK,
+    student_facts=_paper_student_facts,
     detail_view="attempts",
     column_keys=("homework", "path", "deadline", "people", "submitted", "attempts",
                  "avg", "pass_rate", "actions"),
@@ -567,6 +618,36 @@ PAPER_KIND = HomeworkKind(
 # ---------------------------------------------------------------------------
 
 SCRATCH_BLOCK_TYPE = "scratch"
+
+
+def _scratch_student_facts(db: Session, user: User, block_ids: list[int]) -> dict[int, TaskFacts]:
+    from .student_tasks import TaskFacts
+
+    if not block_ids:
+        return {}
+    submissions = list(db.scalars(
+        select(ScratchSubmission).where(
+            ScratchSubmission.lesson_block_id.in_(block_ids),
+            ScratchSubmission.user_id == user.id,
+        )
+    ))
+    latest_by_block: dict[int, ScratchSubmission] = {}
+    for submission in submissions:
+        previous = latest_by_block.get(submission.lesson_block_id)
+        if previous is None or (submission.submitted_at, submission.id) > (
+                previous.submitted_at, previous.id):
+            latest_by_block[submission.lesson_block_id] = submission
+    facts = {}
+    for block_id in block_ids:
+        latest = latest_by_block.get(block_id)
+        facts[block_id] = TaskFacts(
+            due_at=None,
+            has_open_attempt=latest is not None and latest.status in {"evaluating", "returned"},
+            submitted_at=latest.submitted_at if latest else None,
+            grading_done=(latest is not None and (latest.reviewed_at is not None
+                                                  or latest.status in {"passed", "failed"})),
+        )
+    return facts
 
 SUBMISSION_STATUS = {
     "passed": ("已通过", "ok"),
@@ -901,6 +982,8 @@ SCRATCH_KIND = HomeworkKind(
     key="scratch",
     label="Scratch 作业",
     block_type=SCRATCH_BLOCK_TYPE,
+    student_source_type="lesson_scratch",
+    student_facts=_scratch_student_facts,
     detail_view="submissions",
     column_keys=("homework", "path", "deadline", "people", "passed", "pending",
                  "attempts", "avg", "pass_rate", "actions"),

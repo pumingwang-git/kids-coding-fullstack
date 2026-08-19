@@ -11,7 +11,8 @@ from test_admin_courses import add_section, create_category, create_course
 from test_exam import admin_login, build_app, scsrf, student_login
 from test_student_learning import build_published_course, seed_ready_video
 
-from app.models import AuditEvent, Enrollment, User
+from app.course_access import enrolled_course_ids
+from app.models import AuditEvent, Course, Enrollment, User
 
 
 def learner_id(app) -> int:
@@ -42,6 +43,36 @@ def set_enrollment(app, *, student_id: int, course_id: int, **values) -> None:
         for key, value in values.items():
             setattr(row, key, value)
         db.commit()
+    finally:
+        db.close()
+
+
+def test_enrolled_course_ids_uses_the_shared_active_time_window_and_union(tmp_path: Path):
+    app = build_app(tmp_path)
+    student_login(app)
+    now = datetime.now(UTC)
+    db = app.state.session_factory()
+    try:
+        learner = db.scalar(select(User).where(User.username == "learner"))
+        courses = [Course(title=f"集合资格 {index}") for index in range(4)]
+        db.add_all(courses)
+        db.flush()
+        active, not_started, expired, disabled = courses
+        db.add_all([
+            Enrollment(student_id=learner.id, course_id=active.id, source="admin", status="active",
+                       opened_at=now - timedelta(days=1)),
+            Enrollment(student_id=learner.id, course_id=not_started.id, source="admin", status="active",
+                       opened_at=now + timedelta(days=1)),
+            Enrollment(student_id=learner.id, course_id=expired.id, source="admin", status="active",
+                       opened_at=now - timedelta(days=2), expires_at=now - timedelta(days=1)),
+            Enrollment(student_id=learner.id, course_id=disabled.id, source="admin", status="disabled",
+                       opened_at=now - timedelta(days=1)),
+            # 同课包的失效班级来源不能覆盖有效的个人来源。
+            Enrollment(student_id=learner.id, course_id=active.id, source="class_batch", status="disabled",
+                       opened_at=now - timedelta(days=1)),
+        ])
+        db.commit()
+        assert enrolled_course_ids(db, learner) == {active.id}
     finally:
         db.close()
 

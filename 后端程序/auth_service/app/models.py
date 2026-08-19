@@ -418,6 +418,47 @@ class ExamLink(Base):
     __table_args__ = (UniqueConstraint("paper_id", "name", name="uq_exam_links_name"),)
 
 
+class ExamAssignment(Base):
+    """考试名单：一条考试链接投给一个班或一个学生，只管可见性，不管准入。"""
+
+    __tablename__ = "exam_assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    exam_link_id: Mapped[int] = mapped_column(
+        ForeignKey("exam_links.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 多态目标键必须整体非空；target_id 不建 FK，解析时按 target_type 过滤。
+    target_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="active", server_default="active", index=True
+    )
+    assigned_by: Mapped[int | None] = mapped_column(
+        ForeignKey("admin_users.id"), nullable=True
+    )
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(status = 'active' AND ended_at IS NULL) OR "
+            "(status = 'ended' AND ended_at IS NOT NULL)",
+            name="ck_exam_assignments_status_matches_ended_at",
+        ),
+        Index(
+            "uq_exam_assignments_active",
+            "exam_link_id",
+            "target_type",
+            "target_id",
+            unique=True,
+            postgresql_where=sa.text("status = 'active'"),
+            sqlite_where=sa.text("status = 'active'"),
+        ),
+    )
+
+
 class PaperQuestion(Base):
     """卷题关联：用 problem_id_no 逻辑引用题目，故意不建外键（见组卷文档 5.1）。"""
     __tablename__ = "paper_questions"

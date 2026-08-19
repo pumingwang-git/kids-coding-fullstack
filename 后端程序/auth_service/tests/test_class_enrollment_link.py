@@ -78,6 +78,62 @@ def test_transfer_replaces_source_class_enrollment(tmp_path: Path):
     }
 
 
+def test_withdraw_disables_a_future_class_enrollment(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    seed_student(app)
+    course_id = seed_course(app)
+    class_id = create_class(
+        client, headers, course_id, "未来开通班", start_at=(datetime.now(UTC) + timedelta(days=1)).isoformat()
+    )
+    member = client.post(
+        f"/api/admin/classes/{class_id}/members", headers=headers, json={"student_id": 1}
+    ).json()
+    rows = enrollments(app, 1)
+    assert rows[0].status == "active" and as_utc(rows[0].opened_at) > datetime.now(UTC)
+
+    response = client.post(
+        f"/api/admin/classes/{class_id}/members/{member['id']}/withdraw", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    assert enrollments(app, 1)[0].status == "disabled"
+
+
+def test_manual_sync_replaces_an_expired_active_class_enrollment(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    seed_student(app)
+    course_id = seed_course(app)
+    class_id = create_class(
+        client, headers, course_id, "窗口内班级", end_at=(datetime.now(UTC) + timedelta(days=5)).isoformat()
+    )
+    client.post(
+        f"/api/admin/classes/{class_id}/members", headers=headers, json={"student_id": 1}
+    )
+
+    db = app.state.session_factory()
+    try:
+        row = db.scalar(
+            select(Enrollment).where(
+                Enrollment.student_id == 1,
+                Enrollment.class_id == class_id,
+                Enrollment.status == "active",
+            )
+        )
+        row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(f"/api/admin/classes/{class_id}/enrollments/sync", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"granted": 1, "skipped": 0}
+    rows = enrollments(app, 1)
+    assert len(rows) == 2 and all(row.status == "active" for row in rows)
+    assert any(row.expires_at is not None and as_utc(row.expires_at) < datetime.now(UTC) for row in rows)
+    assert any(row.expires_at is None or as_utc(row.expires_at) > datetime.now(UTC) for row in rows)
+
+
 def test_end_date_sync_replaces_history_and_manual_sync_is_idempotent(tmp_path: Path):
     app = build_app(tmp_path)
     client, headers = admin_login(app)

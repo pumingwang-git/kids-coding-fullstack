@@ -10,6 +10,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import Course, Enrollment, User
+from ..course_access import enrollment_predicates
 from ..permissions import can_manage_enrollments
 from ..security import as_utc, utcnow
 from .admin_auth import audit, client_ip, current_admin, db_session, require_csrf
@@ -107,11 +108,7 @@ def _enrollment_phase(row: Enrollment, now: datetime | None = None) -> str:
 def _phase_filters(phase: str, now: datetime) -> list:
     """Build SQL predicates equivalent to ``_enrollment_phase``."""
     if phase == "active":
-        return [
-            Enrollment.status == "active",
-            Enrollment.opened_at <= now,
-            or_(Enrollment.expires_at.is_(None), Enrollment.expires_at >= now),
-        ]
+        return list(enrollment_predicates(now))
     if phase == "not_started":
         return [Enrollment.status == "active", Enrollment.opened_at > now]
     if phase == "expired":
