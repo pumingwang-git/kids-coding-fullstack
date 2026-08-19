@@ -40,6 +40,7 @@ from .routers.admin_questions import router as admin_questions_router
 from .routers.admin_results import router as admin_results_router
 from .routers.admin_scratch import router as admin_scratch_router
 from .routers.admin_students import router as admin_students_router
+from .routers.admin_teaching import router as admin_teaching_router
 from .routers.admin_videos import router as admin_videos_router
 from .routers.auth_secure import router
 from .routers.courses import router as student_courses_router
@@ -169,6 +170,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_router)
     app.include_router(admin_classes_router)
     app.include_router(admin_students_router)
+    app.include_router(admin_teaching_router)
     app.include_router(admin_enrollments_router)
     app.include_router(admin_courses_router)
     app.include_router(admin_learning_catalog_router)
