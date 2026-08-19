@@ -38,6 +38,7 @@ from ..course_access import (
     lesson_progress,
     lesson_unlocked,
 )
+from ..learning_activity import last_activity_at
 from ..models import (
     Course,
     CourseCategory,
@@ -49,10 +50,8 @@ from ..models import (
     CourseType,
     LessonBlockCompletion,
     LessonBlockMaterial,
-    LessonCodeRun,
     LessonMarkdownBlock,
     LessonPaperBlock,
-    LessonProblemAttempt,
     LessonProblemBlock,
     LessonScratchBlock,
     LessonVideoBlock,
@@ -282,42 +281,20 @@ def continue_learning(request: Request, db: Session = Depends(db_session),
     user = current_user(request, db)
 
     # —— 1. 聚合学习活动 → (lesson_id → 最近活动时间) + 视频续播断点 ——
-    last_learned: dict[int, datetime] = {}
+    last_learned = last_activity_at(db, {user.id}, group_by_lesson=True)
     resume_position: dict[int, int] = {}
     resume_beat_at: dict[int, datetime] = {}
-
-    def touch(lesson_id: int, at: datetime) -> None:
-        if lesson_id is None or at is None:
-            return
-        if lesson_id not in last_learned or at > last_learned[lesson_id]:
-            last_learned[lesson_id] = at
 
     # 视频心跳：同课时多个视频块并行，续播断点取「最近一次心跳」那块的最远位置
     for row in db.scalars(
         select(LessonVideoWatch).where(LessonVideoWatch.user_id == user.id)
     ).all():
         at = row.updated_at or row.last_beat_at
-        touch(row.lesson_id, at)
         if at is None:
             continue
         if resume_beat_at.get(row.lesson_id) is None or at > resume_beat_at[row.lesson_id]:
             resume_beat_at[row.lesson_id] = at
             resume_position[row.lesson_id] = row.max_position_seconds
-
-    for row in db.scalars(
-        select(LessonBlockCompletion).where(LessonBlockCompletion.user_id == user.id)
-    ).all():
-        touch(row.lesson_id, row.completed_at)
-
-    for row in db.scalars(
-        select(LessonProblemAttempt).where(LessonProblemAttempt.user_id == user.id)
-    ).all():
-        touch(row.lesson_id, row.updated_at)
-
-    for row in db.scalars(
-        select(LessonCodeRun).where(LessonCodeRun.user_id == user.id)
-    ).all():
-        touch(row.lesson_id, row.created_at)
 
     if not last_learned:
         return {"items": []}
