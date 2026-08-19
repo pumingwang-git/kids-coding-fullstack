@@ -1,11 +1,15 @@
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.config import DEV_FERNET_KEY, Settings
 from app.database import build_database
 from app.main import create_app
-from app.models import AdminUser, Base, Problem
+from app.models import (
+    AdminUser, AuditEvent, Base, ClassGroup, Course, ExamAssignment, LearningArea, Problem, User,
+)
 from app.security import password_hash
 
 
@@ -869,3 +873,136 @@ def test_exam_url_masked_for_non_managers_and_reveal_writes_audit(tmp_path):
         assert "exam_url" not in author_link
         assert author_link["exam_url_hint"] == f"/exam/{token[:4]}…{token[-4:]}"
         assert author_link["allowed_actions"] == ["view", "reveal_url"]
+
+
+def _assignment_targets(client: TestClient) -> tuple[ClassGroup, User]:
+    db = client.app.state.session_factory()
+    try:
+        db.add(LearningArea(key="roster", name="名单测试专区", status="active"))
+        db.flush()
+        course = Course(title="名单测试课包", area_key="roster")
+        db.add(course)
+        db.flush()
+        class_group = ClassGroup(name="名单测试班", course_id=course.id, status="active")
+        student = User(
+            username="roster-student",
+            email="roster-student@example.test",
+            hashed_password="unused",
+            status="active",
+        )
+        db.add_all([class_group, student])
+        db.commit()
+        db.refresh(class_group)
+        db.refresh(student)
+        return class_group, student
+    finally:
+        db.close()
+
+
+def _assignment_audit_rows(client: TestClient, event_type: str) -> list[AuditEvent]:
+    db = client.app.state.session_factory()
+    try:
+        return db.scalars(
+            select(AuditEvent).where(AuditEvent.event_type == event_type).order_by(AuditEvent.id)
+        ).all()
+    finally:
+        db.close()
+
+
+def test_exam_link_assignments_create_conflict_and_audit(tmp_path):
+    with admin_client(tmp_path) as client:
+        headers = login(client)
+        problem = approve_problem(client, headers)
+        paper = _published_paper(client, headers, [{"problem_id_no": problem["problem_id_no"], "score": 100, "sort_order": 0}])
+        link = client.post(f"/api/admin/papers/{paper['id']}/links", headers=headers, json=link_payload()).json()
+        class_group, student = _assignment_targets(client)
+        url = f"/api/admin/exam-links/{link['id']}/assignments"
+
+        assigned_class = client.post(url, headers=headers, json={"target_type": "class", "target_id": class_group.id})
+        assigned_student = client.post(url, headers=headers, json={"target_type": "student", "target_id": student.id})
+        assert assigned_class.status_code == 201, assigned_class.text
+        assert assigned_student.status_code == 201, assigned_student.text
+        assert assigned_class.json()["target_type_label"]
+        assert assigned_student.json()["target_type_label"]
+
+        listing = client.get(url, headers=headers).json()
+        assert listing["total"] == 2
+        assert {item["target_id"] for item in listing["items"]} == {class_group.id, student.id}
+        assert {item["label"] for item in listing["target_type_options"]} == {
+            assigned_class.json()["target_type_label"],
+            assigned_student.json()["target_type_label"],
+        }
+
+        duplicate = client.post(url, headers=headers, json={"target_type": "class", "target_id": class_group.id})
+        assert duplicate.status_code == 409
+        success = _assignment_audit_rows(client, "admin_exam_assign")
+        assert len(success) == 3
+        assert [row.outcome for row in success] == ["success", "success", "failure"]
+        for row in success[:2]:
+            summary = json.loads(row.summary_json)
+            assert summary["schema_version"] == 1
+            assert summary["exam_link_id"] == link["id"]
+            assert {"target_type", "target_id"} <= summary.keys()
+        assert json.loads(success[-1].summary_json)["reason_code"] == "conflict"
+
+
+def test_exam_link_assignment_end_keeps_history_and_allows_reassignment(tmp_path):
+    with admin_client(tmp_path) as client:
+        headers = login(client)
+        problem = approve_problem(client, headers)
+        paper = _published_paper(client, headers, [{"problem_id_no": problem["problem_id_no"], "score": 100, "sort_order": 0}])
+        link = client.post(f"/api/admin/papers/{paper['id']}/links", headers=headers, json=link_payload()).json()
+        _, student = _assignment_targets(client)
+        url = f"/api/admin/exam-links/{link['id']}/assignments"
+        first = client.post(url, headers=headers, json={"target_type": "student", "target_id": student.id}).json()
+
+        ended = client.delete(f"{url}/{first['id']}", headers=headers)
+        assert ended.status_code == 200, ended.text
+        assert ended.json()["status"] == "ended" and ended.json()["ended_at"]
+        replacement = client.post(url, headers=headers, json={"target_type": "student", "target_id": student.id})
+        assert replacement.status_code == 201, replacement.text
+
+        db = client.app.state.session_factory()
+        try:
+            rows = db.scalars(
+                select(ExamAssignment).where(
+                    ExamAssignment.exam_link_id == link["id"],
+                    ExamAssignment.target_type == "student",
+                    ExamAssignment.target_id == student.id,
+                ).order_by(ExamAssignment.id)
+            ).all()
+            assert [row.status for row in rows] == ["ended", "active"]
+            assert rows[0].ended_at is not None
+        finally:
+            db.close()
+        event = _assignment_audit_rows(client, "admin_exam_unassign")[-1]
+        assert event.outcome == "success"
+        summary = json.loads(event.summary_json)
+        assert summary["old_status"] == "active" and summary["new_status"] == "ended"
+
+
+def test_exam_link_assignment_forbidden_is_audited_in_new_session(tmp_path):
+    with admin_client(tmp_path) as client:
+        db = client.app.state.session_factory()
+        try:
+            db.add(AdminUser(username="paper-reviewer", password_hash=password_hash.hash(PASSWORD), display_name="paper-reviewer", role="reviewer"))
+            db.commit()
+        finally:
+            db.close()
+        root = login(client)
+        problem = approve_problem(client, root)
+        paper = _published_paper(client, root, [{"problem_id_no": problem["problem_id_no"], "score": 100, "sort_order": 0}])
+        link = client.post(f"/api/admin/papers/{paper['id']}/links", headers=root, json=link_payload()).json()
+        class_group, _ = _assignment_targets(client)
+
+        reviewer = login(client, "paper-reviewer")
+        response = client.post(
+            f"/api/admin/exam-links/{link['id']}/assignments",
+            headers=reviewer,
+            json={"target_type": "class", "target_id": class_group.id},
+        )
+        assert response.status_code == 403
+        events = _assignment_audit_rows(client, "admin_exam_assign")
+        assert len(events) == 1 and events[0].outcome == "failure"
+        summary = json.loads(events[0].summary_json)
+        assert summary["reason_code"] == "forbidden"

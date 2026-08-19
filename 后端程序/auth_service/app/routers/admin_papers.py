@@ -12,10 +12,15 @@ import secrets
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from ..models import AdminUser, AuditEvent, ChoiceOption, CourseLessonBlock, ExamLink, FillAnswer, LessonPaperBlock, Paper, PaperAttempt, PaperQuestion, Problem, ProgrammingDetail, ReferenceSolution, TestCase
+from ..models import (
+    AdminUser, AuditEvent, ChoiceOption, ClassGroup, CourseLessonBlock, ExamAssignment,
+    ExamLink, FillAnswer, LessonPaperBlock, Paper, PaperAttempt, PaperQuestion, Problem,
+    ProgrammingDetail, ReferenceSolution, TestCase, User,
+)
 from ..permissions import EDITOR_ROLES, REVIEWER_ROLES, SUPER_ROLE
 from ..permissions import is_editor as _is_editor
 from ..permissions import is_reviewer as _is_reviewer
@@ -27,6 +32,12 @@ from .admin_auth import audit, client_ip, current_admin, db_session, limit, requ
 router = APIRouter(prefix="/api/admin", tags=["admin-papers"])
 
 EDITABLE_STATUSES = {"draft", "published"}  # 试卷不走审核流，已发布仍可改；归档即锁定
+ASSIGNMENT_TARGET_LABELS = {"class": "班级", "student": "学生"}
+
+
+class ExamAssignmentPayload(BaseModel):
+    target_type: str = Field(pattern="^(class|student)$")
+    target_id: int = Field(gt=0)
 
 
 def _forbid(message: str = "没有执行该试卷操作的权限。") -> None:
@@ -719,6 +730,246 @@ def _link_row_payload(link: ExamLink, paper: Paper, admin: AdminUser, db: Sessio
     }
     payload["owner"] = _person_payload(db, paper.owner_id)
     return payload
+
+
+def _assignment_target_name(db: Session, target_type: str, target_id: int) -> str | None:
+    if target_type == "class":
+        row = db.get(ClassGroup, target_id)
+        return row.name if row else None
+    row = db.get(User, target_id)
+    return row.username if row else None
+
+
+def _assignment_payload(row: ExamAssignment, db: Session) -> dict:
+    return {
+        "id": row.id,
+        "exam_link_id": row.exam_link_id,
+        "target_type": row.target_type,
+        "target_type_label": ASSIGNMENT_TARGET_LABELS[row.target_type],
+        "target_id": row.target_id,
+        "target_name": _assignment_target_name(db, row.target_type, row.target_id),
+        "status": row.status,
+        "assigned_by": row.assigned_by,
+        "assigned_at": row.assigned_at,
+        "ended_at": row.ended_at,
+    }
+
+
+def _assignment_summary(link_id: int, target_type: str, target_id: int, **extra) -> dict:
+    return {
+        "schema_version": 1,
+        "exam_link_id": link_id,
+        "target_type": target_type,
+        "target_id": target_id,
+        **extra,
+    }
+
+
+def _audit_assignment_failure(
+    db: Session,
+    request: Request,
+    admin: AdminUser,
+    event: str,
+    link_id: int,
+    target_type: str,
+    target_id: int,
+    *,
+    reason_code: str,
+) -> None:
+    audit(
+        db,
+        request.app.state.settings,
+        event,
+        "failure",
+        client_ip(request),
+        admin.id,
+        resource_type="exam_assignment",
+        summary=_assignment_summary(
+            link_id, target_type, target_id, reason_code=reason_code
+        ),
+    )
+    db.commit()
+
+
+def _require_assignment_manage(
+    db: Session,
+    request: Request,
+    paper: Paper,
+    admin: AdminUser,
+    event: str,
+    link_id: int,
+    target_type: str,
+    target_id: int,
+) -> None:
+    try:
+        _require_link_manage(paper, admin)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            _audit_assignment_failure(
+                db,
+                request,
+                admin,
+                event,
+                link_id,
+                target_type,
+                target_id,
+                reason_code="forbidden",
+            )
+        raise
+
+
+def _assignment_target_exists(db: Session, target_type: str, target_id: int) -> bool:
+    model = ClassGroup if target_type == "class" else User
+    return db.get(model, target_id) is not None
+
+
+@router.get("/exam-links/{link_id}/assignments")
+def list_exam_assignments(
+    link_id: int,
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(db_session),
+):
+    admin = current_admin(request, db)
+    link, paper = _lock_link(db, link_id)
+    _require_link_manage(paper, admin)
+    statement = select(ExamAssignment).where(
+        ExamAssignment.exam_link_id == link.id,
+        ExamAssignment.status == "active",
+    )
+    total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    rows = db.scalars(
+        statement.order_by(ExamAssignment.id).offset((page - 1) * page_size).limit(page_size)
+    ).all()
+    return {
+        "items": [_assignment_payload(row, db) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "target_type_options": [
+            {"value": value, "label": label}
+            for value, label in ASSIGNMENT_TARGET_LABELS.items()
+        ],
+    }
+
+
+@router.post("/exam-links/{link_id}/assignments", status_code=201)
+def create_exam_assignment(
+    link_id: int,
+    payload: ExamAssignmentPayload,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    admin = current_admin(request, db)
+    link, paper = _lock_link(db, link_id)
+    _require_assignment_manage(
+        db, request, paper, admin, "exam_assign", link.id, payload.target_type, payload.target_id
+    )
+    if not _assignment_target_exists(db, payload.target_type, payload.target_id):
+        raise HTTPException(404, "指派目标不存在。")
+    existing = db.scalar(
+        select(ExamAssignment.id).where(
+            ExamAssignment.exam_link_id == link.id,
+            ExamAssignment.target_type == payload.target_type,
+            ExamAssignment.target_id == payload.target_id,
+            ExamAssignment.status == "active",
+        )
+    )
+    if existing is not None:
+        _audit_assignment_failure(
+            db,
+            request,
+            admin,
+            "exam_assign",
+            link.id,
+            payload.target_type,
+            payload.target_id,
+            reason_code="conflict",
+        )
+        raise HTTPException(409, "该目标已在当前考试名单中。")
+    row = ExamAssignment(
+        exam_link_id=link.id,
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        assigned_by=admin.id,
+        assigned_at=datetime.now(UTC),
+        status="active",
+    )
+    db.add(row)
+    db.flush()
+    audit(
+        db,
+        request.app.state.settings,
+        "exam_assign",
+        "success",
+        client_ip(request),
+        admin.id,
+        resource_type="exam_assignment",
+        resource_id=row.id,
+        summary=_assignment_summary(link.id, row.target_type, row.target_id),
+    )
+    db.commit()
+    db.refresh(row)
+    return _assignment_payload(row, db)
+
+
+@router.delete("/exam-links/{link_id}/assignments/{assignment_id}")
+def end_exam_assignment(
+    link_id: int,
+    assignment_id: int,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    admin = current_admin(request, db)
+    link, paper = _lock_link(db, link_id)
+    row = db.scalar(
+        select(ExamAssignment).where(
+            ExamAssignment.id == assignment_id,
+            ExamAssignment.exam_link_id == link.id,
+        ).with_for_update()
+    )
+    if row is None:
+        raise HTTPException(404, "考试名单记录不存在。")
+    _require_assignment_manage(
+        db, request, paper, admin, "exam_unassign", link.id, row.target_type, row.target_id
+    )
+    if row.status != "active":
+        _audit_assignment_failure(
+            db,
+            request,
+            admin,
+            "exam_unassign",
+            link.id,
+            row.target_type,
+            row.target_id,
+            reason_code="conflict",
+        )
+        raise HTTPException(409, "该考试名单记录已经取消。")
+    row.status = "ended"
+    row.ended_at = datetime.now(UTC)
+    audit(
+        db,
+        request.app.state.settings,
+        "exam_unassign",
+        "success",
+        client_ip(request),
+        admin.id,
+        resource_type="exam_assignment",
+        resource_id=row.id,
+        summary=_assignment_summary(
+            link.id,
+            row.target_type,
+            row.target_id,
+            old_status="active",
+            new_status="ended",
+        ),
+    )
+    db.commit()
+    db.refresh(row)
+    return _assignment_payload(row, db)
 
 
 @router.get("/papers/{paper_id}/links")
