@@ -86,6 +86,9 @@ function renderPaperRows(items) {
         allowed.has("manage_links")
           ? `<a class="btn-text link" href="exam-links.html?paper_id=${paper.id}">考试链接</a>`
           : "",
+        allowed.has("manage_links")
+          ? `<button class="btn-text link" type="button" data-assignments="${paper.id}">名单</button>`
+          : "",
         allowed.has("publish") ? `<button class="btn-text link" type="button" data-publish="${paper.id}">发布</button>` : "",
         allowed.has("archive") ? `<button class="btn-text link danger" type="button" data-archive="${paper.id}">归档</button>` : "",
         allowed.has("delete") ? `<button class="btn-text link danger" type="button" data-delete="${paper.id}">删除</button>` : "",
@@ -497,8 +500,8 @@ async function savePaper({ publish, keepOpen = false }) {
 
 // ==================== 整卷预览 ====================
 // 取数只走 GET /papers/{id}/preview（卷级组装、按 with_answers 裁剪答案），
-// 绝不调 /problems/{id}——那会把完整答案发进学生卷也能打开的浏览器。
-// 卷别切换 = 重新请求 ?with_answers=0|1：学生卷的响应里必须压根没有答案字段，
+// 绝不调 /problems/{id}——那会把完整答案发进学员卷也能打开的浏览器。
+// 卷别切换 = 重新请求 ?with_answers=0|1：学员卷的响应里必须压根没有答案字段，
 // CSS 隐藏不是安全边界（见 DEMO 与《整卷预览-技术方案》4.1）。
 const previewMask = $("paperPreviewMask");
 const previewSheet = $("paperPreviewSheet");
@@ -507,7 +510,7 @@ let previewLoadSeq = 0; // 防连点卷别时旧响应后落地、覆盖新响�
 let releasePreviewFocus = null;
 let previewOpener = null; // 关闭后把焦点还回去（列表行的按钮或组卷工具条的按钮）
 
-const PV_VARIANTS = [["student", "学生卷"], ["teacher", "教师卷"]];
+const PV_VARIANTS = [["student", "学员卷"], ["teacher", "教师卷"]];
 const pvIsTeacher = () => pillValue("pvVariant") === "teacher";
 const isPreviewOpen = () => !previewMask.hidden;
 
@@ -532,7 +535,7 @@ function pvAnswerSpaceShell(question) {
   return '<div class="answer-space"><span class="slot">答案：<i></i></span></div>';
 }
 
-// 教师卷的答案区（学生卷渲染时整段不存在——响应里本来就没有这些字段）。
+// 教师卷的答案区（学员卷渲染时整段不存在——响应里本来就没有这些字段）。
 function pvAnswerBoxShell(question, paper) {
   let ref = "";
   if (question.type === "programming") {
@@ -634,7 +637,7 @@ async function pvRenderQuestionMarkdown(node, question, teacher) {
     if (!(key in slots)) continue;
     await renderMarkdown(slot, slots[key]);
   }
-  // 教师卷：按 blank_key 找回题干里的空位标记填上答案；学生卷没有 blanks，保持空横线。
+  // 教师卷：按 blank_key 找回题干里的空位标记填上答案；学员卷没有 blanks，保持空横线。
   if (teacher && question.type === "fill") {
     for (const blank of question.blanks || []) {
       for (const mark of node.querySelectorAll(`.blank-mark[data-key="${blank.blank_key}"]`)) {
@@ -662,14 +665,14 @@ async function pvRender(paper, seq) {
       <p class="paper-sub">满分 ${paper.total_score} 分${passLine} · 共 ${paper.questions.length} 题</p>
       ${paper.description ? `<div class="paper-desc">${escapeHtml(paper.description)}</div>` : ""}
       <div class="exam-fields">
-        <span>姓名<i></i></span><span>班级<i></i></span><span>学号<i></i></span><span>得分<i></i></span>
+        <span>姓名<i></i></span><span>班组<i></i></span><span>学号<i></i></span><span>得分<i></i></span>
       </div>
     </header>
     ${paper.questions.map((q, i) => pvQuestionShell(q, i + 1, teacher, paper)).join("")}`;
   // 题目节点一次性快照，循环里绝不再查 previewSheet——这是本函数唯一容易写错的地方：
   // 每个 await 都可能被新一轮渲染（切卷别）插队并整块换掉 innerHTML，若在循环里重新
-  // querySelector，旧这一轮会拿到**新 DOM** 的节点，把教师卷的答案写进已经换成学生卷的卷面
-  // （实测：切到教师卷再立刻切回，学生卷的填空横线上会出现答案）。
+  // querySelector，旧这一轮会拿到**新 DOM** 的节点，把教师卷的答案写进已经换成学员卷的卷面
+  // （实测：切到教师卷再立刻切回，学员卷的填空横线上会出现答案）。
   // 快照里的节点在换页后即脱离文档，旧渲染继续写也上不了屏；seq 只是省下白干的活。
   const nodes = new Map(
     [...previewSheet.querySelectorAll("section.q")].map((node) => [Number(node.dataset.q), node]),
@@ -699,7 +702,7 @@ async function pvRender(paper, seq) {
 async function loadPaperPreview() {
   const seq = ++previewLoadSeq;
   const teacher = pvIsTeacher();
-  $("pvSpaceLine").hidden = teacher; // 答题留白只在学生卷生效
+  $("pvSpaceLine").hidden = teacher; // 答题留白只在学员卷生效
   previewSheet.innerHTML = '<p class="muted" style="text-align:center; padding: 40px 0">正在加载整卷预览…</p>';
   try {
     const paper = await adminRequest(`/papers/${previewPaperId}/preview?with_answers=${teacher ? 1 : 0}`);
@@ -770,6 +773,135 @@ $("pvAnswerSpace").addEventListener("change", (event) => {
 });
 $("pvPrintBtn").addEventListener("click", () => window.print());
 
+// ==================== 考试名单 ====================
+// 链接配置仍在独立页维护；这里只管理某条链接已经有的名单关系。
+const assignmentMask = $("assignmentMask");
+let assignmentRelease = null;
+let assignmentLinkId = null;
+let assignmentOptionsLoaded = false;
+
+function assignmentEndpoint() {
+  return `/exam-links/${assignmentLinkId}/assignments`;
+}
+
+function assignmentDate(value) {
+  return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
+}
+
+function closeAssignments() {
+  if (!isMaskOpen(assignmentMask)) return;
+  closeMask(assignmentMask, assignmentRelease);
+  assignmentRelease = null;
+  assignmentLinkId = null;
+  assignmentOptionsLoaded = false;
+  $("assignmentRows").replaceChildren();
+}
+
+function renderAssignmentTypeOptions(options) {
+  const select = $("assignmentTargetType");
+  const selected = select.value;
+  select.innerHTML = options
+    .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+    .join("");
+  if (options.some((option) => option.value === selected)) select.value = selected;
+}
+
+async function refreshAssignments() {
+  if (!assignmentLinkId) return;
+  $("assignmentRows").innerHTML = '<tr><td class="muted" colspan="5">正在读取名单…</td></tr>';
+  $("assignmentEmpty").hidden = true;
+  try {
+    const data = await adminRequest(assignmentEndpoint());
+    if (!assignmentOptionsLoaded) {
+      renderAssignmentTypeOptions(data.target_type_options || []);
+      assignmentOptionsLoaded = true;
+    }
+    $("assignmentTotal").textContent = `共 ${data.total} 条`;
+    $("assignmentRows").innerHTML = (data.items || [])
+      .map((item) => `
+        <tr>
+          <td>${escapeHtml(item.target_type_label)}</td>
+          <td>${escapeHtml(item.target_name || "—")}</td>
+          <td>${item.target_id}</td>
+          <td>${escapeHtml(assignmentDate(item.assigned_at))}</td>
+          <td><button class="btn-text link danger" type="button" data-end-assignment="${item.id}">取消指派</button></td>
+        </tr>`)
+      .join("");
+    $("assignmentEmpty").hidden = data.total !== 0;
+  } catch (error) {
+    $("assignmentRows").replaceChildren();
+    $("assignmentTotal").textContent = "";
+    $("assignmentEmpty").hidden = false;
+    $("assignmentEmpty").textContent = error.message || "名单读取失败。";
+  }
+}
+
+async function openAssignments(paperId) {
+  const paper = await adminRequest(`/papers/${paperId}`);
+  const links = await adminRequest(`/papers/${paperId}/links`);
+  if (!(links.items || []).length) {
+    toast("请先创建考试链接，再配置名单。", "error");
+    return;
+  }
+  $("assignmentPaperName").textContent = paper.title;
+  $("assignmentLinkSelect").innerHTML = links.items
+    .map((link) => `<option value="${link.id}">${escapeHtml(link.name)}</option>`)
+    .join("");
+  assignmentLinkId = Number($("assignmentLinkSelect").value);
+  assignmentOptionsLoaded = false;
+  assignmentRelease = openMask(assignmentMask, { focusSelector: "#assignmentLinkSelect" });
+  await refreshAssignments();
+}
+
+$("assignmentClose").addEventListener("click", closeAssignments);
+assignmentMask.addEventListener("click", (event) => { if (event.target === assignmentMask) closeAssignments(); });
+$("assignmentLinkSelect").addEventListener("change", async (event) => {
+  assignmentLinkId = Number(event.target.value);
+  assignmentOptionsLoaded = false;
+  await refreshAssignments();
+});
+$("assignmentForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const targetId = Number($("assignmentTargetId").value);
+  if (!Number.isInteger(targetId) || targetId < 1) return;
+  const submit = $("assignmentSubmit");
+  submit.disabled = true;
+  try {
+    await adminRequest(assignmentEndpoint(), {
+      method: "POST",
+      body: JSON.stringify({ target_type: $("assignmentTargetType").value, target_id: targetId }),
+    });
+    $("assignmentTargetId").value = "";
+    toast("已加入考试名单。", "success");
+    await refreshAssignments();
+  } catch (error) {
+    toast(error.message || "名单添加失败。", "error");
+  } finally {
+    submit.disabled = false;
+  }
+});
+$("assignmentRows").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-end-assignment]");
+  if (!button) return;
+  const confirmed = await confirmDialog({
+    title: "取消考试指派",
+    message: "确认取消这条考试名单吗？",
+    detail: "取消后不会删除历史记录，之后仍可再次指派。",
+    confirmText: "确认取消",
+    danger: true,
+  });
+  if (!confirmed) return;
+  button.disabled = true;
+  try {
+    await adminRequest(`${assignmentEndpoint()}/${button.dataset.endAssignment}`, { method: "DELETE" });
+    toast("已取消指派。", "success");
+    await refreshAssignments();
+  } catch (error) {
+    toast(error.message || "取消指派失败。", "error");
+    button.disabled = false;
+  }
+});
+
 // ==================== 事件绑定 ====================
 function syncZoneTabs() {
   for (const btn of document.querySelectorAll(".zone-tabs button")) {
@@ -797,15 +929,17 @@ $("sKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") { list
 $("newPaperBtn").addEventListener("click", () => { readOnly = false; openCompose(null); });
 
 rows.addEventListener("click", async (event) => {
-  const btn = event.target.closest("button[data-edit],button[data-view],button[data-preview],button[data-publish],button[data-archive],button[data-delete]");
+  const btn = event.target.closest("button[data-edit],button[data-view],button[data-preview],button[data-assignments],button[data-publish],button[data-archive],button[data-delete]");
   if (!btn) return;
-  const { edit, view, preview, publish, archive, delete: del } = btn.dataset;
+  const { edit, view, preview, assignments, publish, archive, delete: del } = btn.dataset;
   try {
     if (edit || view) {
       readOnly = Boolean(view);
       openCompose(await adminRequest(`/papers/${edit || view}`));
     } else if (preview) {
       await openPaperPreview(preview);
+    } else if (assignments) {
+      await openAssignments(assignments);
     } else if (publish) {
       const paper = await adminRequest(`/papers/${publish}`);
       const ok = await confirmDialog({ title: "发布试卷", message: `确认发布「${paper.title}」？`, detail: "发布后即可创建考试链接；之后每次修改仍会重新过发布校验。", confirmText: "确认发布" });
@@ -1013,6 +1147,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   // 预览层（z-index 110）压在所有弹窗之上，Escape 先关它。
   if (isPreviewOpen()) closePaperPreview();
+  else if (isMaskOpen(assignmentMask)) closeAssignments();
   else if (isDrawerOpen()) closeDrawer();
   else if (isMaskOpen(composeMask)) closeCompose();
 });

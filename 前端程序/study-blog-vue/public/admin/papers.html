@@ -65,7 +65,7 @@
       </div>
 
       <!-- ==================== 草稿 / 已发布 / 已归档 ==================== -->
-      <div class="card" style="margin-top: 20px">
+      <div class="card paper-list-card">
         <div class="zone-tabs">
           <button data-zone="draft">草稿 <span class="count" id="draftCount">0</span></button>
           <button class="active" data-zone="published">已发布 <span class="count" id="publishedCount">0</span></button>
@@ -75,16 +75,16 @@
           <table>
             <thead>
               <tr>
-                <th style="width: 90px">编号</th>
+                <th class="paper-col-id">编号</th>
                 <th>试卷名</th>
-                <th style="width: 76px">类型</th>
-                <th style="width: 70px">学科</th>
-                <th style="width: 64px">赛制</th>
-                <th style="width: 170px">题型构成</th>
-                <th style="width: 62px">总分</th>
-                <th style="width: 90px">链接</th>
-                <th style="width: 78px">状态</th>
-                <th style="width: 300px">操作</th>
+                <th class="paper-col-type">类型</th>
+                <th class="paper-col-subject">学科</th>
+                <th class="paper-col-ruleset">赛制</th>
+                <th class="paper-col-question-types">题型构成</th>
+                <th class="paper-col-score">总分</th>
+                <th class="paper-col-links">链接</th>
+                <th class="paper-col-status">状态</th>
+                <th class="paper-col-actions">操作</th>
               </tr>
             </thead>
             <tbody id="paperRows"></tbody>
@@ -154,11 +154,11 @@
         <div class="left-block">
           <h4 class="sec-title">计分</h4>
           <div class="rdot-group col" id="pScoreModeGroup"></div>
-          <label class="check-line" style="margin-top: 10px"><input type="checkbox" id="pPartialMulti" /> 多选少选且无错选给半分</label>
+          <label class="check-line partial-credit-line"><input type="checkbox" id="pPartialMulti" /> 多选少选且无错选给半分</label>
         </div>
         <div class="left-block">
           <h4 class="sec-title">及格分</h4>
-          <input id="pPassScore" type="number" min="0" style="width: 110px" placeholder="不设" />
+          <input class="pass-score-input" id="pPassScore" type="number" min="0" placeholder="不设" />
           <p class="field-error" id="passScoreWarn" hidden></p>
         </div>
       </div>
@@ -182,7 +182,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th style="width: 42px">序</th><th style="width: 92px">题号</th><th>题干摘要</th><th style="width: 70px">题型</th><th style="width: 82px">分值</th><th style="width: 118px">排序 / 删除</th></tr>
+                <tr><th class="selected-col-order">序</th><th class="selected-col-id">题号</th><th>题干摘要</th><th class="selected-col-type">题型</th><th class="selected-col-score">分值</th><th class="selected-col-actions">排序 / 删除</th></tr>
               </thead>
               <tbody id="selectedRows"></tbody>
             </table>
@@ -213,14 +213,14 @@
           <section class="drawer-panel" id="libraryPanel" role="tabpanel" aria-labelledby="libraryTab">
             <h4 class="sec-title">筛选题库</h4>
             <div class="search-form">
-              <div class="field" style="flex: 1; min-width: 140px"><input id="bKeyword" placeholder="题干 / 编号" aria-label="搜索题干或编号" /></div>
+              <div class="field bank-keyword-field"><input id="bKeyword" placeholder="题干 / 编号" aria-label="搜索题干或编号" /></div>
               <div class="field"><select id="bType" aria-label="题型"></select></div>
               <div class="field"><select id="bDifficulty" aria-label="难度"></select></div>
               <button class="btn" id="bSearchBtn" type="button">查询</button>
             </div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th style="width: 54px"></th><th style="width: 88px">编号</th><th>题干</th><th style="width: 68px">题型</th><th style="width: 78px">难度</th></tr></thead>
+                <thead><tr><th class="bank-col-add"></th><th class="bank-col-id">编号</th><th>题干</th><th class="bank-col-type">题型</th><th class="bank-col-difficulty">难度</th></tr></thead>
                 <tbody id="bankRows"></tbody>
               </table>
             </div>
@@ -241,7 +241,7 @@
             <h4 class="sec-title">粘贴题号</h4>
             <p class="muted">格式「题号:分值」，如 Q000004:20；分值可省，默认 10 分。支持换行、空格、逗号或顿号分隔；重复题号会自动跳过。</p>
             <textarea class="id-paste" id="idInput" rows="7" placeholder="Q000004:20&#10;Q000005 Q000006:15&#10;粘贴老师手里的清单即可"></textarea>
-            <div class="row-actions" style="margin-top: 10px">
+            <div class="row-actions import-actions">
               <button class="btn primary" id="parseIdsBtn" type="button">解析并加入</button>
               <span class="muted" id="importFeedback" aria-live="polite"></span>
             </div>
@@ -269,9 +269,43 @@
 <!-- 考试链接管理已独立成页：exam-links.html（配题 / 考试链接）。
      这里曾经内嵌一个链接 Modal；规则开始长分支后同一套逻辑不能存两份，整块迁走。 -->
 
+<div class="modal-mask assignment-mask" id="assignmentMask" hidden>
+  <section class="modal assignment-modal" role="dialog" aria-modal="true" aria-labelledby="assignmentTitle">
+    <header class="modal-head">
+      <div>
+        <h2 id="assignmentTitle">考试名单</h2>
+        <p class="muted" id="assignmentPaperName"></p>
+      </div>
+      <button class="icon-btn" id="assignmentClose" type="button" aria-label="关闭考试名单">×</button>
+    </header>
+    <div class="assignment-body">
+      <label class="assignment-link-field">考试链接
+        <select id="assignmentLinkSelect" aria-label="选择考试链接"></select>
+      </label>
+      <section class="assignment-section" aria-labelledby="assignmentListTitle">
+        <div class="assignment-section-head">
+          <div><h3 id="assignmentListTitle">当前名单</h3><p class="muted" id="assignmentTotal" aria-live="polite"></p></div>
+        </div>
+        <div class="table-wrap assignment-table-wrap">
+          <table>
+            <thead><tr><th>类型</th><th>目标</th><th>目标 ID</th><th>指派时间</th><th></th></tr></thead>
+            <tbody id="assignmentRows"></tbody>
+          </table>
+        </div>
+        <p class="assignment-empty" id="assignmentEmpty" hidden>当前没有名单记录。</p>
+      </section>
+      <form class="assignment-form" id="assignmentForm">
+        <label>目标类型<select id="assignmentTargetType" required></select></label>
+        <label>目标 ID<input id="assignmentTargetId" type="number" min="1" inputmode="numeric" required /></label>
+        <button class="btn primary" id="assignmentSubmit" type="submit">添加名单</button>
+      </form>
+    </div>
+  </section>
+</div>
+
 <!-- ==================== 整卷预览 Modal ====================
      与题库页「整题预览」共用 preview-mask/dialog 骨架（z-index 110，可压在组卷 Modal 上）。
-     卷别切换 = 重新请求 ?with_answers=0|1（不是 CSS 切换）；答题留白只在学生卷生效。 -->
+     卷别切换 = 重新请求 ?with_answers=0|1（不是 CSS 切换）；答题留白只在学员卷生效。 -->
 <div class="preview-mask" id="paperPreviewMask" hidden>
   <section class="preview-dialog paper-preview" role="dialog" aria-modal="true" aria-labelledby="paperPreviewTitle">
     <header class="preview-head">

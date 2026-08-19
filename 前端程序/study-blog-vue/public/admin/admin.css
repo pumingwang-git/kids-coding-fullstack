@@ -4148,3 +4148,53 @@ h1 {
   .class-member-import-mask .modal-foot { flex-wrap: wrap; }
   .class-member-import-mask .modal-foot .spacer { display: none; }
 }
+
+/* ---- 试卷页：名单管理与原有内联布局迁移 ---- */
+.paper-list-card { margin-top: 20px; }
+.paper-col-id { width: 90px; }
+.paper-col-type { width: 76px; }
+.paper-col-subject { width: 70px; }
+.paper-col-ruleset { width: 64px; }
+.paper-col-question-types { width: 170px; }
+.paper-col-score { width: 62px; }
+.paper-col-links { width: 90px; }
+.paper-col-status { width: 78px; }
+.paper-col-actions { width: 300px; }
+.partial-credit-line { margin-top: 10px; }
+.pass-score-input { width: 110px; }
+.selected-col-order { width: 42px; }
+.selected-col-id { width: 92px; }
+.selected-col-type { width: 70px; }
+.selected-col-score { width: 82px; }
+.selected-col-actions { width: 118px; }
+.bank-keyword-field { flex: 1; min-width: 140px; }
+.bank-col-add { width: 54px; }
+.bank-col-id { width: 88px; }
+.bank-col-type { width: 68px; }
+.bank-col-difficulty { width: 78px; }
+.import-actions { margin-top: 10px; }
+
+.assignment-modal { width: min(840px, calc(100vw - 32px)); max-height: min(760px, 88vh); overflow: auto; }
+.assignment-modal .modal-head { align-items: flex-start; }
+.assignment-modal .modal-head h2, .assignment-section-head h3 { margin: 0; }
+.assignment-modal .modal-head p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
+.assignment-body { display: grid; gap: 20px; padding: 22px 24px 26px; }
+.assignment-link-field, .assignment-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 800; }
+.assignment-link-field select { width: min(520px, 100%); }
+.assignment-section { padding-top: 18px; border-top: 1px solid var(--line); }
+.assignment-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 10px; }
+.assignment-section-head p { margin: 4px 0 0; font-size: 12px; }
+.assignment-table-wrap { margin: 0 -24px; }
+.assignment-table-wrap table { min-width: 680px; }
+.assignment-table-wrap th, .assignment-table-wrap td { white-space: nowrap; }
+.assignment-empty { margin: 0; padding: 18px 0 0; color: var(--muted); font-size: 13px; }
+.assignment-form { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(120px, .7fr) auto; align-items: end; gap: 10px; padding-top: 18px; border-top: 1px solid var(--line); }
+.assignment-form label select, .assignment-form label input { width: 100%; min-width: 0; }
+.assignment-form .btn { min-height: 38px; white-space: nowrap; }
+@media (max-width: 640px) {
+  .assignment-modal { width: calc(100vw - 24px); max-height: 90vh; }
+  .assignment-body { padding: 18px 16px 20px; }
+  .assignment-table-wrap { margin: 0 -16px; }
+  .assignment-form { grid-template-columns: 1fr; }
+  .assignment-form .btn { justify-self: start; }
+}
