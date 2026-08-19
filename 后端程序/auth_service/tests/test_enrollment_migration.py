@@ -11,6 +11,7 @@ from app.models import Base
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_HEAD = "0055_class_groups"
+ENROLLMENT_REVISION = "0056_enrollments"
 ENROLLMENT_TABLE = "enrollments"
 
 
@@ -49,17 +50,17 @@ def table_names(url: str) -> set[str]:
 
 def test_upgrade_and_empty_downgrade_are_repeatable(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, ENROLLMENT_REVISION)
     assert ENROLLMENT_TABLE in table_names(url)
     command.downgrade(config, PREVIOUS_HEAD)
     assert ENROLLMENT_TABLE not in table_names(url)
-    command.upgrade(config, "head")
+    command.upgrade(config, ENROLLMENT_REVISION)
     assert ENROLLMENT_TABLE in table_names(url)
 
 
 def test_source_is_not_closed_by_a_database_check(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, ENROLLMENT_REVISION)
     engine = sa.create_engine(url)
     try:
         with engine.begin() as conn:
@@ -67,7 +68,7 @@ def test_source_is_not_closed_by_a_database_check(migration_env):
                 sa.text(
                     "INSERT INTO enrollments "
                     "(student_id, course_id, source, status) "
-                    "VALUES (1, 1, 'class_batch', 'active')"
+                    "VALUES (1, 1, 'future_source', 'active')"
                 )
             )
             conn.execute(
@@ -83,7 +84,7 @@ def test_source_is_not_closed_by_a_database_check(migration_env):
 
 def test_downgrade_refuses_business_data(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, ENROLLMENT_REVISION)
     engine = sa.create_engine(url)
     try:
         with engine.begin() as conn:
