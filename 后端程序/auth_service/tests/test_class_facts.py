@@ -1,7 +1,12 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+from sqlalchemy import select
+
 from app.lesson_homework_kinds import PAPER_KIND, SCRATCH_KIND
+from app.models import User
+from test_admin_results import _lesson_homework, _start_homework, _submit
+from test_exam import build_exam
 
 
 NOW = datetime.now(UTC)
@@ -59,6 +64,24 @@ def test_paper_class_facts_transpose_nonempty_student_facts():
     class_facts = PAPER_KIND.class_facts(
         _PaperDb([attempt]), 3, {7}
     )[7]
+    assert student == class_facts
+    assert student.submitted_at is not None
+
+
+def test_paper_class_facts_transposes_real_start_submit(tmp_path):
+    env = build_exam(tmp_path, only=["choice"])
+    built = _lesson_homework(env)
+    attempt_id = _start_homework(env.student, built)
+    _submit(env, attempt_id)
+    db = env.app.state.session_factory()
+    try:
+        user = db.scalar(select(User).where(User.username == "learner"))
+        student = PAPER_KIND.student_facts(db, user, [built["block"]["id"]])[
+            built["block"]["id"]
+        ]
+        class_facts = PAPER_KIND.class_facts(db, built["block"]["id"], {user.id})[user.id]
+    finally:
+        db.close()
     assert student == class_facts
     assert student.submitted_at is not None
 
