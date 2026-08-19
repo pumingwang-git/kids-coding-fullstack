@@ -4085,11 +4085,12 @@ h1 {
 .class-history-row { background: color-mix(in srgb, var(--line) 18%, transparent); }
 .class-relation-form select:disabled { opacity: .65; cursor: not-allowed; }
 @media (max-width: 720px) {
+  .class-relations, .class-relation-section { min-width: 0; }
   .class-relation-head { align-items: stretch; flex-direction: column; }
   .class-relation-form { justify-content: flex-start; }
   .class-relation-form input { flex: 1 1 140px; width: auto; min-width: 0; }
   .class-teacher-form select { flex: 1 1 160px; min-width: 0; }
-  .class-relation-table-wrap { margin: 0 -16px; }
+  .class-relation-table-wrap { margin: 0 -16px; overflow-x: auto; }
 }
 
 /* ---- 学员管理：范围内目录与可复用选择器 ---- */
