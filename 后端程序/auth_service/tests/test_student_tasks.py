@@ -6,13 +6,13 @@ import pytest
 from sqlalchemy import event, select
 from test_admin_course_content import block_payload
 from test_enrollments import set_enrollment
-from test_exam import build_app, student_login
+from test_exam import build_app, scsrf, student_login
 from test_lesson_block_unlock import build_lesson_with_blocks, complete
 from test_lesson_problem_blocks import seed_paper
 from test_lesson_practice import answer, build_practice, seed_choice_problem
 from test_scratch import build_scratch_lesson
 
-from app.models import LessonPaperBlock, Problem, ProblemTag, Tag, User
+from app.models import LessonPaperBlock, PaperAttempt, Problem, ProblemTag, Tag, User
 from app.routers.exam import _phase
 from app.student_tasks import (
     EXAM_PHASE_GROUPS,
@@ -484,3 +484,50 @@ def test_tasks_overview_includes_running_exam_and_classifies_remaining_groups(tm
     assert body["unfinished"]["items"] == [
         {"id": 3, "phase": "in_progress"}, {"id": 2, "phase": "overdue"}
     ]
+
+
+def test_lesson_homework_start_resumes_the_same_attempt(tmp_path: Path):
+    app = build_app(tmp_path)
+    student = student_login(app)
+    paper_id = seed_paper(app)["paper_id"]
+    built = build_lesson_with_blocks(
+        app, [{"block_type": "homework", "paper_id": paper_id}], open_policy="closed"
+    )
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=built["course_id"])
+    path = f"/api/exam/lesson-homework/{built['lesson_id']}/blocks/{built['block_ids'][0]}/start"
+
+    first = student.post(path, headers=scsrf(student))
+    second = student.post(path, headers=scsrf(student))
+    assert first.status_code == second.status_code == 201
+    assert second.json()["resumed"] is True
+    assert second.json()["attempt_id"] == first.json()["attempt_id"]
+
+
+def test_lesson_homework_start_unique_conflict_is_409(tmp_path: Path, monkeypatch):
+    app = build_app(tmp_path)
+    student = student_login(app)
+    paper_id = seed_paper(app)["paper_id"]
+    built = build_lesson_with_blocks(
+        app, [{"block_type": "homework", "paper_id": paper_id}], open_policy="closed"
+    )
+    user = _learner(app)
+    block_id = built["block_ids"][0]
+    set_enrollment(app, student_id=user.id, course_id=built["course_id"])
+    db = app.state.session_factory()
+    try:
+        db.add(PaperAttempt(source_type="lesson_homework", source_id=block_id, paper_id=paper_id,
+                            user_id=user.id, attempt_no=1, status="ongoing"))
+        db.commit()
+    finally:
+        db.close()
+
+    import app.routers.exam as exam_router
+    monkeypatch.setattr(exam_router, "_ongoing_attempt", lambda *_args: None)
+    monkeypatch.setattr(exam_router, "_used_attempts", lambda *_args: 0)
+    response = student.post(
+        f"/api/exam/lesson-homework/{built['lesson_id']}/blocks/{block_id}/start",
+        headers=scsrf(student),
+    )
+    assert response.status_code == 409
+    assert "其他窗口" in response.json()["detail"]
