@@ -46,6 +46,10 @@ def test_teaching_classes_match_admin_classes_scope(tmp_path: Path):
         ).json()["id"]
         for name in ("工作台一班", "工作台二班")
     ]
+    unassigned_class_id = manager.post(
+        "/api/admin/classes", headers=manager_headers,
+        json={"name": "教师不带的班", "course_id": course_id},
+    ).json()["id"]
     teacher, teacher_headers = login_as_role(app, "teacher", admin_id=13)
     db = app.state.session_factory()
     try:
@@ -65,6 +69,7 @@ def test_teaching_classes_match_admin_classes_scope(tmp_path: Path):
     assert {row["id"] for row in teaching.json()["items"]} == {
         row["id"] for row in classes.json()["items"]
     }
+    assert unassigned_class_id not in {row["id"] for row in teaching.json()["items"]}
 
 
 def test_teaching_overview_scope_denial_matches_missing_class(tmp_path: Path):
