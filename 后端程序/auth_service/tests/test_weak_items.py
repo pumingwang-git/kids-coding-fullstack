@@ -83,16 +83,25 @@ def test_paper_items_are_the_existing_item_analysis_rows_without_recalculation(t
         db.add_all([homework_detail, link])
         db.flush()
         db.add(ExamAssignment(exam_link_id=link.id, target_type="class", target_id=class_group.id))
+        outsider = User(username="weak-outsider", email="weak-outsider@example.com",
+                        hashed_password="hash")
+        db.add(outsider)
+        db.flush()
 
         homework_source = from_lesson_homework(homework_block, homework_detail)
         homework_attempt = PaperAttempt(
             source_type=homework_source.source_type, source_id=homework_source.source_id,
-            paper_id=homework_paper.id, user_id=students[0].id, attempt_no=1, total_score=10,
+            paper_id=homework_paper.id, user_id=students[0].id, attempt_no=1, total_score=5,
             status="submitted",
         )
         failed_homework_attempt = PaperAttempt(
             source_type=homework_source.source_type, source_id=homework_source.source_id,
             paper_id=homework_paper.id, user_id=students[1].id, attempt_no=1, total_score=0,
+            status="submitted",
+        )
+        outsider_homework_attempt = PaperAttempt(
+            source_type=homework_source.source_type, source_id=homework_source.source_id,
+            paper_id=homework_paper.id, user_id=outsider.id, attempt_no=1, total_score=0,
             status="submitted",
         )
         exam_source = from_exam_link(link)
@@ -101,14 +110,26 @@ def test_paper_items_are_the_existing_item_analysis_rows_without_recalculation(t
             exam_link_id=link.id, paper_id=exam_paper.id, user_id=students[0].id,
             attempt_no=1, total_score=0, status="submitted",
         )
-        db.add_all([homework_attempt, failed_homework_attempt, exam_attempt])
+        outsider_exam_attempt = PaperAttempt(
+            source_type=exam_source.source_type, source_id=exam_source.source_id,
+            exam_link_id=link.id, paper_id=exam_paper.id, user_id=outsider.id,
+            attempt_no=1, total_score=10, status="submitted",
+        )
+        db.add_all([
+            homework_attempt, failed_homework_attempt, outsider_homework_attempt, exam_attempt,
+            outsider_exam_attempt,
+        ])
         db.flush()
         db.add_all([
-            AttemptAnswer(attempt_id=homework_attempt.id, problem_id_no="HW-1", score=10,
+            AttemptAnswer(attempt_id=homework_attempt.id, problem_id_no="HW-1", score=5,
                           judge_status="judged"),
             AttemptAnswer(attempt_id=failed_homework_attempt.id, problem_id_no="HW-1", score=0,
                           judge_status="failed"),
+            AttemptAnswer(attempt_id=outsider_homework_attempt.id, problem_id_no="HW-1", score=0,
+                          judge_status="judged"),
             AttemptAnswer(attempt_id=exam_attempt.id, problem_id_no="EX-1", score=0,
+                          judge_status="judged"),
+            AttemptAnswer(attempt_id=outsider_exam_attempt.id, problem_id_no="EX-1", score=10,
                           judge_status="judged"),
         ])
         db.commit()
@@ -134,6 +155,7 @@ def test_paper_items_are_the_existing_item_analysis_rows_without_recalculation(t
             "source", "source_id", "source_title"
         }} == exam_expected[0]
         assert homework_actual["judge_failed"] == 1
+        assert homework_actual["score_rate"] == 0.5
     finally:
         db.close()
         engine.dispose()
@@ -152,6 +174,10 @@ def test_practice_rate_is_based_on_people_not_attempt_count(tmp_path):
         problem.root_problem_id = problem.id
         db.add(LessonProblemBlock(block_id=block.id, problem_id_no=problem.problem_id_no,
                                   problem_type=problem.type, display_no="1", score=10))
+        outsider = User(username="practice-outsider", email="practice-outsider@example.com",
+                        hashed_password="hash")
+        db.add(outsider)
+        db.flush()
         db.add_all([
             LessonProblemAttempt(user_id=students[0].id, block_id=block.id, lesson_id=lesson.id,
                                  tries=4, last_correct=True),
@@ -159,6 +185,8 @@ def test_practice_rate_is_based_on_people_not_attempt_count(tmp_path):
                                  tries=1, last_correct=False),
             LessonProblemAttempt(user_id=students[2].id, block_id=block.id, lesson_id=lesson.id,
                                  tries=2, last_correct=False),
+            LessonProblemAttempt(user_id=outsider.id, block_id=block.id, lesson_id=lesson.id,
+                                 tries=1, last_correct=True),
         ])
         db.commit()
 
