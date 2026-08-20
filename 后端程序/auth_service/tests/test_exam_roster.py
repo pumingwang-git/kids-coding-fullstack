@@ -141,6 +141,27 @@ def test_exam_participation_excludes_students_who_left_class(db):
     assert body["not_submitted_people"] == 0
 
 
+def test_exam_participation_keeps_directly_assigned_other_class_students_out(db):
+    student, group, link = _seed(db)
+    outsider = User(username="other-class-student", email="other-class@example.com",
+                   hashed_password="hash")
+    other_group = ClassGroup(name="另一班", course_id=group.course_id, status="active")
+    db.add_all([outsider, other_group])
+    db.flush()
+    db.add(ClassMember(class_id=other_group.id, student_id=outsider.id))
+    db.add_all([
+        ExamAssignment(exam_link_id=link.id, target_type="class", target_id=group.id),
+        ExamAssignment(exam_link_id=link.id, target_type="student", target_id=outsider.id),
+    ])
+    db.commit()
+
+    body = exam_participation(db, link.id, group.id)
+
+    assert body["roster_people"] == 1
+    assert [row["student"]["id"] for row in body["roster"]] == [student.id]
+    assert body["not_submitted_people"] == 1
+
+
 def test_exam_participation_uses_exam_phase_and_never_returns_question_content(db):
     _student, group, link = _seed(db)
     db.add(ExamAssignment(exam_link_id=link.id, target_type="class", target_id=group.id))
