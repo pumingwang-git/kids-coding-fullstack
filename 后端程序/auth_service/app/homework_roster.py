@@ -8,15 +8,12 @@ from sqlalchemy.orm import Session
 
 from .class_groups import active_student_ids_for_classes
 from .course_access import enrolled_course_ids
-from .lesson_homework_kinds import KINDS, HomeworkKind, _counted_submission
+from .lesson_homework_kinds import KINDS, HomeworkKind
 from .models import (
     CourseLesson,
     CourseLessonBlock,
-    PaperAttempt,
-    ScratchSubmission,
     User,
 )
-from .routers.exam import counted_attempt
 from .student_tasks import HOMEWORK_PHASE_LABELS, homework_phase
 
 
@@ -27,37 +24,6 @@ def _kind(value: HomeworkKind | str) -> HomeworkKind:
         if item.key == value or item.student_source_type == value:
             return item
     raise ValueError(f"unknown homework kind: {value}")
-
-
-def _attempt_counts(db: Session, kind: HomeworkKind, block_id: int,
-                    student_ids: set[int]) -> tuple[set[int], int]:
-    """Return counted submitters and raw attempt count using the canonical selectors."""
-    if not student_ids:
-        return set(), 0
-    if kind.key == "scratch":
-        rows = list(db.scalars(select(ScratchSubmission).where(
-            ScratchSubmission.lesson_block_id == block_id,
-            ScratchSubmission.user_id.in_(student_ids),
-        )))
-        by_user: dict[int, list[ScratchSubmission]] = {}
-        for row in rows:
-            by_user.setdefault(row.user_id, []).append(row)
-        counted = {user_id for user_id, user_rows in by_user.items()
-                   if _counted_submission(user_rows) is not None}
-        return counted, len(rows)
-
-    rows = list(db.scalars(select(PaperAttempt).where(
-        PaperAttempt.source_type == kind.student_source_type,
-        PaperAttempt.source_id == block_id,
-        PaperAttempt.user_id.in_(student_ids),
-    )))
-    # Lesson homework is currently score_policy=best; the selector remains centralized.
-    by_user: dict[int, list[PaperAttempt]] = {}
-    for row in rows:
-        by_user.setdefault(row.user_id, []).append(row)
-    counted = {user_id for user_id, user_rows in by_user.items()
-               if counted_attempt(user_rows, "best") is not None}
-    return counted, len(rows)
 
 
 def build_homework_roster(
@@ -76,7 +42,7 @@ def build_homework_roster(
         select(User).where(User.id.in_(student_ids)).order_by(User.id)
     )) if student_ids else []
     facts = kind.class_facts(db, block_id, student_ids)
-    counted_ids, attempts = _attempt_counts(db, kind, block_id, student_ids)
+    counted_ids, attempts = kind.class_attempt_counts(db, block_id, student_ids)
 
     block = db.get(CourseLessonBlock, block_id)
     lesson = db.get(CourseLesson, block.lesson_id) if block else None

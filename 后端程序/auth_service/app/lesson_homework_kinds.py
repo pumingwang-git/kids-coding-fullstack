@@ -53,6 +53,7 @@ from .results_common import (
     full_score,
     score_summary,
 )
+from .routers.exam import counted_attempt
 from .routers.admin_papers import _as_utc
 
 # ---------------------------------------------------------------------------
@@ -180,6 +181,7 @@ class HomeworkKind:
     student_source_type: str
     student_facts: Callable[[Session, User, list[int]], dict[int, TaskFacts]]
     class_facts: Callable[[Session, int, set[int]], dict[int, TaskFacts]]
+    class_attempt_counts: Callable[[Session, int, set[int]], tuple[set[int], int]]
     # 详情页的呈现形态。前端按它选渲染器与行为，不按 key 猜。
     detail_view: str
     column_keys: tuple[str, ...]
@@ -379,6 +381,23 @@ def _paper_class_facts(db: Session, block_id: int,
                           if latest else False),
         )
     return facts
+
+
+def _paper_class_attempt_counts(db: Session, block_id: int,
+                                user_ids: set[int]) -> tuple[set[int], int]:
+    """Return counted paper submitters and all attempts for one class block."""
+    if not user_ids:
+        return set(), 0
+    attempts = list(db.scalars(select(PaperAttempt).where(
+        PaperAttempt.source_type == SOURCE_LESSON_HOMEWORK,
+        PaperAttempt.source_id == block_id,
+        PaperAttempt.user_id.in_(user_ids),
+    )))
+    by_user: dict[int, list[PaperAttempt]] = {}
+    for attempt in attempts:
+        by_user.setdefault(attempt.user_id, []).append(attempt)
+    return ({user_id for user_id, rows in by_user.items()
+             if counted_attempt(rows, "best") is not None}, len(attempts))
 
 
 def _paper_deadline(detail: LessonPaperBlock) -> dict:
@@ -633,6 +652,7 @@ PAPER_KIND = HomeworkKind(
     student_source_type=SOURCE_LESSON_HOMEWORK,
     student_facts=_paper_student_facts,
     class_facts=_paper_class_facts,
+    class_attempt_counts=_paper_class_attempt_counts,
     detail_view="attempts",
     column_keys=("homework", "path", "deadline", "people", "submitted", "attempts",
                  "avg", "pass_rate", "actions"),
@@ -760,6 +780,22 @@ def _counted_submission(submissions: list[ScratchSubmission]) -> ScratchSubmissi
         return None
     return max(submissions, key=lambda s: (s.passed, s.score if s.score is not None else -1,
                                            s.attempt_no))
+
+
+def _scratch_class_attempt_counts(db: Session, block_id: int,
+                                  user_ids: set[int]) -> tuple[set[int], int]:
+    """Return counted Scratch submitters and all submissions for one class block."""
+    if not user_ids:
+        return set(), 0
+    submissions = list(db.scalars(select(ScratchSubmission).where(
+        ScratchSubmission.lesson_block_id == block_id,
+        ScratchSubmission.user_id.in_(user_ids),
+    )))
+    by_user: dict[int, list[ScratchSubmission]] = {}
+    for submission in submissions:
+        by_user.setdefault(submission.user_id, []).append(submission)
+    return ({user_id for user_id, rows in by_user.items()
+             if _counted_submission(rows) is not None}, len(submissions))
 
 
 def _scratch_stats(submissions: list[ScratchSubmission]) -> dict:
@@ -1062,6 +1098,7 @@ SCRATCH_KIND = HomeworkKind(
     student_source_type="lesson_scratch",
     student_facts=_scratch_student_facts,
     class_facts=_scratch_class_facts,
+    class_attempt_counts=_scratch_class_attempt_counts,
     detail_view="submissions",
     column_keys=("homework", "path", "deadline", "people", "passed", "pending",
                  "attempts", "avg", "pass_rate", "actions"),
