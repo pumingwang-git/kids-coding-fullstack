@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>教学工作台 · 学习平台后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body class="admin-teaching">
+  <div class="app">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main">
+      <header class="topbar" id="topbar"></header>
+      <div class="content teaching-content">
+        <section class="teaching-header" aria-labelledby="teachingTitle">
+          <div>
+            <h1 id="teachingTitle">教学工作台</h1>
+            <p>按班级查看学习活动、任务进度与需要处理的事项。</p>
+          </div>
+          <label class="teaching-class-select" for="classSelect">
+            <span>当前班级</span>
+            <select id="classSelect" disabled><option>加载中</option></select>
+          </label>
+        </section>
+
+        <div class="teaching-page-state" id="classesState" role="status">正在载入班级…</div>
+        <section id="workbench" hidden aria-live="polite">
+          <section class="teaching-overview" aria-labelledby="overviewTitle">
+            <div class="teaching-section-head">
+              <div><h2 id="overviewTitle">班级概览</h2><p id="overviewHint"></p></div>
+              <button class="btn teaching-icon-button" id="refreshBtn" type="button" title="刷新当前班级数据" aria-label="刷新当前班级数据">刷新</button>
+            </div>
+            <div class="teaching-overview-grid" id="overviewMetrics"></div>
+          </section>
+
+          <div class="teaching-work-grid">
+            <section class="teaching-panel teaching-students" aria-labelledby="studentsTitle">
+              <div class="teaching-section-head"><div><h2 id="studentsTitle">学员学习活动</h2><p>按最近活动排序；可筛选连续未学习的学员。</p></div></div>
+              <form class="teaching-filter" id="studentFilter">
+                <label for="inactiveDays">连续未学习天数</label>
+                <input id="inactiveDays" name="inactiveDays" inputmode="numeric" min="0" type="number" />
+                <button class="btn" type="submit">筛选</button>
+                <button class="btn-text" id="clearStudentFilter" type="button">清除</button>
+              </form>
+              <div class="teaching-table-wrap"><table><thead><tr><th>学员</th><th>最近活动</th><th>未学习天数</th><th>操作</th></tr></thead><tbody id="studentRows"></tbody></table></div>
+              <div class="teaching-pagination" id="studentPagination"></div>
+            </section>
+
+            <section class="teaching-panel" aria-labelledby="reviewTitle">
+              <div class="teaching-section-head"><div><h2 id="reviewTitle">待批改队列</h2><p>按提交时间排列，需要处理的作品会显示在这里。</p></div></div>
+              <div class="teaching-queue" id="reviewRows"></div>
+            </section>
+          </div>
+
+          <section class="teaching-panel" aria-labelledby="homeworkTitle">
+            <div class="teaching-section-head"><div><h2 id="homeworkTitle">作业完成情况</h2><p>选择一份作业展开名单；展示内容以接口返回为准。</p></div></div>
+            <div class="teaching-task-list" id="homeworkRows"></div>
+          </section>
+
+          <div class="teaching-work-grid">
+            <section class="teaching-panel" aria-labelledby="examTitle">
+              <div class="teaching-section-head"><div><h2 id="examTitle">考试参与</h2><p>名单未知时不显示推断出的未参与人数。</p></div></div>
+              <div class="teaching-task-list" id="examRows"></div>
+            </section>
+            <section class="teaching-panel" aria-labelledby="weakTitle">
+              <div class="teaching-section-head"><div><h2 id="weakTitle">低正确率题目</h2><p>按服务端计算的正确率从低到高排列。</p></div></div>
+              <div class="teaching-table-wrap"><table><thead><tr><th>题目</th><th>来源</th><th>正确率</th></tr></thead><tbody id="weakRows"></tbody></table></div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="teaching.js"></script>
+</body>
+</html>
