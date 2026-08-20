@@ -15,6 +15,8 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_FILE = SERVICE_ROOT / "alembic" / "versions" / "0059_exam_assignments.py"
 TABLE = "exam_assignments"
 PREVIOUS_HEAD = "0058_enrollment_class_source"
+# Pin the migration under test: "head" currently resolves to 0059, masking this bug.
+EXAM_ASSIGNMENT_REVISION = "0059_exam_assignments"
 
 
 def alembic_config() -> Config:
@@ -51,7 +53,7 @@ def execute(url: str, statement: str) -> None:
 
 def test_upgrade_and_empty_downgrade_round_trip(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, EXAM_ASSIGNMENT_REVISION)
     assert TABLE in sa.inspect(sa.create_engine(url)).get_table_names()
     command.downgrade(config, PREVIOUS_HEAD)
     assert TABLE not in sa.inspect(sa.create_engine(url)).get_table_names()
@@ -59,7 +61,7 @@ def test_upgrade_and_empty_downgrade_round_trip(migration_env):
 
 def test_active_assignment_is_unique_but_ended_history_can_be_reassigned(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, EXAM_ASSIGNMENT_REVISION)
     execute(url, "INSERT INTO exam_assignments (exam_link_id, target_type, target_id) VALUES (1, 'class', 7)")
     with pytest.raises(IntegrityError):
         execute(url, "INSERT INTO exam_assignments (exam_link_id, target_type, target_id) VALUES (1, 'class', 7)")
@@ -79,7 +81,7 @@ def test_active_assignment_is_unique_but_ended_history_can_be_reassigned(migrati
 )
 def test_status_and_ended_at_must_match(migration_env, status, ended_at):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, EXAM_ASSIGNMENT_REVISION)
     with pytest.raises(IntegrityError):
         execute(
             url,
@@ -91,7 +93,7 @@ def test_status_and_ended_at_must_match(migration_env, status, ended_at):
 
 def test_downgrade_refuses_non_empty_table(migration_env):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, EXAM_ASSIGNMENT_REVISION)
     execute(url, "INSERT INTO exam_assignments (exam_link_id, target_type, target_id) VALUES (1, 'student', 9)")
     with pytest.raises(RuntimeError):
         command.downgrade(config, PREVIOUS_HEAD)
@@ -100,7 +102,7 @@ def test_downgrade_refuses_non_empty_table(migration_env):
 
 def test_model_and_migration_have_same_columns_indexes_and_checks(migration_env, tmp_path):
     config, url = migration_env
-    command.upgrade(config, "head")
+    command.upgrade(config, EXAM_ASSIGNMENT_REVISION)
     model_url = f"sqlite:///{tmp_path / 'model.db'}"
     model_engine = sa.create_engine(model_url)
     Base.metadata.create_all(model_engine)
