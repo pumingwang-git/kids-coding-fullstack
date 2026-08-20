@@ -7,7 +7,7 @@ from sqlalchemy import event, select
 from test_exam import build_app, student_login
 from test_lesson_block_unlock import build_lesson_with_blocks
 
-from app.learning_activity import last_activity_at
+from app.learning_activity import activity_rows, activity_status, last_activity_at
 from app.models import (
     LessonBlockCompletion,
     LessonCodeRun,
@@ -18,6 +18,43 @@ from app.models import (
 from app.security import as_utc
 
 ACTIVITY_AT = datetime(2026, 8, 19, 8, 30, tzinfo=UTC)
+
+
+def test_activity_status_distinguishes_never_active_from_inactive():
+    now = datetime(2026, 8, 20, 8, 30, tzinfo=UTC)
+
+    assert activity_status(None, now) == {
+        "last_activity_at": None,
+        "never_active": True,
+        "inactive_days": None,
+        "active": False,
+    }
+    assert activity_status(now - timedelta(days=1), now) == {
+        "last_activity_at": now - timedelta(days=1),
+        "never_active": False,
+        "inactive_days": 1,
+        "active": True,
+    }
+
+
+def test_activity_status_threshold_is_inactive_at_exact_boundary():
+    now = datetime(2026, 8, 20, 8, 30, tzinfo=UTC)
+
+    assert activity_status(now - timedelta(days=7), now)["active"] is False
+
+
+def test_activity_rows_keeps_user_without_learning_activity(tmp_path: Path):
+    app = build_app(tmp_path)
+    user_id, _, db = _student_and_lesson(app)
+    try:
+        rows = activity_rows(db, {user_id, user_id + 1000}, ACTIVITY_AT)
+    finally:
+        db.close()
+
+    assert [row["user_id"] for row in rows] == [user_id, user_id + 1000]
+    assert rows[0]["never_active"] is True
+    assert rows[0]["inactive_days"] is None
+    assert rows[1]["never_active"] is True
 
 
 def _student_and_lesson(app):

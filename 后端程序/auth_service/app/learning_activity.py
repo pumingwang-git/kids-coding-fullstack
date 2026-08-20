@@ -15,6 +15,48 @@ from .models import (
     LessonVideoWatch,
 )
 
+INACTIVE_DAYS_DEFAULT = 7
+
+
+def activity_status(
+    last_seen: datetime | None,
+    now: datetime,
+    threshold_days: int = INACTIVE_DAYS_DEFAULT,
+) -> dict:
+    """Return the explicit active/inactive status for one learner."""
+    if last_seen is None:
+        return {
+            "last_activity_at": None,
+            "never_active": True,
+            "inactive_days": None,
+            "active": False,
+        }
+
+    inactive_days = (now - last_seen).days
+    return {
+        "last_activity_at": last_seen,
+        "never_active": False,
+        "inactive_days": inactive_days,
+        "active": inactive_days < threshold_days,
+    }
+
+
+def activity_rows(
+    db: Session,
+    user_ids: set[int],
+    now: datetime,
+    threshold_days: int = INACTIVE_DAYS_DEFAULT,
+) -> list[dict]:
+    """Return one activity-status DTO row for every supplied user ID."""
+    latest = last_activity_at(db, user_ids)
+    return [
+        {
+            "user_id": user_id,
+            **activity_status(latest.get(user_id), now, threshold_days),
+        }
+        for user_id in sorted(user_ids)
+    ]
+
 
 def last_activity_at(
     db: Session,
