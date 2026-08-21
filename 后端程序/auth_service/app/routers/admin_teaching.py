@@ -116,6 +116,26 @@ def class_overview(
     }
 
 
+def _filtered_class_students(
+    db: Session, class_id: int, inactive_days_gte: int | None
+) -> list[tuple[User, dict]]:
+    """Shared in-roster activity query used by list and CSV export endpoints."""
+    students = active_students_for_class(db, class_id)
+    activity_by_student = {
+        row["user_id"]: row
+        for row in activity_rows(db, {student.id for student in students}, utcnow())
+    }
+    rows = [(student, activity_by_student[student.id]) for student in students]
+    if inactive_days_gte is not None:
+        rows = [
+            (student, activity)
+            for student, activity in rows
+            if activity["inactive_days"] is not None
+            and activity["inactive_days"] >= inactive_days_gte
+        ]
+    return rows
+
+
 @router.get("/classes/{class_id}/students")
 def class_students(
     class_id: int,
@@ -132,22 +152,13 @@ def class_students(
     if sort_field not in {"last_activity_at", "username"}:
         raise HTTPException(422, "不支持的排序字段。")
 
-    students = active_students_for_class(db, class_id)
-    activity_by_student = {
-        row["user_id"]: row
-        for row in activity_rows(db, {student.id for student in students}, utcnow())
-    }
+    student_rows = _filtered_class_students(db, class_id, inactive_days_gte)
     rows = [
-        {"student": {"id": student.id, "username": student.username}, **activity_by_student[student.id]}
-        for student in students
+        {"student": {"id": student.id, "username": student.username}, **activity}
+        for student, activity in student_rows
     ]
     for row in rows:
         row.pop("user_id")
-    if inactive_days_gte is not None:
-        rows = [
-            row for row in rows
-            if row["inactive_days"] is not None and row["inactive_days"] >= inactive_days_gte
-        ]
     if sort_field == "last_activity_at":
         rows.sort(
             key=lambda row: (row["last_activity_at"] is not None, row["last_activity_at"], row["student"]["username"]),
@@ -162,15 +173,17 @@ def class_students(
 
 @router.get("/classes/{class_id}/export")
 def export_class_insight(
-    class_id: int, request: Request, db: Session = Depends(db_session)
+    class_id: int,
+    request: Request,
+    inactive_days_gte: int | None = Query(default=None, ge=0),
+    db: Session = Depends(db_session),
 ):
     """Export one row per currently enrolled learner as a UTF-8 CSV."""
     class_group = _readable_class_or_404(class_id, request, db)
-    students = active_students_for_class(db, class_id)
+    student_rows = _filtered_class_students(db, class_id, inactive_days_gte)
+    students = [student for student, _ in student_rows]
+    activity_by_student = {student.id: activity for student, activity in student_rows}
     student_ids = {student.id for student in students}
-    activity_by_student = {
-        row["user_id"]: row for row in activity_rows(db, student_ids, utcnow())
-    }
 
     homework_by_student = {student_id: {"total": 0, "submitted": 0} for student_id in student_ids}
     for item in _class_homework_items(db, class_group):
@@ -200,8 +213,8 @@ def export_class_insight(
     writer = csv.writer(output)
     writer.writerow([
         "学员ID", "用户名", "最近活动", "从未学习", "未学习天数",
-        "作业总数_people", "作业已提交_people",
-        "考试总数_people", "考试已参与_people", "考试提交_attempts",
+        "作业总数_attempts", "作业已提交_attempts",
+        "考试总数_attempts", "考试已参与_attempts", "考试提交_attempts",
     ])
     for student in students:
         activity = activity_by_student[student.id]

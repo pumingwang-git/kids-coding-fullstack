@@ -11,7 +11,8 @@ from test_weak_items import _seed_class
 
 from app.lesson_homework_kinds import PAPER_KIND
 from app.models import (
-    ClassMember, ClassTeacher, CourseLessonBlock, ExamAssignment, ExamLink,
+    ClassGroup, ClassMember, ClassTeacher, CourseLesson, CourseLessonBlock, CourseSection,
+    ExamAssignment, ExamLink, LessonBlockCompletion,
     LessonProblemAttempt, LessonProblemBlock, Paper, PaperAttempt, Problem,
     ScratchSubmission,
 )
@@ -316,6 +317,52 @@ def test_teaching_class_export_is_scoped_utf8_csv_and_ignores_unknown_filters(tm
     assert {int(row["学员ID"]) for row in rows} == {301, 302}
     assert "用户名" in rows[0]
     assert not any("answer" in key.lower() or "problem_id_no" in key.lower() for key in rows[0])
+
+
+def test_teaching_class_export_reuses_inactive_filter_and_student_ids(tmp_path: Path):
+    app = build_app(tmp_path)
+    manager, manager_headers = admin_login(app)
+    class_id = _teaching_class(app, manager, manager_headers, "学情筛选班")
+    teacher, teacher_headers = login_as_role(app, "teacher", admin_id=36)
+    for student_id in (311, 312, 313):
+        seed_student(app, student_id)
+    db = app.state.session_factory()
+    try:
+        class_group = db.get(ClassGroup, class_id)
+        db.add(ClassTeacher(class_id=class_id, admin_user_id=36, role_in_class="teacher"))
+        db.add_all([ClassMember(class_id=class_id, student_id=student_id) for student_id in (311, 312, 313)])
+        section = CourseSection(course_id=class_group.course_id, title="筛选章节")
+        db.add(section)
+        db.flush()
+        lesson = CourseLesson(course_id=class_group.course_id, section_id=section.id, title="筛选课时")
+        db.add(lesson)
+        db.flush()
+        block = CourseLessonBlock(lesson_id=lesson.id, block_type="markdown", title="阅读")
+        db.add(block)
+        db.flush()
+        now = datetime.now(UTC)
+        db.add_all([
+            LessonBlockCompletion(user_id=311, block_id=block.id, lesson_id=lesson.id,
+                                  completed_at=now - timedelta(days=1)),
+            LessonBlockCompletion(user_id=312, block_id=block.id, lesson_id=lesson.id,
+                                  completed_at=now - timedelta(days=10)),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    listing = teacher.get(
+        f"/api/admin/teaching/classes/{class_id}/students?inactive_days_gte=7&page_size=100",
+        headers=teacher_headers,
+    )
+    export = teacher.get(
+        f"/api/admin/teaching/classes/{class_id}/export?inactive_days_gte=7",
+        headers=teacher_headers,
+    )
+    rows = list(csv.DictReader(io.StringIO(export.content.decode("utf-8-sig"))))
+    assert listing.status_code == export.status_code == 200
+    assert len(rows) == listing.json()["total"] == 1
+    assert {int(row["学员ID"]) for row in rows} == {312}
 
 
 def test_review_queue_endpoint_filters_to_teacher_students_and_is_stable(tmp_path: Path):
