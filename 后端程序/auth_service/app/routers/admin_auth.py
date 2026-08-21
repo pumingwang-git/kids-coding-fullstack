@@ -23,6 +23,7 @@ from ..permissions import (
     ROLE_SCOPES,
     SCOPE_LABELS,
     SUPER_ROLE,
+    can_manage_classes,
     is_super,
     validate_admin_role,
 )
@@ -382,6 +383,7 @@ def current_admin(request: Request, db: Session = Depends(db_session)) -> AdminU
     now = utcnow()
     if (
         not session
+        or session.admin_user_id != int(claims["sub"])
         or session.revoked_at
         or as_utc(session.expires_at) < now
         or as_utc(session.absolute_expires_at) < now
@@ -400,6 +402,7 @@ def me(admin: AdminUser = Depends(current_admin)):
         "display_name": admin.display_name,
         "role": admin.role,
         "can_manage_admin_roles": is_super(admin),
+        "can_manage_classes": can_manage_classes(admin),
     }
 
 

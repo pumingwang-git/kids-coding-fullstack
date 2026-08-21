@@ -13,11 +13,11 @@ from app.config import DEV_FERNET_KEY, Settings
 from app.login_risk import process_login_risk
 from app.mailer import build_login_alert_email, build_verification_email, safe_smtp_error
 from app.main import create_app
-from app.models import AuditEvent, AuthSession, LoginHistory
+from app.models import AuditEvent, AuthSession, LoginHistory, User
 from app.pwned import enforce_breach_policy, sha1_hex
 from app.rate_limit import RateLimiterUnavailable
 from app.schemas import RegisterRequest
-from app.security import totp_code, utcnow
+from app.security import mint_access_token, password_hash, totp_code, utcnow
 
 PASSWORD = "A-long-password-123!"
 
@@ -194,6 +194,42 @@ def test_register_verify_login_and_logout(tmp_path):
         assert test_client.get("/api/auth/me").json()["username"] == "learner"
         headers = {"X-CSRF-Token": test_client.cookies.get("csrf_token")}
         assert test_client.post("/api/auth/logout", headers=headers).status_code == 204
+        assert test_client.get("/api/auth/me").status_code == 401
+
+
+def test_access_token_sid_and_sub_must_belong_to_same_user(tmp_path):
+    with client(tmp_path) as test_client:
+        db = test_client.app.state.session_factory()
+        try:
+            user_a = User(
+                username="session-owner",
+                email="session-owner@example.com",
+                hashed_password=password_hash.hash(PASSWORD),
+                status="active",
+            )
+            user_b = User(
+                username="claim-target",
+                email="claim-target@example.com",
+                hashed_password=password_hash.hash(PASSWORD),
+                status="active",
+            )
+            db.add_all([user_a, user_b])
+            db.commit()
+            # The session is created directly to keep this test focused on JWT binding.
+            session = AuthSession(
+                id="session-owner-id",
+                user_id=user_a.id,
+                family_id="session-owner-family",
+                refresh_token_hmac="unused-refresh-hmac",
+                expires_at=utcnow() + timedelta(hours=1),
+                absolute_expires_at=utcnow() + timedelta(days=1),
+            )
+            db.add(session)
+            db.commit()
+            token = mint_access_token(test_client.app.state.settings, user_b.id, session.id)
+        finally:
+            db.close()
+        test_client.cookies.set("access_token", token)
         assert test_client.get("/api/auth/me").status_code == 401
 
 

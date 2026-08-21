@@ -8,7 +8,7 @@ from app.config import DEV_FERNET_KEY, Settings
 from app.database import build_database
 from app.main import create_app
 from app.models import AdminSession, AdminUser, AuditEvent, Base, SliderCaptchaChallenge
-from app.security import decrypt_code, password_hash, utcnow
+from app.security import decrypt_code, mint_admin_access_token, password_hash, utcnow
 
 ADMIN_PASSWORD = "Admin-pass-123!"
 
@@ -88,8 +88,39 @@ def test_admin_login_success_me_logout(tmp_path):
         assert me.status_code == 200
         assert me.json()["username"] == "root"
         assert me.json()["role"] == "super_admin"
+        assert me.json()["can_manage_classes"] is True
         headers = {"X-CSRF-Token": client.cookies.get("admin_csrf_token")}
         assert client.post("/api/admin/logout", headers=headers).status_code == 204
+        assert client.get("/api/admin/me").status_code == 401
+
+
+def test_admin_access_token_sid_and_sub_must_belong_to_same_admin(tmp_path):
+    with admin_client(tmp_path) as client:
+        db = client.app.state.session_factory()
+        try:
+            owner = db.scalar(select(AdminUser).where(AdminUser.username == "root"))
+            target = AdminUser(
+                username="claim-target",
+                password_hash=password_hash.hash(ADMIN_PASSWORD),
+                display_name="Target",
+                role="teacher",
+            )
+            db.add(target)
+            db.flush()
+            session = AdminSession(
+                id="admin-owner-session",
+                admin_user_id=owner.id,
+                family_id="admin-owner-family",
+                refresh_token_hmac="unused-admin-refresh-hmac",
+                expires_at=utcnow() + timedelta(hours=1),
+                absolute_expires_at=utcnow() + timedelta(days=1),
+            )
+            db.add(session)
+            db.commit()
+            token = mint_admin_access_token(client.app.state.settings, target.id, session.id)
+        finally:
+            db.close()
+        client.cookies.set("admin_access_token", token)
         assert client.get("/api/admin/me").status_code == 401
 
 

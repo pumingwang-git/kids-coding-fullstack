@@ -56,6 +56,97 @@ class ScratchGuiAssetsPlugin {
     }
 }
 
+/**
+ * 平台扩展的产出：`src/extensions/<ID>.js` → 资产 `<ID>`（**故意不带后缀**）。
+ *
+ * 为什么名字必须正好等于作品内 ID：`.sb3` 只记扩展 ID、不记它从哪儿加载
+ * （`scratch-vm/src/serialization/sb3.js:355` 官方注释：将来若支持按 URL 加载…，
+ * 即现在不支持），所以重开作品时 VM 拿 ID 当相对路径去 `importScripts`，
+ * 实测请求的正是 `<Studio base>/<ID>`。名字对不上，历史作品就打不开。
+ *
+ * 每个产物 = `_shim.js` + 扩展体。垫片只此一份，各扩展不许自带副本。
+ */
+const EXTENSIONS_DIR = path.resolve(__dirname, 'src/extensions');
+
+function readPlatformExtensions () {
+    if (!fs.existsSync(EXTENSIONS_DIR)) return [];
+    const shim = fs.readFileSync(path.join(EXTENSIONS_DIR, '_shim.js'), 'utf8');
+    return fs.readdirSync(EXTENSIONS_DIR)
+        .filter(name => name.endsWith('.js') && !name.startsWith('_'))
+        .map(name => ({
+            id: name.replace(/\.js$/, ''),
+            // dev 下每次请求重新拼，改扩展不用重启
+            build: () => `${shim}\n${fs.readFileSync(path.join(EXTENSIONS_DIR, name), 'utf8')}`
+        }));
+}
+
+class PlatformExtensionsPlugin {
+    apply (compiler) {
+        compiler.hooks.thisCompilation.tap('PlatformExtensionsPlugin', compilation => {
+            compilation.hooks.processAssets.tap(
+                {
+                    name: 'PlatformExtensionsPlugin',
+                    stage: compiler.webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL
+                },
+                () => {
+                    for (const ext of readPlatformExtensions()) {
+                        compilation.emitAsset(
+                            ext.id,
+                            new compiler.webpack.sources.RawSource(ext.build())
+                        );
+                    }
+                }
+            );
+        });
+    }
+}
+
+const HULL_FORMAT_REPLACEMENTS = [
+    [
+        /new Function\("pt","return \[pt"\+t\[0\]\+",pt"\+t\[1\]\+"\];"\)\(e\)/g,
+        '[e[t[0].slice(1)], e[t[1].slice(1)]]'
+    ],
+    [
+        /new Function\("pt","var o = \{\}; o"\+t\[0\]\+"= pt\[0\]; o"\+t\[1\]\+"= pt\[1\]; return o;"\)\(e\)/g,
+        '((o) => { o[t[0].slice(1)] = e[0]; o[t[1].slice(1)] = e[1]; return o; })({})'
+    ]
+];
+
+class ScratchSecurityPatchPlugin {
+    apply (compiler) {
+        compiler.hooks.thisCompilation.tap('ScratchSecurityPatchPlugin', compilation => {
+            compilation.hooks.processAssets.tap(
+                {
+                    name: 'ScratchSecurityPatchPlugin',
+                    // Run after webpack's minimizer so the checked asset is the
+                    // exact browser artifact that will be deployed.
+                    stage: compiler.webpack.Compilation.PROCESS_ASSETS_STAGE_SUMMARIZE
+                },
+                assets => {
+                    for (const [filename, asset] of Object.entries(assets)) {
+                        if (!filename.endsWith('.js') && !filename.endsWith('.map')) continue;
+                        let source = asset.source().toString();
+                        for (const [pattern, replacement] of HULL_FORMAT_REPLACEMENTS) {
+                            source = source.replace(pattern, replacement);
+                        }
+                        compilation.updateAsset(
+                            filename,
+                            new compiler.webpack.sources.RawSource(source)
+                        );
+                    }
+                    const residual = /new Function\(["']pt["']/;
+                    for (const [filename, asset] of Object.entries(compilation.getAssets())) {
+                        if ((filename.endsWith('.js') || filename.endsWith('.map'))
+                            && residual.test(asset.source.source().toString())) {
+                            throw new Error(`Unsafe hull.js dynamic formatter remains in ${filename}`);
+                        }
+                    }
+                }
+            );
+        });
+    }
+}
+
 module.exports = (env, argv) => {
     const isDev = argv.mode !== 'production';
 
@@ -100,7 +191,9 @@ module.exports = (env, argv) => {
             new HtmlWebpackPlugin({
                 template: './index.html'
             }),
-            new ScratchGuiAssetsPlugin()
+            new ScratchGuiAssetsPlugin(),
+            new PlatformExtensionsPlugin(),
+            new ScratchSecurityPatchPlugin()
         ],
         devServer: {
             port: 8602,
@@ -114,7 +207,26 @@ module.exports = (env, argv) => {
                     changeOrigin: true
                 }
             ],
-            client: {overlay: true}
+            client: {overlay: true},
+            // 平台扩展的产物没有 `.js` 后缀（名字必须等于作品内 ID），静态中间件
+            // 给不出正确的 MIME，而浏览器对 `importScripts` 的类型有要求；再加上
+            // `historyApiFallback: true` 会把 `/wpmStringV1` 当路由发回 index.html。
+            // 所以这些路径必须**抢在**兜底之前自己回，并显式声明类型。
+            // 生产由 nginx 承担同一件事（见《51、Scratch 扩展接入方案》§4）。
+            setupMiddlewares: (middlewares) => {
+                for (const ext of readPlatformExtensions()) {
+                    middlewares.unshift({
+                        name: `platform-extension-${ext.id}`,
+                        path: `/${ext.id}`,
+                        middleware: (req, res) => {
+                            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+                            res.setHeader('Cache-Control', 'no-store');
+                            res.end(ext.build());
+                        }
+                    });
+                }
+                return middlewares;
+            }
         },
         devtool: isDev ? 'eval-source-map' : 'source-map'
     };

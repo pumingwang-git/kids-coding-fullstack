@@ -6,6 +6,31 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEV_FERNET_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
+# These values have appeared in committed example configuration. They must
+# never be accepted by a production process, even if they do not use the
+# development prefix.
+PUBLIC_EXAMPLE_SECRETS = frozenset({
+    "mNlmwhUn4C2Q-pSnZbz_6nBUcRgU-wdeL73cfXOfWMG5I3Pwfz86aITGy2XsQzmy",
+    "tCjIvogPXXM6daC4K2pIGpdFj9L549zaNzEFzRnCCMLwf5NoEIZ5g_9QJzpecoP9",
+    "replace-with-a-separate-random-secret",
+})
+SECRET_PLACEHOLDER_MARKERS = (
+    "change-me",
+    "replace-with",
+    "development",
+    "not-for-production",
+    "example-secret",
+)
+
+
+def _is_production_secret_rejected(value: str | None) -> bool:
+    if not value:
+        return True
+    normalized = value.strip().lower()
+    return value in PUBLIC_EXAMPLE_SECRETS or any(
+        marker in normalized for marker in SECRET_PLACEHOLDER_MARKERS
+    )
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -98,6 +123,14 @@ class Settings(BaseSettings):
     avatar_upload_root: str = "data/avatars"
     avatar_max_bytes: int = Field(default=2 * 1024 * 1024, ge=256 * 1024, le=5 * 1024 * 1024)
     avatar_max_dimension: int = Field(default=512, ge=256, le=1024)
+    # 匿名发音代理：响应、频率和磁盘占用都必须有硬上限。默认值按短 MP3 设计，
+    # 可由环境变量覆盖，但不能配置成无限制。
+    typing_audio_cache_root: str = "data/audio_cache"
+    typing_audio_response_max_bytes: int = Field(default=512 * 1024, ge=16 * 1024, le=2 * 1024 * 1024)
+    typing_audio_cache_max_bytes: int = Field(default=256 * 1024 * 1024, ge=1 * 1024 * 1024, le=2 * 1024 * 1024 * 1024)
+    typing_audio_cache_max_files: int = Field(default=5000, ge=100, le=100_000)
+    typing_audio_rate_limit_per_minute: int = Field(default=120, ge=10, le=1000)
+    typing_audio_fetch_limit_per_minute: int = Field(default=30, ge=5, le=300)
     # 学员端站点地址：拼完整考试链接（{exam_base_url}/exam/{access_token}）。
     # 为空时接口返回相对路径 /exam/{token}，由前端按当前域名自行拼全。
     exam_base_url: str = ""
@@ -220,14 +253,20 @@ class Settings(BaseSettings):
             raise RuntimeError("Production requires a PostgreSQL DATABASE_URL.")
         if not self.redis_url or not self.cookie_secure or "*" in self.origins:
             raise RuntimeError("生产环境必须配置 Redis、Secure Cookie 和精确的 CORS_ORIGINS。")
+        production_secrets = (
+            self.jwt_secret_key,
+            self.jwt_previous_secret_key,
+            self.refresh_token_hmac_key,
+            self.verification_hmac_key,
+            self.outbox_encryption_key,
+        )
         if (
             not self.origins
-            or self.jwt_secret_key.startswith("development")
-            or self.verification_hmac_key.startswith("development")
-            or self.refresh_token_hmac_key.startswith("development")
+            or any(_is_production_secret_rejected(value) for value in production_secrets)
             or self.outbox_encryption_key == DEV_FERNET_KEY
+            or self.jwt_previous_secret_key == self.jwt_secret_key
         ):
-            raise RuntimeError("生产环境不得使用开发密钥。")
+            raise RuntimeError("生产环境不得使用开发密钥、公开示例或占位密钥；current/previous 也不得重复。")
         if not self.pwned_check_enabled or not self.pwned_check_strict:
             raise RuntimeError(
                 "生产环境必须启用严格的泄露密码检查；请配置可用的 PWNED_API_BASE_URL。"
@@ -248,7 +287,8 @@ class Settings(BaseSettings):
                              ("COURSE_COVER_UPLOAD_ROOT", self.course_cover_upload_root),
                              ("AVATAR_UPLOAD_ROOT", self.avatar_upload_root),
                              ("SCRATCH_UPLOAD_ROOT", self.scratch_upload_root),
-                             ("TESTDATA_UPLOAD_ROOT", self.testdata_upload_root)):
+                             ("TESTDATA_UPLOAD_ROOT", self.testdata_upload_root),
+                             ("TYPING_AUDIO_CACHE_ROOT", self.typing_audio_cache_root)):
             if not Path(value).is_absolute():
                 raise RuntimeError(f"生产环境的 {label} 必须是绝对路径。")
 

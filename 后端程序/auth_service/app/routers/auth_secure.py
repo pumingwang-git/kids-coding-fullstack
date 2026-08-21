@@ -547,6 +547,7 @@ def current_user(request: Request, db: Session = Depends(db_session)) -> User:
     now = utcnow()
     if (
         not session
+        or session.user_id != int(claims["sub"])
         or session.revoked_at
         or as_utc(session.expires_at) < now
         or as_utc(session.absolute_expires_at) < now

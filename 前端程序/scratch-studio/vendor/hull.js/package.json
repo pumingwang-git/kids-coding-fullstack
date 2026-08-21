@@ -1,0 +1,7 @@
+{
+  "name": "hull.js",
+  "version": "1.0.10-wpm.1",
+  "description": "Security-patched compatibility fork of hull.js 0.2.10",
+  "main": "src/hull.js",
+  "license": "BSD-3-Clause"
+}

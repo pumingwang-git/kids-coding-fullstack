@@ -42,6 +42,7 @@ from .routers.admin_scratch import router as admin_scratch_router
 from .routers.admin_students import router as admin_students_router
 from .routers.admin_teaching import router as admin_teaching_router
 from .routers.admin_videos import router as admin_videos_router
+from .routers.typing import _cleanup_audio_cache
 from .routers.auth_secure import router
 from .routers.courses import router as student_courses_router
 from .routers.exam import judge_submission, sweep_stale_judgings
@@ -115,6 +116,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 重复执行无害；workers 进程与 API 进程走同一 create_app，也会扫到）。
         sweep_material_uploads(settings, session_factory)
         sweep_material_imports(settings, session_factory)
+        audio_cache = Path(settings.typing_audio_cache_root)
+        audio_cache.mkdir(parents=True, exist_ok=True)
+        _cleanup_audio_cache(
+            audio_cache,
+            max_bytes=settings.typing_audio_cache_max_bytes,
+            max_files=settings.typing_audio_cache_max_files,
+        )
         try:
             yield
         finally:
