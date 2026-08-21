@@ -213,8 +213,8 @@ def export_class_insight(
     writer = csv.writer(output)
     writer.writerow([
         "学员ID", "用户名", "最近活动", "从未学习", "未学习天数",
-        "作业总数_attempts", "作业已提交_attempts",
-        "考试总数_attempts", "考试已参与_attempts", "考试提交_attempts",
+        "作业项数_items", "已提交作业项数_items",
+        "考试项数_items", "已参与考试项数_items", "考试提交_attempts",
     ])
     for student in students:
         activity = activity_by_student[student.id]

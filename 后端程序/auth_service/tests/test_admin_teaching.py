@@ -316,6 +316,15 @@ def test_teaching_class_export_is_scoped_utf8_csv_and_ignores_unknown_filters(tm
     assert len(rows) == listing.json()["total"] == 2
     assert {int(row["学员ID"]) for row in rows} == {301, 302}
     assert "用户名" in rows[0]
+    assert {
+        "作业项数_items", "已提交作业项数_items", "考试项数_items",
+        "已参与考试项数_items", "考试提交_attempts",
+    }.issubset(rows[0])
+    for row in rows:
+        assert [row[key] for key in (
+            "作业项数_items", "已提交作业项数_items", "考试项数_items",
+            "已参与考试项数_items", "考试提交_attempts",
+        )] == ["0", "0", "0", "0", "0"]
     assert not any("answer" in key.lower() or "problem_id_no" in key.lower() for key in rows[0])
 
 
