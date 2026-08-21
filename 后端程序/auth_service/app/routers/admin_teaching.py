@@ -1,16 +1,91 @@
-"""Teacher workbench route skeleton."""
+"""Teacher workbench routes."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import csv
+import io
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..class_groups import active_student_ids_by_class_for_classes, active_students_for_class
 from ..class_insight import build_class_insight
-from ..models import ClassGroup
+from ..exam_roster import exam_participation
+from ..homework_roster import build_homework_roster
+from ..learning_activity import activity_rows
+from ..lesson_homework_kinds import KINDS
+from ..models import ClassGroup, CourseLesson, CourseLessonBlock, ExamAssignment, ExamLink, User
+from ..permissions import log_scope_denial, visible_student_ids
+from ..review_queue import pending_review_count, pending_reviews
+from ..security import utcnow
+from ..weak_items import build_weak_items
 from . import admin_classes
 from .admin_auth import db_session
 
 router = APIRouter(prefix="/api/admin/teaching", tags=["admin-teaching"])
+
+
+def _readable_class_or_404(class_id: int, request: Request, db: Session) -> ClassGroup:
+    admin_classes._require_class_reader(request, db, class_id)
+    class_group = db.get(ClassGroup, class_id)
+    if class_group is None:
+        raise HTTPException(404, "班级不存在。")
+    return class_group
+
+
+def _visible_student_or_404(student_id: int, request: Request, db: Session):
+    """Match the admin student directory's indistinguishable scope 404."""
+    admin, class_ids = admin_classes._require_class_reader(request, db)
+    student = db.get(User, student_id)
+    student_ids = visible_student_ids(admin, db)
+    out_of_scope = student is not None and student_ids is not None and student_id not in student_ids
+    if out_of_scope:
+        log_scope_denial(admin, "student", student_id)
+    if student is None or out_of_scope:
+        raise HTTPException(404, "学员不存在。")
+    return student, class_ids
+
+
+def _class_homework_items(db: Session, class_group: ClassGroup) -> list[dict]:
+    """The single DTO source for the class homework endpoint and learner profile."""
+    kinds_by_block_type = {kind.block_type: kind for kind in KINDS}
+    blocks = db.scalars(
+        select(CourseLessonBlock)
+        .join(CourseLesson, CourseLesson.id == CourseLessonBlock.lesson_id)
+        .where(
+            CourseLesson.course_id == class_group.course_id,
+            CourseLessonBlock.block_type.in_(kinds_by_block_type),
+        )
+        .order_by(CourseLessonBlock.id)
+    ).all()
+    return [
+        {
+            "source_type": kinds_by_block_type[block.block_type].student_source_type,
+            "source_id": block.id,
+            "title": block.title,
+            **build_homework_roster(
+                db, class_group.id, kinds_by_block_type[block.block_type], block.id
+            ),
+        }
+        for block in blocks
+    ]
+
+
+def _class_exam_items(db: Session, class_id: int, class_ids: set[int] | None) -> list[dict]:
+    """The single DTO source for the class exam endpoint and learner profile."""
+    statement = (
+        select(ExamLink)
+        .join(ExamAssignment, ExamAssignment.exam_link_id == ExamLink.id)
+        .where(
+            ExamLink.status == "active",
+            ExamAssignment.target_type == "class",
+            ExamAssignment.status == "active",
+        )
+    )
+    if class_ids is not None:
+        statement = statement.where(ExamAssignment.target_id.in_(class_ids))
+    links = db.scalars(statement.distinct().order_by(ExamLink.id)).all()
+    return [exam_participation(db, link.id, class_id) for link in links]
 
 
 @router.get("/classes")
@@ -22,9 +97,10 @@ def list_teaching_classes(
     if class_ids is not None:
         statement = statement.where(ClassGroup.id.in_(class_ids))
     rows = db.scalars(statement.order_by(ClassGroup.id)).all()
+    insights = build_class_insight(db, {row.id for row in rows})
     return {"items": [
         admin_classes._serialize_class(row)
-        | {"insight": build_class_insight(db, row.id)}
+        | {"insight": insights[row.id]}
         for row in rows
     ]}
 
@@ -33,7 +109,230 @@ def list_teaching_classes(
 def class_overview(
     class_id: int, request: Request, db: Session = Depends(db_session)
 ):
-    admin_classes._require_class_reader(request, db, class_id)
-    if db.get(ClassGroup, class_id) is None:
-        raise HTTPException(404, "班级不存在。")
-    return {"class_id": class_id, "insight": build_class_insight(db, class_id)}
+    _readable_class_or_404(class_id, request, db)
+    return {
+        "class_id": class_id,
+        "insight": build_class_insight(db, {class_id})[class_id],
+    }
+
+
+@router.get("/classes/{class_id}/students")
+def class_students(
+    class_id: int,
+    request: Request,
+    inactive_days_gte: int | None = Query(default=None, ge=0),
+    sort: str = Query(default="last_activity_at"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(db_session),
+):
+    _readable_class_or_404(class_id, request, db)
+    descending = sort.startswith("-")
+    sort_field = sort[1:] if descending else sort
+    if sort_field not in {"last_activity_at", "username"}:
+        raise HTTPException(422, "不支持的排序字段。")
+
+    students = active_students_for_class(db, class_id)
+    activity_by_student = {
+        row["user_id"]: row
+        for row in activity_rows(db, {student.id for student in students}, utcnow())
+    }
+    rows = [
+        {"student": {"id": student.id, "username": student.username}, **activity_by_student[student.id]}
+        for student in students
+    ]
+    for row in rows:
+        row.pop("user_id")
+    if inactive_days_gte is not None:
+        rows = [
+            row for row in rows
+            if row["inactive_days"] is not None and row["inactive_days"] >= inactive_days_gte
+        ]
+    if sort_field == "last_activity_at":
+        rows.sort(
+            key=lambda row: (row["last_activity_at"] is not None, row["last_activity_at"], row["student"]["username"]),
+            reverse=descending,
+        )
+    else:
+        rows.sort(key=lambda row: row["student"]["username"], reverse=descending)
+    total = len(rows)
+    start = (page - 1) * page_size
+    return {"items": rows[start:start + page_size], "total": total}
+
+
+@router.get("/classes/{class_id}/export")
+def export_class_insight(
+    class_id: int, request: Request, db: Session = Depends(db_session)
+):
+    """Export one row per currently enrolled learner as a UTF-8 CSV."""
+    class_group = _readable_class_or_404(class_id, request, db)
+    students = active_students_for_class(db, class_id)
+    student_ids = {student.id for student in students}
+    activity_by_student = {
+        row["user_id"]: row for row in activity_rows(db, student_ids, utcnow())
+    }
+
+    homework_by_student = {student_id: {"total": 0, "submitted": 0} for student_id in student_ids}
+    for item in _class_homework_items(db, class_group):
+        for row in item["roster"]:
+            student_id = row["student"]["id"]
+            if student_id not in homework_by_student:
+                continue
+            homework_by_student[student_id]["total"] += 1
+            if row["phase"] in {"submitted", "graded"}:
+                homework_by_student[student_id]["submitted"] += 1
+
+    exam_by_student = {student_id: {"total": 0, "participated": 0, "attempts": 0}
+                       for student_id in student_ids}
+    _, class_ids = admin_classes._require_class_reader(request, db)
+    for item in _class_exam_items(db, class_id, class_ids):
+        for row in item["roster"]:
+            student_id = row["student"]["id"]
+            if student_id not in exam_by_student:
+                continue
+            exam_by_student[student_id]["total"] += 1
+            attempts = row["attempts"]
+            exam_by_student[student_id]["attempts"] += attempts
+            if attempts:
+                exam_by_student[student_id]["participated"] += 1
+
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow([
+        "学员ID", "用户名", "最近活动", "从未学习", "未学习天数",
+        "作业总数_people", "作业已提交_people",
+        "考试总数_people", "考试已参与_people", "考试提交_attempts",
+    ])
+    for student in students:
+        activity = activity_by_student[student.id]
+        homework = homework_by_student[student.id]
+        exams = exam_by_student[student.id]
+        writer.writerow([
+            admin_classes._csv_cell(student.id),
+            admin_classes._csv_cell(student.username),
+            admin_classes._csv_cell(activity["last_activity_at"]),
+            admin_classes._csv_cell(activity["never_active"]),
+            admin_classes._csv_cell(activity["inactive_days"]),
+            homework["total"],
+            homework["submitted"],
+            exams["total"],
+            exams["participated"],
+            exams["attempts"],
+        ])
+
+    return Response(
+        content=("\ufeff" + output.getvalue()).encode("utf-8"),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="class-{class_id}-insight.csv"'},
+    )
+
+
+@router.get("/classes/{class_id}/homework")
+def class_homework(class_id: int, request: Request, db: Session = Depends(db_session)):
+    class_group = _readable_class_or_404(class_id, request, db)
+    return {"items": _class_homework_items(db, class_group)}
+
+
+@router.get("/classes/{class_id}/exams")
+def class_exams(class_id: int, request: Request, db: Session = Depends(db_session)):
+    _readable_class_or_404(class_id, request, db)
+    _, class_ids = admin_classes._require_class_reader(request, db)
+    return {"items": _class_exam_items(db, class_id, class_ids)}
+
+
+@router.get("/review-queue")
+def review_queue(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(db_session),
+):
+    admin, _ = admin_classes._require_class_reader(request, db)
+    student_ids = visible_student_ids(admin, db)
+    rows = pending_reviews(db, student_ids, page, page_size)
+    return {
+        "items": [
+            {
+                "submission_id": row.id,
+                "student_id": row.user_id,
+                "lesson_id": row.lesson_id,
+                "lesson_block_id": row.lesson_block_id,
+                "challenge_id": row.challenge_id,
+                "submitted_at": row.submitted_at,
+                "review_endpoint": f"scratch-review.html?submission_id={row.id}",
+            }
+            for row in rows
+        ],
+        "total": pending_review_count(db, student_ids),
+    }
+
+
+@router.get("/classes/{class_id}/weak-items")
+def class_weak_items(class_id: int, request: Request, db: Session = Depends(db_session)):
+    _readable_class_or_404(class_id, request, db)
+    items = []
+    for row in build_weak_items(db, class_id):
+        rate = row.pop("score_rate")
+        rate_key = "practice_correct_rate" if row["source"] == "lesson_practice" else "paper_score_rate"
+        items.append({**row, rate_key: rate})
+    return {"items": items}
+
+
+@router.get("/students/{student_id}/profile")
+def student_profile(student_id: int, request: Request, db: Session = Depends(db_session)):
+    """Read-only learner profile composed only from the class workbench DTO sources."""
+    student, class_ids = _visible_student_or_404(student_id, request, db)
+    statement = select(ClassGroup).order_by(ClassGroup.id)
+    if class_ids is not None:
+        statement = statement.where(ClassGroup.id.in_(class_ids))
+    candidate_groups = list(db.scalars(statement))
+    student_ids_by_class = active_student_ids_by_class_for_classes(
+        db, {class_group.id for class_group in candidate_groups}
+    )
+    class_groups = [
+        class_group for class_group in candidate_groups
+        if student_id in student_ids_by_class[class_group.id]
+    ]
+
+    learning = activity_rows(db, {student_id}, utcnow())[0]
+    learning.pop("user_id")
+    homework: list[dict] = []
+    exams: list[dict] = []
+    practice: list[dict] = []
+    for class_group in class_groups:
+        for item in _class_homework_items(db, class_group):
+            row = next(row for row in item["roster"] if row["student"]["id"] == student_id)
+            homework.append({
+                "class_id": class_group.id,
+                "source_type": item["source_type"],
+                "source_id": item["source_id"],
+                "title": item["title"],
+                **row,
+            })
+        for item in _class_exam_items(db, class_group.id, class_ids):
+            row = next((row for row in item["roster"] if row["student"]["id"] == student_id), None)
+            if row is not None:
+                exams.append({
+                    "class_id": class_group.id,
+                    "exam_link_id": item["exam_link_id"],
+                    "name": item["name"],
+                    "phase": item["phase"],
+                    "phase_label": item["phase_label"],
+                    **row,
+                })
+        practice.extend({
+            "class_id": class_group.id,
+            "source_type": row["source"],
+            "source_id": row["source_id"],
+            "source_title": row["source_title"],
+            "practice_correct_rate": row["score_rate"],
+        } for row in build_weak_items(db, class_group.id, student_id=student_id)
+        if row["source"] == "lesson_practice")
+
+    return {
+        "student": {"id": student.id, "username": student.username},
+        "learning": learning,
+        "homework": homework,
+        "exams": exams,
+        "practice": practice,
+    }
