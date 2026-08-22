@@ -52,12 +52,8 @@ async function load() {
 async function createWork() {
   busy.value = true;
   try {
-    const work = await request("/api/scratch/works", {
-      method: "POST",
-      body: JSON.stringify({ title: "未命名作品" }),
-    });
-    studioEdit(work.id);
-    await load();
+    // 延迟到工作台首次保存时建档，未完成的草稿不会出现在这里。
+    window.open("/scratch-studio/?mode=free&draft=1", "_blank");
   } catch (e) {
     notice.value = e.message || "创建失败，请稍后再试。";
   } finally {

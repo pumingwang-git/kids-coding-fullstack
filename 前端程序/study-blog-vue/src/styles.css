@@ -1192,6 +1192,15 @@ label small {
   background: color-mix(in srgb, var(--cream) 78%, var(--paper));
   color: var(--muted);
 }
+/* 模块被路由守卫挡回专区首页时的说明条 */
+.area-blocked-tip {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cream) 78%, var(--paper));
+  color: var(--muted);
+  font-size: 14px;
+}
 .area-upcoming {
   display: grid;
   gap: 18px;
@@ -2703,24 +2712,6 @@ label small {
   box-sizing: border-box;
   white-space: nowrap;
 }
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  padding: 9px 16px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  min-height: 40px;
-  box-sizing: border-box;
-}
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  padding: 9px 16px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
 .works-sort {
   display: inline-flex;
   border: 1px solid var(--line);
@@ -2738,24 +2729,6 @@ label small {
   min-height: 40px;
   box-sizing: border-box;
   white-space: nowrap;
-}
-  border: none;
-  background: transparent;
-  padding: 9px 16px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--muted);
-  cursor: pointer;
-  min-height: 40px;
-  box-sizing: border-box;
-}
-  border: none;
-  background: transparent;
-  padding: 9px 16px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--muted);
-  cursor: pointer;
 }
 .works-sort button.active {
   background: color-mix(in srgb, var(--accent) 12%, var(--paper));
@@ -3129,10 +3102,6 @@ label small {
   font-size: 13px;
   color: var(--danger);
 }
-  min-height: 40px;
-  padding: 8px 20px;
-}
-
 /* 空状态 */
 .create-hub-placeholder .honest-empty {
   padding: 48px 24px;

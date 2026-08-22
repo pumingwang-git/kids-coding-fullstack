@@ -311,12 +311,21 @@ def _apply_sub_rows(db: Session, problem: Problem, payload: ProblemPayload, prev
     if not detail:
         detail = ProgrammingDetail(problem_id=problem.id)
         db.add(detail)
+    # 五列**无条件整体赋值**，不按形态分支跳过。形态从 project 改回 algorithm 时，
+    # payload 里这几项已被 ProgrammingPayload 闸成空值，照写即清空；若这里改成
+    # "只有 project 才写"，改回算法题后库里会留着上一版的规则和量规，而
+    # ProgrammingDetail 的注释说这两套判分依据不许并存。
+    detail.shape = prog.shape
     detail.input_format = prog.input_format.strip()
     detail.output_format = prog.output_format.strip()
     detail.hints = prog.hints.strip() or "无"
     detail.pass_condition = prog.pass_condition
     detail.time_limit_ms = prog.time_limit_ms
     detail.memory_limit_mb = prog.memory_limit_mb
+    detail.starter_code = prog.starter_code
+    detail.allowed_modules = json.dumps(prog.allowed_modules, ensure_ascii=False)
+    detail.rules_json = json.dumps(prog.rules, ensure_ascii=False)
+    detail.rubric_json = json.dumps(prog.rubric, ensure_ascii=False)
 
     db.execute(delete(ReferenceSolution).where(ReferenceSolution.problem_id == problem.id))
     for language, code in (("cpp", prog.ref_code.cpp), ("python", prog.ref_code.python)):
@@ -335,6 +344,19 @@ def _apply_sub_rows(db: Session, problem: Problem, payload: ProblemPayload, prev
                         time_limit_ms=case.time_limit_ms, memory_limit_mb=case.memory_limit_mb))
         order += 1
     return cleanup_dirs
+
+
+def _json_or(raw: str, fallback):
+    """把 JSON 文本列解析成结构；脏数据回退到 fallback，不抛异常。
+
+    与 `scratch_rules.parse_rules` / `rubric.parse_rubric` 同一口径：这些列是教研填的，
+    坏了该由写入校验兜住，不该让读题目详情的人拿到 500。
+    """
+    try:
+        parsed = json.loads(raw or "")
+    except (TypeError, json.JSONDecodeError):
+        return fallback
+    return parsed if isinstance(parsed, type(fallback)) else fallback
 
 
 def _submission_error(problem: Problem, db: Session) -> str | None:
@@ -424,11 +446,17 @@ def _problem_to_payload(problem: Problem, db: Session, admin: AdminUser) -> dict
         ref = {item.language: item.code for item in db.scalars(select(ReferenceSolution).where(ReferenceSolution.problem_id == problem.id))}
         samples = db.scalars(select(TestCase).where(TestCase.problem_id == problem.id, TestCase.is_sample.is_(True)).order_by(TestCase.sort_order)).all()
         manual = db.scalars(select(TestCase).where(TestCase.problem_id == problem.id, TestCase.is_sample.is_(False), TestCase.input_file.is_(None)).order_by(TestCase.sort_order)).all()
-        payload["programming"] = {"title": problem.title, "pass_condition": detail.pass_condition, "input_format": detail.input_format, "output_format": detail.output_format, "hints": detail.hints,
+        payload["programming"] = {"title": problem.title, "shape": detail.shape, "pass_condition": detail.pass_condition, "input_format": detail.input_format, "output_format": detail.output_format, "hints": detail.hints,
                                   "time_limit_ms": detail.time_limit_ms, "memory_limit_mb": detail.memory_limit_mb,
                                   "samples": [{"input": item.input, "output": item.output} for item in samples],
                                   "manual_test_cases": [{"input": item.input, "output": item.output, "time_limit_ms": item.time_limit_ms, "memory_limit_mb": item.memory_limit_mb} for item in manual],
-                                  "ref_code": {"cpp": ref.get("cpp", ""), "python": ref.get("python", "")}}
+                                  "ref_code": {"cpp": ref.get("cpp", ""), "python": ref.get("python", "")},
+                                  # 作品题四件套。存的是 JSON 文本，出口一律解析成结构，
+                                  # 脏数据当空值——回显路径上抛异常会让整页题目详情 500。
+                                  "starter_code": detail.starter_code,
+                                  "allowed_modules": _json_or(detail.allowed_modules, []),
+                                  "rules": _json_or(detail.rules_json, []),
+                                  "rubric": _json_or(detail.rubric_json, {})}
         package = db.get(TestDataPackage, problem.id)
         if package:
             payload["programming"]["testdata_package"] = {"archive_name": package.archive_name, "checker": package.checker, "manifest": json.loads(package.manifest_json), "uploaded_at": package.uploaded_at, "time_limit_ms": detail.time_limit_ms, "memory_limit_mb": detail.memory_limit_mb}
@@ -704,7 +732,8 @@ def revise_problem(problem_id: int, request: Request, db: Session = Depends(db_s
     detail = db.get(ProgrammingDetail, source.id)
     copied_dir = None
     if detail:
-        db.add(ProgrammingDetail(problem_id=clone.id, input_format=detail.input_format, output_format=detail.output_format, hints=detail.hints, pass_condition=detail.pass_condition, time_limit_ms=detail.time_limit_ms, memory_limit_mb=detail.memory_limit_mb))
+        db.add(ProgrammingDetail(problem_id=clone.id, shape=detail.shape, input_format=detail.input_format, output_format=detail.output_format, hints=detail.hints, pass_condition=detail.pass_condition, time_limit_ms=detail.time_limit_ms, memory_limit_mb=detail.memory_limit_mb,
+                                 starter_code=detail.starter_code, allowed_modules=detail.allowed_modules, rules_json=detail.rules_json, rubric_json=detail.rubric_json))
         for solution in db.scalars(select(ReferenceSolution).where(ReferenceSolution.problem_id == source.id)):
             db.add(ReferenceSolution(problem_id=clone.id, language=solution.language, code=solution.code))
         package = db.get(TestDataPackage, source.id)

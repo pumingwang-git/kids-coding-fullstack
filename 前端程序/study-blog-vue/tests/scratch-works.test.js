@@ -131,3 +131,65 @@ describe("自由作品 API 客户端", () => {
     expect(call.method).toBe("GET");
   });
 });
+
+describe("写请求的 Content-Type", () => {
+  // 这条守的是一次真事故：JSON 写请求没带 Content-Type，浏览器给 fetch 兜的是
+  // text/plain，FastAPI 解不出请求体，createWork / updateWork / shareWork **一律 422**。
+  // 工作台里点「保存作品」看到的是"保存失败：[object Object]"（422 的 detail 是
+  // 数组，被 JS 拼成了那个字符串），排查了一圈才找到源头是少了一个头。
+  it("JSON body 自报 application/json", async () => {
+    await createWork("小猫散步");
+    await updateWork(7, { title: "新名字" });
+    await shareWork(42);
+    const writes = calls.filter((c) => c.method !== "GET" && typeof c.body === "string");
+    expect(writes.length).toBe(3);
+    for (const call of writes) {
+      expect(call.headers["Content-Type"]).toBe("application/json");
+    }
+  });
+
+  it("FormData 不许被塞 Content-Type（会顶掉 multipart 边界）", async () => {
+    const blob = new Blob(["sb3-bytes"], { type: "application/zip" });
+    await saveWorkSb3(7, blob, "manual");
+    const call = calls.find((c) => c.body instanceof FormData);
+    expect(call.headers["Content-Type"]).toBeUndefined();
+  });
+
+  it("无 body 的写请求也不加 Content-Type", async () => {
+    await deleteWork(7);
+    const call = calls.find((c) => c.method === "DELETE");
+    expect(call.headers["Content-Type"]).toBeUndefined();
+  });
+});
+
+describe("服务端错误文案", () => {
+  // 后端对每条失败路径都写了中文文案，前端把它原样显示出来是纪律（学生按提示
+  // 才知道该做什么）。422 的 detail 是 [{loc, msg}] 数组，直接塞进 new Error()
+  // 会变成 "[object Object]"，等于把提示吞了。
+  function failWith(status, detail) {
+    vi.stubGlobal("fetch", async (url) => {
+      if (url === "/api/auth/csrf") {
+        setCookies({ csrf_token: "STUDENT-TOKEN" });
+        return jsonResponse({ message: "ok" });
+      }
+      return jsonResponse({ detail }, status);
+    });
+  }
+
+  it("字符串 detail 原样透出", async () => {
+    failWith(401, "登录已过期，请重新登录。");
+    await expect(createWork("x")).rejects.toThrow("登录已过期，请重新登录。");
+  });
+
+  it("422 的数组 detail 拼成人话，不是 [object Object]", async () => {
+    failWith(422, [
+      { loc: ["body", "title"], msg: "Field required", type: "missing" },
+    ]);
+    await expect(createWork("x")).rejects.toThrow("title：Field required");
+  });
+
+  it("拿不到 detail 时退回 HTTP 状态码", async () => {
+    failWith(500, null);
+    await expect(createWork("x")).rejects.toThrow("请求失败（HTTP 500）");
+  });
+});

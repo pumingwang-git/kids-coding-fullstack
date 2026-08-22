@@ -24,17 +24,27 @@ from .results_common import build_item_analysis
 
 def _paper_items(db: Session, *, source: str, source_id: int, title: str,
                  paper: Paper, attempts: list[PaperAttempt], score_policy: str) -> list[dict]:
-    """Attach source context to the existing item-analysis result without changing it."""
+    """Project item analysis into the weak-items DTO.
+
+    ``build_item_analysis`` is also used by the administrator results pages, where the
+    logical problem number is needed to identify an item.  The teaching workbench's
+    weak-items contract deliberately does not expose that internal identifier.
+    """
     _grouping, items = build_item_analysis(db, paper, attempts, score_policy)
     return [
-        {"source": source, "source_id": source_id, "source_title": title, **item}
+        {"source": source, "source_id": source_id, "source_title": title,
+         **{key: value for key, value in item.items() if key != "problem_id_no"}}
         for item in items
         if item["score_rate"] is not None
     ]
 
 
-def build_weak_items(db: Session, class_id: int) -> list[dict]:
+def build_weak_items(
+    db: Session, class_id: int, *, student_id: int | None = None
+) -> list[dict]:
     """Return attempted items for one class, ordered from the lowest score rate upward.
+
+    The returned teaching-workbench DTO intentionally omits ``problem_id_no``.
 
     Paper homework and assigned exam links deliberately delegate all item statistics to
     ``build_item_analysis``.  Lesson practice is not a paper attempt, so its one-row-per-
@@ -45,6 +55,8 @@ def build_weak_items(db: Session, class_id: int) -> list[dict]:
         raise LookupError("班级不存在。")
 
     student_ids = active_student_ids_for_classes(db, {class_id})
+    if student_id is not None:
+        student_ids &= {student_id}
     if not student_ids:
         return []
 
@@ -120,7 +132,6 @@ def build_weak_items(db: Session, class_id: int) -> list[dict]:
             "source_id": block.id,
             "source_title": block.title,
             "sort_order": detail.display_no or str(block.sort_order + 1),
-            "problem_id_no": detail.problem_id_no,
             "full_score": detail.score,
             "type": problem.type if problem else detail.problem_type,
             "title": (problem.title or "")[:60] if problem else "",

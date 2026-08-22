@@ -16,6 +16,15 @@ class ScratchGuiAssetsPlugin {
             'node_modules/@scratch/scratch-gui/dist'
         );
         const copyDirectory = (compilation, root, relativeRoot) => {
+            // Some published scratch-gui versions omit optional runtime
+            // directories. Treat those as absent instead of letting
+            // readdirSync abort the whole compilation with ENOENT.
+            if (!fs.existsSync(root)) {
+                compilation.warnings.push(
+                    new Error(`scratch-gui runtime directory not found: ${path.relative(__dirname, root)}`)
+                );
+                return;
+            }
             for (const entry of fs.readdirSync(root, {withFileTypes: true})) {
                 const relativePath = path.posix.join(relativeRoot, entry.name);
                 const fullPath = path.join(root, entry.name);

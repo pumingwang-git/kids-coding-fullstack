@@ -156,8 +156,16 @@
 
         <div class="modal-body">
           <!-- 左：题型 + 通用标签（跨题型不变，切换 type 不清空） -->
+          <!-- 左栏分两层：**开题必须决定的**常驻在上（题型 → 语言 → 形态、知识点、负责人），
+               **有默认值、多数时候不用动的**收进下面的折叠区（难度/来源/结构/阶段/业务标签）。
+               原来八块全展开，一屏三十多个胶囊竖着堆，新增一道题时真正要点的那两三个
+               被淹在里面。折叠区的标题常驻显示当前取值摘要——收起不等于藏起来，
+               否则老师会不放心而每次都点开，折叠就白做了。
+
+               `data-left-block` 是显隐的依据。**别改回按 index 判断**：块的顺序一变，
+               "index > 0 就隐藏"会静默地藏错东西，而这种错不会报任何错。 -->
           <div class="modal-left">
-            <div class="left-block">
+            <div class="left-block" data-left-block="type">
               <h4 class="sec-title">题型选择</h4>
               <div class="pill-group" id="typeGroup">
                 <label class="pill"
@@ -183,86 +191,44 @@
                   ><input type="radio" name="qType" value="scratch" /><span>Scratch 挑战</span></label
                 >
               </div>
-              <!-- 操作题细类：仅影响参考代码高亮与测试点展示，单表枚举字段 -->
-              <div class="pill-group" id="langGroup" style="margin-top: 8px; display: none">
-                <label class="pill"
-                  ><input type="radio" name="qLang" value="cpp" checked /><span
-                    >C++操作题</span
-                  ></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qLang" value="python" /><span
-                    >Python操作题</span
-                  ></label
-                >
+              <!-- 操作题细类：仅影响参考代码高亮与测试点展示，单表枚举字段。
+                   `pill-sub` 让它在视觉上从属于上面的题型，而不是第二排平级选项。 -->
+              <div class="pill-sub" id="langGroup" hidden>
+                <span class="pill-sub-label">语言</span>
+                <div class="pill-group">
+                  <label class="pill"
+                    ><input type="radio" name="qLang" value="cpp" checked /><span
+                      >C++</span
+                    ></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qLang" value="python" /><span
+                      >Python</span
+                    ></label
+                  >
+                </div>
+              </div>
+              <!-- 题目形态：只对 Python 开放。算法题走 stdin/stdout 逐点判分，
+                   作品题（画线/画气球）没有标准输入输出，判分靠声明式规则 + 教师量规。
+                   C++ 没有对应的规则表，形态选择器对它整组隐藏。 -->
+              <div class="pill-sub" id="shapeGroup" hidden>
+                <span class="pill-sub-label">形态</span>
+                <div class="pill-group">
+                  <label class="pill"
+                    ><input type="radio" name="qShape" value="algorithm" checked /><span
+                      >算法题</span
+                    ></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qShape" value="project" /><span
+                      >作品题（绘图）</span
+                    ></label
+                  >
+                </div>
               </div>
             </div>
 
-            <div class="left-block">
-              <h4 class="sec-title">难度（洛谷分级）</h4>
-              <div class="pill-group" id="difficultyGroup"></div>
-            </div>
-
-            <div class="left-block">
-              <h4 class="sec-title">题目来源</h4>
-              <div class="pill-group">
-                <label class="pill"
-                  ><input type="radio" name="qSource" value="第三方" checked /><span
-                    >第三方</span
-                  ></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qSource" value="原创" /><span>原创</span></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qSource" value="自命题" /><span>自命题</span></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qSource" value="洛谷" /><span>洛谷</span></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qSource" value="NOIP" /><span>NOIP</span></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qSource" value="CSP-J" /><span>CSP-J</span></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qSource" value="CSP-S" /><span>CSP-S</span></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qSource" value="USACO" /><span>USACO</span></label
-                >
-              </div>
-            </div>
-
-            <div class="left-block">
-              <h4 class="sec-title">当前负责人</h4>
-              <p class="muted" id="ownerDisplay">正在读取当前登录用户…</p>
-              <p class="form-error" id="rejectionDisplay" hidden></p>
-            </div>
-
-            <div class="left-block">
-              <h4 class="sec-title">知识点结构</h4>
-              <div class="pill-group">
-                <label class="pill"
-                  ><input type="radio" name="qStructure" value="单项知识点" checked /><span
-                    >单项知识点</span
-                  ></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qStructure" value="多项知识点" /><span
-                    >多项知识点</span
-                  ></label
-                >
-                <label class="pill"
-                  ><input type="radio" name="qStructure" value="综合应用" /><span
-                    >综合应用</span
-                  ></label
-                >
-              </div>
-            </div>
-
-            <div class="left-block">
+            <div class="left-block" data-left-block="knowledge">
               <h4 class="sec-title">知识点（可多选，点击弹出树形选择）</h4>
               <div
                 class="kt-trigger"
@@ -277,25 +243,95 @@
               </div>
             </div>
 
-            <div class="left-block">
-              <h4 class="sec-title">适用阶段（可多选）</h4>
-              <div class="multi-cloud" data-multi="stage">
-                <button class="tk" type="button" data-v="C++基础">C++基础</button>
-                <button class="tk" type="button" data-v="Python基础">Python基础</button>
-                <button class="tk" type="button" data-v="CSP-J">CSP-J</button>
-                <button class="tk" type="button" data-v="CSP-S">CSP-S</button>
-                <button class="tk" type="button" data-v="信奥提高">信奥提高</button>
-              </div>
-            </div>
+            <details class="more-settings left-taxonomy" id="taxonomyFold" data-left-block="taxonomy">
+              <summary>
+                分类与标签<span class="taxonomy-summary" id="taxonomySummary"></span>
+              </summary>
 
-            <div class="left-block">
-              <h4 class="sec-title">业务标签（可多选）</h4>
-              <div class="multi-cloud" data-multi="business">
-                <button class="tk" type="button" data-v="直播专用">直播专用</button>
-                <button class="tk" type="button" data-v="引流题">引流题</button>
-                <button class="tk" type="button" data-v="试机题">试机题</button>
-                <button class="tk" type="button" data-v="内部练习">内部练习</button>
+              <div class="left-block">
+                <h4 class="sec-title">难度（洛谷分级）</h4>
+                <div class="pill-group" id="difficultyGroup"></div>
               </div>
+
+              <div class="left-block">
+                <h4 class="sec-title">题目来源</h4>
+                <div class="pill-group">
+                  <label class="pill"
+                    ><input type="radio" name="qSource" value="第三方" checked /><span
+                      >第三方</span
+                    ></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qSource" value="原创" /><span>原创</span></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qSource" value="自命题" /><span>自命题</span></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qSource" value="洛谷" /><span>洛谷</span></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qSource" value="NOIP" /><span>NOIP</span></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qSource" value="CSP-J" /><span>CSP-J</span></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qSource" value="CSP-S" /><span>CSP-S</span></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qSource" value="USACO" /><span>USACO</span></label
+                  >
+                </div>
+              </div>
+
+              <div class="left-block">
+                <h4 class="sec-title">知识点结构</h4>
+                <div class="pill-group">
+                  <label class="pill"
+                    ><input type="radio" name="qStructure" value="单项知识点" checked /><span
+                      >单项知识点</span
+                    ></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qStructure" value="多项知识点" /><span
+                      >多项知识点</span
+                    ></label
+                  >
+                  <label class="pill"
+                    ><input type="radio" name="qStructure" value="综合应用" /><span
+                      >综合应用</span
+                    ></label
+                  >
+                </div>
+              </div>
+
+              <div class="left-block">
+                <h4 class="sec-title">适用阶段（可多选）</h4>
+                <div class="multi-cloud" data-multi="stage">
+                  <button class="tk" type="button" data-v="C++基础">C++基础</button>
+                  <button class="tk" type="button" data-v="Python基础">Python基础</button>
+                  <button class="tk" type="button" data-v="CSP-J">CSP-J</button>
+                  <button class="tk" type="button" data-v="CSP-S">CSP-S</button>
+                  <button class="tk" type="button" data-v="信奥提高">信奥提高</button>
+                </div>
+              </div>
+
+              <div class="left-block">
+                <h4 class="sec-title">业务标签（可多选）</h4>
+                <div class="multi-cloud" data-multi="business">
+                  <button class="tk" type="button" data-v="直播专用">直播专用</button>
+                  <button class="tk" type="button" data-v="引流题">引流题</button>
+                  <button class="tk" type="button" data-v="试机题">试机题</button>
+                  <button class="tk" type="button" data-v="内部练习">内部练习</button>
+                </div>
+              </div>
+            </details>
+
+            <div class="left-block" data-left-block="owner">
+              <h4 class="sec-title">当前负责人</h4>
+              <p class="muted" id="ownerDisplay">正在读取当前登录用户…</p>
+              <p class="form-error" id="rejectionDisplay" hidden></p>
             </div>
           </div>
 
@@ -336,11 +372,14 @@
       import { initLayout } from "./admin-layout.js";
       import { adminDownload, adminMe, adminRequest, adminUpload, ifMatch } from "./admin-api.js";
       import { clearFieldErrors, closeMask, confirmDialog, escapeHtml, openMask, promptDialog, showFieldErrors, toast, trapFocus } from "./admin-ui.js";
+        import { mountRubricEditor, mountRuleEditor } from "./admin-rule-editor.js";
       import { createPagedList } from "./admin-list.js";
       import { createKnowledgeTree } from "./admin-tagtree.js";
       import { IMAGE_WIDTHS, renderMarkdown, rewriteImageWidth, sanitizeRenderedHtml, splitImageAlt } from "./admin-markdown.js";
       import { scratchMockEnabled, scratchRequest } from "./admin-scratch-api.js";
       import { EXTENSION_OPTIONS, RULE_TYPES, buildChallengePayload, publishChecks, ruleToForm, ruleTypeHelp, ruleTypeLabel, studioDemoUrl, studioStarterUrl, DEFAULT_RUBRIC, rubricPayload } from "./admin-scratch-core.js";
+        import { DEFAULT_PROJECT_RUBRIC, PY_MODULE_OPTIONS, PY_RULE_TYPES, projectAssetsPayload, projectSubmitChecks, pyRuleTypeHelp, pyRuleTypeLabel } from "./admin-python-core.js";
+        import { taxonomyIsPristine, taxonomySummaryText } from "./admin-authoring-core.js";
       import { Uppy, Dashboard, AwsS3 } from "./vendor/uppy/uppy.esm.js";
       initLayout();
 
@@ -404,6 +443,12 @@
             refCode: { cpp: "", python: "" }, // 纯文本 + language（key）
             manualTestCases: [], // Python 手工隐藏测试点
             testDataPackage: null, // C++ ZIP 导入清单；文件内容仅留在服务端
+            // ---- 仅作品题（shape="project"）----
+            shape: "algorithm",
+            starterCode: "", // 学生打开编辑器时预置的代码骨架
+            allowedModules: [], // 允许 import 的顶层模块名；空 = 不限制
+            rules: [], // 表单态 {type, params}，提交前由 projectAssetsPayload 扁平化
+            rubric: null, // null = 不用量规；{ criteria: [...] } = 用量规
           },
           scratch: {
             id: null, version: null, edit_seq: null, status: "draft", title: "", instructions_md: "",
@@ -750,6 +795,179 @@
           </tr></thead><tbody>${rows}</tbody></table>${diff}`;
       }
 
+      // Python 作品题（shape="project"）的表单。
+      //
+      // 与算法题共用 `programming` 这一块，但字段几乎不重叠：作品题**没有标准输入输出**，
+      // 所以输入/输出格式、样例、隐藏测试点、ZIP 导入整条链路都不出现；换上来的是
+      // 初始代码、模块白名单、声明式规则和教师量规。
+      //
+      // 「效果图」不另开上传位：题干的 Markdown 编辑器已经支持插图，且配图是内容寻址的
+      // （models.MediaAsset），同一张图被多道题引用也只存一份。再加一个专用上传口，
+      // 等于为同一件事造第二套存储、第二条清理路径。
+      //
+      // 参考代码这里**没有试跑按钮**：试跑是拿参考代码去跑题目的测试数据，作品题没有
+      // 测试数据可跑。等 AST 判定引擎落地后，这里换成「拿参考代码跑一遍判定规则」。
+      function buildProjectForm(p) {
+        const box = document.createElement("div");
+        box.className = "card";
+        box.style.cssText = "box-shadow:none;background:transparent;padding:0;margin-top:16px";
+
+        const grid = document.createElement("div");
+        grid.className = "form-grid";
+        grid.innerHTML = `
+        <label class="field">题目标题（≤ 20 字符）<input id="pTitle" maxlength="20" placeholder="如：画一个正六边形" /></label>
+        <label class="field">通过条件
+          <span class="pill-group">
+            <label class="pill"><input type="radio" name="pPass" value="规则全通过" /><span>规则全通过</span></label>
+            <label class="pill"><input type="radio" name="pPass" value="教师评定" /><span>教师评定</span></label>
+          </span>
+        </label>
+        <label class="field">限时（ms，100–10000）<input id="pTimeLimit" type="number" min="100" max="10000" step="100" /></label>
+        <label class="field">内存（MB，16–512）<input id="pMemoryLimit" type="number" min="16" max="512" /></label>
+        <label class="field full">提示说明<textarea id="pHints" rows="2" placeholder="无"></textarea></label>`;
+        grid.querySelector("#pTitle").value = p.title;
+        grid.querySelectorAll('input[name="pPass"]').forEach((r) => {
+          r.checked = r.value === p.passCondition;
+          r.addEventListener("change", () => (p.passCondition = r.value));
+        });
+        grid.querySelector("#pTimeLimit").value = p.timeLimitMs ?? 1000;
+        grid.querySelector("#pMemoryLimit").value = p.memoryLimitMb ?? 256;
+        grid.querySelector("#pHints").value = p.hints;
+        grid.querySelector("#pTitle").addEventListener("input", (e) => (p.title = e.target.value));
+        grid.querySelector("#pHints").addEventListener("input", (e) => (p.hints = e.target.value));
+        grid.querySelector("#pTimeLimit").addEventListener("input", (e) => {
+          p.timeLimitMs = e.target.value === "" ? null : Number(e.target.value);
+        });
+        grid.querySelector("#pMemoryLimit").addEventListener("input", (e) => {
+          p.memoryLimitMb = e.target.value === "" ? null : Number(e.target.value);
+        });
+        box.appendChild(grid);
+
+        const note = document.createElement("p");
+        note.className = "muted";
+        note.style.cssText = "margin:10px 0 0";
+        note.textContent = "画成什么样，请把效果图插进上面的题干里（Markdown 编辑器支持贴图）。限时与内存对绘图题仍然有用：学生写出死循环时靠它兜住。";
+        box.appendChild(note);
+
+        // ---- 初始代码 ----
+        const starterTitle = document.createElement("h4");
+        starterTitle.className = "sec-title";
+        starterTitle.style.cssText = "margin:18px 0 4px";
+        starterTitle.textContent = "初始代码（学生打开就有）";
+        box.appendChild(starterTitle);
+        const starterHint = document.createElement("p");
+        starterHint.className = "muted";
+        starterHint.style.cssText = "margin:0 0 6px";
+        starterHint.textContent = "起手式：import 与注释写在这里，学生只需补上关键那几行。作品题没有输入格式可写，这一段就是题目的脚手架。";
+        box.appendChild(starterHint);
+        const starterArea = document.createElement("textarea");
+        starterArea.className = "code-area";
+        starterArea.id = "pStarterCode";
+        starterArea.value = p.starterCode;
+        box.appendChild(starterArea);
+        cmInstances.push(mountCodeMirror(starterArea, "text/x-python", (v) => (p.starterCode = v)));
+
+        // ---- 允许使用的模块 ----
+        const moduleTitle = document.createElement("h4");
+        moduleTitle.className = "sec-title";
+        moduleTitle.style.cssText = "margin:18px 0 4px";
+        moduleTitle.textContent = "允许使用的模块";
+        box.appendChild(moduleTitle);
+        const moduleHint = document.createElement("p");
+        moduleHint.className = "muted";
+        moduleHint.style.cssText = "margin:0 0 6px";
+        moduleHint.textContent = "一个都不勾 = 不限制。勾了就是白名单，用于把学生圈在本课教过的工具里。";
+        box.appendChild(moduleHint);
+        const moduleGrid = document.createElement("div");
+        moduleGrid.className = "check-grid";
+        moduleGrid.innerHTML = PY_MODULE_OPTIONS.map((option) => `<label><input type="checkbox" value="${option.key}" ${p.allowedModules.includes(option.key) ? "checked" : ""} /> ${escapeHtml(option.label)}</label>`).join("");
+        moduleGrid.addEventListener("change", () => {
+          p.allowedModules = [...moduleGrid.querySelectorAll("input:checked")].map((i) => i.value);
+        });
+        box.appendChild(moduleGrid);
+
+        // ---- 参考代码 ----
+        const codeTitle = document.createElement("h4");
+        codeTitle.className = "sec-title";
+        codeTitle.style.cssText = "margin:18px 0 4px";
+        codeTitle.textContent = "参考代码（Python）";
+        box.appendChild(codeTitle);
+        const codeArea = document.createElement("textarea");
+        codeArea.className = "code-area";
+        codeArea.id = "pRefCode";
+        codeArea.value = p.refCode.python;
+        box.appendChild(codeArea);
+        cmInstances.push(mountCodeMirror(codeArea, "text/x-python", (v) => (p.refCode.python = v)));
+
+        // ---- 判定规则 ----
+        const rulesSection = document.createElement("section");
+        rulesSection.className = "scratch-question-section";
+        rulesSection.style.cssText = "margin-top:18px";
+        rulesSection.innerHTML = `<h4>判定规则</h4>
+          <p class="muted">服务端静态读一遍学生代码来判，不需要把程序跑起来。规则参数不会下发给学生，只下发规则名——参数里带着答案。</p>
+          <ol class="scratch-rule-list" id="pyRules"></ol>
+          <div class="inline-picker">
+            <select id="pyRuleType">${PY_RULE_TYPES.map((type) => `<option value="${type.key}" title="${escapeHtml(type.desc)}">${escapeHtml(type.label)}</option>`).join("")}</select>
+            <button class="btn" id="pyRuleAdd" type="button">添加规则（自动填入示例）</button>
+          </div>
+          <p class="muted scratch-rule-help" id="pyRuleHelp"></p>`;
+        box.appendChild(rulesSection);
+
+        // ---- 教师量规 ----
+        const rubricSection = document.createElement("section");
+        rubricSection.className = "scratch-question-section";
+        rubricSection.style.cssText = "margin-top:18px";
+        rubricSection.innerHTML = `<h4>教师量规（可选）</h4>
+          <p class="muted">绘图作品好不好看，规则判不出来，得老师打分。批改台按量规逐项打分；不配置则只做通过 / 不通过。满分 = 各准则最高档分值之和，自动计算，不必手填。</p>
+          <div class="inline-picker">
+            <button class="btn" id="pyRubricDefault" type="button">使用推荐量规</button>
+            <button class="btn" id="pyRubricClear" type="button">不用量规</button>
+          </div>
+          <div id="pyRubricArea"></div>`;
+        box.appendChild(rubricSection);
+
+        // ---- 自查清单 ----
+        const readiness = document.createElement("aside");
+        readiness.className = "scratch-inline-readiness";
+        readiness.innerHTML = '<strong>提交前自查</strong><ul id="pyReadiness"></ul>';
+        box.appendChild(readiness);
+        const renderReadiness = () => {
+          const missing = new Set(projectSubmitChecks(p));
+          box.querySelector("#pyReadiness").innerHTML = ["初始代码", "至少一条判定规则，或一套教师量规"]
+            .map((item) => `<li class="${missing.has(item) ? "missing" : "ready"}">${missing.has(item) ? "待补充" : "已完成"} · ${escapeHtml(item)}</li>`)
+            .join("");
+        };
+
+        const ruleEditor = mountRuleEditor({
+          list: box.querySelector("#pyRules"),
+          typeSelect: box.querySelector("#pyRuleType"),
+          addButton: box.querySelector("#pyRuleAdd"),
+          help: box.querySelector("#pyRuleHelp"),
+        }, {
+          get: () => p.rules,
+          ruleTypes: PY_RULE_TYPES,
+          labelOf: pyRuleTypeLabel,
+          helpOf: pyRuleTypeHelp,
+          onChange: renderReadiness,
+        });
+        const rubricEditor = mountRubricEditor(box.querySelector("#pyRubricArea"), {
+          get: () => p.rubric,
+          set: (value) => { p.rubric = value; },
+        });
+        box.querySelector("#pyRubricDefault").addEventListener("click", () => {
+          p.rubric = JSON.parse(JSON.stringify(DEFAULT_PROJECT_RUBRIC));
+          rubricEditor.render(); renderReadiness();
+        });
+        box.querySelector("#pyRubricClear").addEventListener("click", () => {
+          p.rubric = null;
+          rubricEditor.render(); renderReadiness();
+        });
+        box.addEventListener("input", renderReadiness);
+
+        ruleEditor.render(); rubricEditor.render(); renderReadiness();
+        return box;
+      }
+
       function mountCodeMirror(textarea, mode, onChange) {
         if (!window.CodeMirror) throw new Error("CodeMirror 未加载，请检查本地 vendor 资源。");
         const editor = window.CodeMirror.fromTextArea(textarea, {
@@ -813,6 +1031,9 @@
       async function openModal(target = null, initialType = null) {
         cleanupEditors();
         pendingCppZipFile = null;
+        // 上一道题里手动收起过折叠区，不该带到这一道题上——每次开窗都重新按
+        // "有没有非默认标签"来决定展开与否。
+        delete document.getElementById("taxonomyFold").dataset.userToggled;
         if (target) {
           let data;
           try {
@@ -938,6 +1159,13 @@
             memoryLimitMb: t.memory_limit_mb ?? null,
           }));
           form.programming.testDataPackage = p.testdata_package || null;
+          form.programming.shape = p.shape === "project" ? "project" : "algorithm";
+          form.programming.starterCode = p.starter_code || "";
+          form.programming.allowedModules = Array.isArray(p.allowed_modules) ? [...p.allowed_modules] : [];
+          form.programming.rules = (p.rules || []).map(ruleToForm);
+          // 后端用 {} 表示"不用量规"，表单态用 null——同一个含义两种写法是历史，
+          // 在这一处归一，别让下游每个判断都写 `!rubric || !rubric.criteria?.length`。
+          form.programming.rubric = p.rubric?.criteria?.length ? p.rubric : null;
         }
         return form;
       }
@@ -977,6 +1205,17 @@
       }
 
       // 左栏（通用标签）状态回写，切换 type 不清空
+      // 折叠区的两条判据（要不要自动展开、标题上显示什么）在 admin-authoring-core.js，
+      // 那里能被 vitest 直接测到；这里只负责把结果写进 DOM。
+      //
+      // 用户手动收起后不再强行展开（`dataset.userToggled`），不然点一下就弹回来。
+      function syncTaxonomyFold() {
+        const fold = document.getElementById("taxonomyFold");
+        document.getElementById("taxonomySummary").textContent =
+          taxonomySummaryText(formState.common);
+        if (!fold.dataset.userToggled) fold.open = !taxonomyIsPristine(formState.common);
+      }
+
       function syncLeftPanel() {
         kt.setSelected(formState.common.knowledge); // 归一化并回写 chips/摘要
         const setRadio = (name, value) => {
@@ -985,6 +1224,7 @@
         };
         setRadio("qType", formState.type);
         setRadio("qLang", formState.subType);
+        setRadio("qShape", formState.programming.shape);
         setRadio("qDifficulty", formState.common.difficulty);
         setRadio("qSource", formState.common.source);
         setRadio("qStructure", formState.common.structure);
@@ -996,11 +1236,17 @@
               tk.classList.toggle("active", formState.common[key].includes(tk.dataset.v)),
             );
         });
-        document.getElementById("langGroup").style.display =
-          formState.type === "programming" ? "" : "none";
-        document.querySelectorAll(".modal-left .left-block").forEach((block, index) => {
-          block.style.display = formState.type === "scratch" && index > 0 ? "none" : "";
+        // 子级选择器逐层出现：选了操作题才问语言，选了 Python 才问形态。
+        document.getElementById("langGroup").hidden = formState.type !== "programming";
+        document.getElementById("shapeGroup").hidden =
+          !(formState.type === "programming" && formState.subType === "python");
+        // Scratch 挑战的题面、规则、量规全在右栏自己的渲染器里，左栏除题型外都不适用。
+        // **按 data-left-block 判断，不要按 index**：块的顺序一变，"index > 0 就隐藏"
+        // 会静默地藏错东西，而这种错不会报任何错。
+        document.querySelectorAll(".modal-left [data-left-block]").forEach((block) => {
+          block.hidden = formState.type === "scratch" && block.dataset.leftBlock !== "type";
         });
+        syncTaxonomyFold();
         document.getElementById("ownerDisplay").textContent = formState.owner?.display_name || "未分配负责人";
         const rejectionDisplay = document.getElementById("rejectionDisplay");
         rejectionDisplay.hidden = !formState.rejection?.reason;
@@ -1072,28 +1318,20 @@
             <section class="scratch-question-section"><h4>示范项目</h4><p class="muted">与初始项目一样在 Studio 里录制。学生<strong>提交作品并拿到结果后</strong>可在只读 Studio 中查看，提交前既看不到入口也取不到文件。</p><div class="scratch-upload-row"><strong id="scratchDemoState">${s.has_demo ? "已上传" : "未上传"}</strong><span class="scratch-upload-actions">${s.id ? `<a class="btn" href="${studioDemoUrl(s.id)}" target="_blank" rel="noopener">${s.has_demo ? "在 Studio 中编辑示范项目" : "在 Studio 中录制示范项目"}</a>` : `<button class="btn" type="button" disabled title="请先保存挑战草稿">在 Studio 中录制示范项目</button>`}${s.demo_url ? `<a class="btn" href="${s.demo_url}" download>下载 .sb3</a>` : `<button class="btn" type="button" disabled title="还没有示范项目">下载 .sb3</button>`}<button class="btn" id="scratchDemoPick" type="button" ${s.id ? "" : "disabled"}>上传或替换 .sb3</button></span><input id="scratchDemoFile" type="file" accept=".sb3" hidden /></div>${s.status === "published" ? '<p class="muted">已发布的挑战不能原地改示范项目，请先复制为新版本。</p>' : ""}</section>
             <section class="scratch-question-section"><h4>教师解析视频</h4><p class="muted">可选。大加号点击或拖拽上传；学生提交作品并拿到结果后才可播放，避免提前泄题。</p><div class="av-area" data-scratch-av-mount></div></section>
             <aside class="scratch-inline-readiness"><strong>发布就绪度</strong><ul id="scratchReadiness"></ul><span class="muted">版本 ${s.version ? `v${s.version}` : "未保存"} · 已绑定 ${s.bound_block_count || 0} 个内容块 · ${s.submission_count || 0} 条提交</span></aside>`;
-          const renderRules = () => {
-            const list = box.querySelector("#scratchRules");
-            // 数组/对象参数（attributes、pattern）在输入框里按文本形态回显，
-            // 与 buildChallengePayload 的 list/json 解析互逆。
-            const displayValue = (value) => {
-              if (Array.isArray(value)) return value.join(", ");
-              if (value && typeof value === "object") return JSON.stringify(value);
-              return String(value ?? "");
-            };
-            list.innerHTML = s.rules.length ? s.rules.map((rule, index) => {
-              const type = RULE_TYPES.find((item) => item.key === rule.type);
-              const fields = (type?.fields || []).map((field) => `<label class="scratch-rule-field" title="${escapeHtml(field.hint || "")}">${escapeHtml(field.label)}<input data-rule-index="${index}" data-rule-param="${field.key}" ${field.type === "number" ? "type=number" : ""} value="${escapeHtml(displayValue(rule.params?.[field.key]))}" placeholder="${escapeHtml(field.placeholder || "")}" /></label>`).join("");
-              const help = type ? ` <span class="rule-help-dot" title="${escapeHtml(ruleTypeHelp(rule.type) || "")}">?</span>` : "";
-              return `<li class="scratch-rule-row"><strong>${escapeHtml(ruleTypeLabel(rule.type))}${help}</strong>${fields}<button class="btn-text link danger" type="button" data-rule-delete="${index}">删除</button></li>`;
-            }).join("") : '<li class="muted">尚未添加规则。</li>';
-          };
-          // 类型下拉下面常驻一行中文说明（选中即换），比只靠悬停更容易被发现。
-          const renderRuleHelp = () => {
-            const helpBox = box.querySelector("#scratchRuleHelp");
-            const selected = box.querySelector("#scratchRuleType").value;
-            helpBox.textContent = ruleTypeHelp(selected) || "";
-          };
+          // 规则编辑器实现在 mountRuleEditor，与 Python 作品题共用同一份。
+          const ruleEditor = mountRuleEditor({
+            list: box.querySelector("#scratchRules"),
+            typeSelect: box.querySelector("#scratchRuleType"),
+            addButton: box.querySelector("#scratchRuleAdd"),
+            help: box.querySelector("#scratchRuleHelp"),
+          }, {
+            get: () => s.rules,
+            ruleTypes: RULE_TYPES,
+            labelOf: ruleTypeLabel,
+            helpOf: ruleTypeHelp,
+            onChange: () => renderReadiness(),
+          });
+          const renderRules = () => ruleEditor.render();
           const renderReadiness = () => {
             const payload = scratchPayload();
             const missing = new Set(publishChecks({ ...s, ...payload }));
@@ -1154,99 +1392,17 @@
             },
           });
           box.addEventListener("input", sync); box.addEventListener("change", sync);
-          box.querySelector("#scratchRuleAdd").addEventListener("click", () => {
-            // 添加即填入该类型的示例参数：老师照着改比从零填 opcode 快得多，
-            // 示例值本身也是"这个字段长什么样"的活文档。
-            const selected = box.querySelector("#scratchRuleType").value;
-            const example = RULE_TYPES.find((t) => t.key === selected)?.example || {};
-            s.rules.push({ type: selected, params: { ...example } });
-            renderRules(); renderReadiness();
-          });
-          box.querySelector("#scratchRuleType").addEventListener("change", renderRuleHelp);
-          renderRuleHelp();
-          box.querySelector("#scratchRules").addEventListener("click", (event) => { const button = event.target.closest("[data-rule-delete]"); if (!button) return; s.rules.splice(Number(button.dataset.ruleDelete), 1); renderRules(); renderReadiness(); });
-          box.querySelector("#scratchRules").addEventListener("input", (event) => { const input = event.target.closest("[data-rule-index]"); if (!input) return; s.rules[Number(input.dataset.ruleIndex)].params[input.dataset.ruleParam] = input.value; renderReadiness(); });
-          box.querySelector("#scratchSaveAndEdit")?.addEventListener("click", async (event) => {
-            // Studio 的初始项目属于某一条挑战，未保存的新表单没有 challenge_id，不能
-            // 直接打开。由这次用户手势先开空白页，等创建成功再跳转，避免 await 后被
-            // 浏览器当成弹窗拦截；创建失败则关闭空白页，当前表单保留供继续修改。
-            const { errors, payload } = scratchPayload();
-            if (errors.length) {
-              showModalErrors([{ selector: "#scratchTitle", message: errors[0] }]);
-              toast(errors[0], "error");
-              return;
-            }
-            const trigger = event.currentTarget;
-            trigger.disabled = true;
-            trigger.textContent = "正在保存…";
-            const studioWindow = window.open("about:blank", "_blank");
-            try {
-              const saved = await scratchRequest("/scratch/challenges", { method: "POST", body: JSON.stringify(payload) });
-              Object.assign(s, saved);
-              s.hints_text = (saved.hints || []).join("\n");
-              formState.uploadedVideoId = null;
-              formState.uploadedVideoStatus = null;
-              initialSnapshot = snapshot();
-              const destination = studioStarterUrl(s.id);
-              if (studioWindow) studioWindow.location.replace(destination);
-              else window.location.assign(destination);
-              toast("Scratch 挑战草稿已保存，已打开 Studio。", "success");
-              renderAll();
-            } catch (error) {
-              studioWindow?.close();
-              trigger.disabled = false;
-              trigger.textContent = "保存草稿并在 Studio 中编辑";
-              toast(error.message, "error");
-            }
-          });
-          const upload = async (kind, input) => {
-            const file = input.files?.[0]; input.value = ""; if (!file) return;
-            try {
-              const path = `/scratch/challenges/${s.id}/${kind}`;
-              let updated;
-              if (scratchMockEnabled()) updated = await scratchRequest(path, { method: "POST", body: JSON.stringify({ file_name: file.name, size: file.size }) });
-              else { const data = new FormData(); data.append("file", file); updated = await adminUpload(path, data); }
-              Object.assign(s, updated); s.hints_text = (updated.hints || []).join("\n"); toast("项目已上传"); renderAll();
-            } catch (error) { toast(error.message, "error"); }
-          };
           box.querySelector("#scratchStarterPick").addEventListener("click", () => box.querySelector("#scratchStarterFile").click());
           box.querySelector("#scratchDemoPick").addEventListener("click", () => box.querySelector("#scratchDemoFile").click());
           box.querySelector("#scratchStarterFile").addEventListener("change", () => upload("starter-project", box.querySelector("#scratchStarterFile")));
           box.querySelector("#scratchDemoFile").addEventListener("change", () => upload("demo-project", box.querySelector("#scratchDemoFile")));
 
-          // ---- 量规编辑器 ----
-          const renderRubric = () => {
-            const area = box.querySelector("#scratchRubricArea");
-            const rubric = s.rubric;
-            if (!rubric || !Array.isArray(rubric.criteria) || !rubric.criteria.length) {
-              area.innerHTML = '<p class="muted">未配置量规：批改台将只做「通过 / 不通过」。</p>';
-              return;
-            }
-            const total = rubricPayload(rubric).max_score;
-            area.innerHTML = `<div class="muted" style="margin-bottom:8px">满分 = 各准则最高档分值之和：<strong>${total} 分</strong></div>${
-              rubric.criteria.map((c, ci) => `<div class="scratch-rubric-criterion" style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px">
-                <div style="display:flex;gap:8px;margin-bottom:6px">
-                  <input data-rubric-cid="${ci}" value="${escapeHtml(c.id)}" placeholder="准则 id（英文/数字/下划线）" style="width:150px" />
-                  <input data-rubric-clabel="${ci}" value="${escapeHtml(c.label)}" placeholder="准则名，如：程序逻辑" style="flex:1" />
-                  <button class="btn-text link danger" type="button" data-rubric-cdel="${ci}">删除</button>
-                </div>
-                <input data-rubric-cdesc="${ci}" value="${escapeHtml(c.desc || "")}" placeholder="准则说明（可选）" style="width:100%;box-sizing:border-box;margin-bottom:6px" />
-                ${(c.levels || []).map((lvl, li) => `<div style="display:flex;gap:6px;margin-bottom:4px">
-                  <input data-rubric-llabel="${ci}:${li}" value="${escapeHtml(lvl.label)}" placeholder="档位名，如：完全达成" style="flex:1" />
-                  <input data-rubric-lpoints="${ci}:${li}" type="number" min="0" value="${lvl.points}" placeholder="分值" style="width:90px" />
-                  <button class="btn-text link danger" type="button" data-rubric-ldel="${ci}:${li}">删档</button>
-                </div>`).join("")}
-                <button class="btn-text link" type="button" data-rubric-ladd="${ci}">＋ 加一个档位</button>
-              </div>`).join("")
-            }<button class="btn" id="scratchRubricAdd" type="button">＋ 加一项准则</button>`;
-            box.querySelector("#scratchRubricAdd")?.addEventListener("click", () => {
-              if (!s.rubric) s.rubric = { criteria: [] };
-              s.rubric.criteria.push({ id: `c_${s.rubric.criteria.length + 1}`, label: "", desc: "", levels: [
-                { value: 1, label: "达成", points: 1 }, { value: 0, label: "未达成", points: 0 },
-              ] });
-              renderRubric();
-            });
-          };
+          // ---- 量规编辑器 ----（实现在 mountRubricEditor，与 Python 作品题共用）
+          const rubricEditor = mountRubricEditor(box.querySelector("#scratchRubricArea"), {
+            get: () => s.rubric,
+            set: (value) => { s.rubric = value; },
+          });
+          const renderRubric = () => rubricEditor.render();
           box.querySelector("#scratchRubricDefault").addEventListener("click", () => {
             s.rubric = JSON.parse(JSON.stringify(DEFAULT_RUBRIC));
             renderRubric();
@@ -1269,41 +1425,6 @@
               renderRubric();
               toast("已导入量规。");
             } catch (error) { toast(error.message, "error"); }
-          });
-          box.querySelector("#scratchRubricArea").addEventListener("click", (event) => {
-            const del = event.target.closest("[data-rubric-cdel]");
-            if (del) { s.rubric?.criteria.splice(Number(del.dataset.rubricCdel), 1); renderRubric(); return; }
-            const ladd = event.target.closest("[data-rubric-ladd]");
-            if (ladd) {
-              const c = s.rubric?.criteria[Number(ladd.dataset.rubricLadd)];
-              if (c) {
-                const next = Math.max(-1, ...(c.levels || []).map((l) => l.value)) + 1;
-                c.levels.push({ value: next, label: "", points: 0 });
-                renderRubric();
-              }
-              return;
-            }
-            const ldel = event.target.closest("[data-rubric-ldel]");
-            if (ldel) {
-              const [ci, li] = ldel.dataset.rubricLdel.split(":").map(Number);
-              s.rubric?.criteria[ci]?.levels.splice(li, 1);
-              renderRubric();
-              return;
-            }
-          });
-          box.querySelector("#scratchRubricArea").addEventListener("input", (event) => {
-            const input = event.target;
-            if (input.dataset.rubricCid != null) { s.rubric.criteria[Number(input.dataset.rubricCid)].id = input.value; return; }
-            if (input.dataset.rubricClabel != null) { s.rubric.criteria[Number(input.dataset.rubricClabel)].label = input.value; return; }
-            if (input.dataset.rubricCdesc != null) { s.rubric.criteria[Number(input.dataset.rubricCdesc)].desc = input.value; return; }
-            if (input.dataset.rubricLlabel != null) {
-              const [ci, li] = input.dataset.rubricLlabel.split(":").map(Number);
-              s.rubric.criteria[ci].levels[li].label = input.value; return;
-            }
-            if (input.dataset.rubricLpoints != null) {
-              const [ci, li] = input.dataset.rubricLpoints.split(":").map(Number);
-              s.rubric.criteria[ci].levels[li].points = Number(input.value) || 0; return;
-            }
           });
           scratchRequest("/scratch/challenges/options").then((data) => {
             box.querySelector("#scratchRubricImport").innerHTML = '<option value="">从其它挑战导入量规…</option>' + (data.items || []).filter((item) => item.id !== s.id).map((item) => `<option value="${item.id}">#${item.id} · ${escapeHtml(item.title)}</option>`).join("");
@@ -1481,6 +1602,9 @@
 
         programming() {
           const p = formState.programming;
+          // 作品题与算法题的字段几乎不重叠，分派到独立表单而不是在下面层层 if：
+          // 后者会让"这一段到底哪种形态会看到"变成读代码时的常驻问题。
+          if (p.shape === "project") return buildProjectForm(p);
           const box = document.createElement("div");
           box.className = "card";
           box.style.cssText = "box-shadow:none;background:transparent;padding:0;margin-top:16px";
@@ -3210,7 +3334,26 @@
       document.querySelectorAll('input[name="qLang"]').forEach((r) => {
         r.addEventListener("change", () => {
           formState.subType = document.querySelector('input[name="qLang"]:checked').value;
+          // 作品题只对 Python 开放（后端 ProblemPayload 也会拒）。切到 C++ 时把形态
+          // 拉回算法题，否则表单停在一个保存必然 422 的状态上，而错误信息出现在
+          // 提交之后——那时老师已经填了一屏作品题字段。
+          if (formState.subType !== "python") setShape("algorithm");
           renderAll(); // subType 影响参考代码默认语言
+        });
+      });
+
+      // 形态切换：通过条件按形态分家（后端 PassCondition 分成两组），
+      // 换形态时必须把它带到新形态的默认值上，否则保存会被跨形态取值拒掉。
+      function setShape(shape) {
+        const p = formState.programming;
+        if (p.shape === shape) return;
+        p.shape = shape;
+        p.passCondition = shape === "project" ? "规则全通过" : "全测试点通过";
+      }
+      document.querySelectorAll('input[name="qShape"]').forEach((r) => {
+        r.addEventListener("change", () => {
+          setShape(document.querySelector('input[name="qShape"]:checked').value);
+          renderAll();
         });
       });
 
@@ -3309,6 +3452,24 @@
               memory_limit_mb: t.memoryLimitMb ?? null,
             })),
           };
+          // 形态互斥：后端 shape_fields_are_consistent 会拒绝"作品题带样例"或
+          // "算法题带初始代码"。这里按形态把另一半清空再发，而不是把表单里残留的
+          // 值原样送上去——老师从算法题改成作品题时，之前填的样例不该变成 422。
+          const project = formState.programming;
+          if (project.shape === "project") {
+            payload.programming.shape = "project";
+            payload.programming.input_format = "";
+            payload.programming.output_format = "";
+            payload.programming.samples = [];
+            payload.programming.manual_test_cases = [];
+            Object.assign(payload.programming, projectAssetsPayload(project).payload);
+          } else {
+            payload.programming.shape = "algorithm";
+            payload.programming.starter_code = "";
+            payload.programming.allowed_modules = [];
+            payload.programming.rules = [];
+            payload.programming.rubric = {};
+          }
         }
         return payload;
       }
@@ -3637,6 +3798,10 @@
       let editingId = null;
       const previewMask = document.getElementById("previewMask");
 
+      // 用户自己点过折叠区之后，syncLeftPanel 不再强行改它的开合状态。
+      document.getElementById("taxonomyFold").addEventListener("toggle", (event) => {
+        event.currentTarget.dataset.userToggled = "1";
+      });
       document.getElementById("addBtn").addEventListener("click", () => openModal());
       document.getElementById("modalClose").addEventListener("click", handleClose);
       document.getElementById("modalCancel").addEventListener("click", handleClose);

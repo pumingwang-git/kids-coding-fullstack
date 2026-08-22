@@ -26,6 +26,7 @@ import MistakeReview from "../views/MistakeReview.vue";
 import MistakeStats from "../views/MistakeStats.vue";
 import { ensureSession, session } from "../stores/session";
 import { areaByKey, ensureLearningAreas } from "../stores/learningCatalog";
+import { learningModuleForRoute } from "../stores/studentNavigation";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -327,12 +328,28 @@ router.beforeEach(async (to) => {
     }
     const area = areaByKey(String(to.params.areaKey));
     if (!area) return { name: "learning" };
-    if (
-      to.name === "area-module" &&
-      to.params.moduleKey !== "more" &&
-      !area.modules.some((item) => item.module_key === to.params.moduleKey)
-    ) {
-      return { name: "area-overview", params: { areaKey: area.key } };
+
+    // 模块配置以前只约束兜底的 area-module 占位路由，courses / tasks / explore /
+    // toolbox / 错题本都是独立命名路由，直接敲地址就能绕过——「隐藏」只是把导航项
+    // 摘掉，页面照进。这里改用 learningModuleForRoute 反查，让配置对所有学习路由生效。
+    const isMoreHub = to.name === "area-module" && to.params.moduleKey === "more";
+    const moduleKey = isMoreHub ? null : learningModuleForRoute(to);
+
+    // overview 就是专区首页本身，参与校验会让重定向自环。
+    if (moduleKey && moduleKey !== "overview") {
+      const module = area.modules.find((item) => item.module_key === moduleKey);
+      // 公开接口不下发 hidden，所以「未配置」和「已隐藏」在学生端是同一种情况。
+      if (!module || module.status === "hidden") {
+        return {
+          name: "area-overview",
+          params: { areaKey: area.key },
+          query: { blocked: moduleKey },
+        };
+      }
+      // 规划中的能力一律落到占位页，不放进真实页面。
+      if (module.status === "planning" && to.name !== "area-module") {
+        return { name: "area-module", params: { areaKey: area.key, moduleKey } };
+      }
     }
   }
 

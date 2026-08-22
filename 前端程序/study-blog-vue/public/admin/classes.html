@@ -26,6 +26,7 @@
               <p>班级主数据与可见范围</p>
             </div>
             <div class="head-actions">
+              <button class="btn primary" id="createClassBtn" type="button" hidden>新建班级</button>
               <button class="btn" id="exportClassRelationships" type="button">导出关系</button>
               <button class="btn" id="refreshClasses" type="button">刷新列表</button>
             </div>
@@ -80,7 +81,12 @@
                 <p class="class-detail-kicker">班级详情</p>
                 <h2 id="classDetailTitle">班级</h2>
               </div>
-              <button class="btn" id="closeDetail" type="button">返回列表</button>
+              <div class="class-detail-actions">
+                <button class="btn" id="editClassBtn" type="button" hidden>编辑</button>
+                <button class="btn" id="archiveClassBtn" type="button" hidden>归档</button>
+                <button class="btn danger" id="deleteClassBtn" type="button" hidden>删除班级</button>
+                <button class="btn" id="closeDetail" type="button">返回列表</button>
+              </div>
             </div>
             <dl class="class-detail-grid" id="classDetailFields"></dl>
             <div class="class-detail-error" id="classDetailError" hidden></div>
@@ -188,6 +194,48 @@
           </section>
         </main>
       </div>
+    </div>
+    <div class="modal-mask class-form-mask" id="classFormMask" hidden inert>
+      <section
+        class="modal narrow"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="classFormTitle"
+      >
+        <header class="modal-head">
+          <h2 id="classFormTitle">新建班级</h2>
+          <button class="icon-btn" id="closeClassForm" type="button" aria-label="关闭">×</button>
+        </header>
+        <div class="modal-body form-only class-form-body">
+          <div class="form-field">
+            <label for="classFormName">班级名称 <b class="req">*</b></label>
+            <input id="classFormName" type="text" maxlength="200" autocomplete="off" required />
+            <p class="field-error" id="classFormNameError" hidden></p>
+          </div>
+          <div class="form-field">
+            <label for="classFormCourseId">课包 ID <b class="req">*</b></label>
+            <input id="classFormCourseId" type="number" min="1" step="1" inputmode="numeric" required />
+            <p class="field-error" id="classFormCourseIdError" hidden></p>
+          </div>
+          <div class="class-form-dates">
+            <div class="form-field">
+              <label for="classFormStartAt">开始时间</label>
+              <input id="classFormStartAt" type="datetime-local" />
+            </div>
+            <div class="form-field">
+              <label for="classFormEndAt">结束时间</label>
+              <input id="classFormEndAt" type="datetime-local" />
+            </div>
+          </div>
+          <p class="field-error" id="classFormDateError" hidden></p>
+          <p class="muted" id="classFormHint">班级创建后由服务端确定当前状态。</p>
+        </div>
+        <footer class="modal-foot">
+          <span class="spacer"></span>
+          <button class="btn" id="cancelClassForm" type="button">取消</button>
+          <button class="btn primary" id="saveClassForm" type="button">保存班级</button>
+        </footer>
+      </section>
     </div>
     <div class="modal-mask class-member-import-mask" id="memberBulkImportMask" hidden>
       <section

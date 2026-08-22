@@ -15,6 +15,7 @@ from ..class_enrollment import (
     CLASS_BATCH_SOURCE,
     grant_for_membership,
     has_effective_class_enrollment,
+    revoke_for_class,
     revoke_for_membership,
     sync_class_window,
 )
@@ -437,15 +438,17 @@ def update_class(
 @router.post("/{class_id}/archive")
 def archive_class(class_id: int, request: Request, db: Session = Depends(db_session)):
     require_csrf(request)
-    _require_manager(request, db)
+    admin = _require_manager(request, db)
     row = db.get(ClassGroup, class_id)
     if row is None:
         raise HTTPException(404, "班级不存在。")
     if row.status != "archived":
         row.status = "archived"
         row.updated_at = utcnow()
-        db.commit()
-        db.refresh(row)
+    # Re-archiving also repairs active records left by older code paths.
+    revoke_for_class(db, class_group=row, admin_id=admin.id, request=request)
+    db.commit()
+    db.refresh(row)
     return _serialize_class(row)
 
 

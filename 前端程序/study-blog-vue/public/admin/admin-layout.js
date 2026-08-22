@@ -39,6 +39,7 @@ export const MENU = [
     icon: "🛠",
     children: [
       { label: "学员管理", page: "students.html", crumb: "运营 / 学员管理" },
+      { label: "课程开通", page: "enrollments.html", crumb: "运营 / 课程开通" },
       { label: "班级管理", page: "classes.html", crumb: "运营 / 班级管理" },
       { label: "教学工作台", page: "teaching.html", crumb: "运营 / 教学工作台" },
       { label: "成绩统计", page: "reports.html", crumb: "运营 / 成绩统计" },

@@ -57,6 +57,32 @@ async function csrfToken (scope, forceRefresh = false) {
 }
 
 /** 把非 2xx 响应规范化为统一错误对象 */
+/**
+ * 把 FastAPI 的 `detail` 变成一句人话。
+ *
+ * `detail` 有三种形状：字符串（我们自己 raise 的业务文案）、对象、以及**校验错误的
+ * 数组**（422 的默认形状）。原先直接塞给 `new Error(detail)`，后两种会被 JS 拼成
+ * 字符串 `[object Object]` —— 学生看到的就是"保存失败：[object Object]"，等于没提示。
+ */
+function detailToMessage (detail) {
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        const parts = detail
+            .map(item => {
+                if (typeof item === 'string') return item;
+                if (!item || typeof item !== 'object') return null;
+                const field = Array.isArray(item.loc) ? item.loc[item.loc.length - 1] : null;
+                return [field, item.msg].filter(Boolean).join('：') || null;
+            })
+            .filter(Boolean);
+        return parts.length ? parts.join('；') : null;
+    }
+    if (detail && typeof detail === 'object') {
+        return detail.message || detail.msg || null;
+    }
+    return null;
+}
+
 async function toError (response) {
     let detail = null;
     try {
@@ -65,7 +91,7 @@ async function toError (response) {
         detail = null;
     }
     const err = new Error(
-        (detail && detail.detail) || `请求失败（HTTP ${response.status}）`
+        (detail && detailToMessage(detail.detail)) || `请求失败（HTTP ${response.status}）`
     );
     err.status = response.status;
     err.code = detail && detail.code;
@@ -74,11 +100,17 @@ async function toError (response) {
 }
 
 function send (url, options, token) {
+    // 字符串 body 必须自报 application/json。不写的话浏览器给 fetch 兜的是
+    // `text/plain;charset=UTF-8`，FastAPI 解不出请求体，**所有 JSON 写请求一律 422**
+    // ——`createWork` / `updateWork` / `deleteWork` / `shareWork` 全在这条路上。
+    // FormData（保存 .sb3）不能碰：它要自己带 multipart 边界。
+    const isJsonBody = typeof options.body === 'string';
     return fetch(url, {
         credentials: 'include',
         ...options,
         headers: {
             ...(token ? {'X-CSRF-Token': token} : {}),
+            ...(isJsonBody ? {'Content-Type': 'application/json'} : {}),
             ...(options.headers || {})
         }
     });
@@ -232,11 +264,11 @@ export function uploadChallengeProject (url, sb3Blob, filename = 'project.sb3') 
 // 自由作品是"创作"本身：一人多份、可命名、可公开，公开作品进广场展出。
 // 与闯关（上面那一组）刻意分开：闯关有提交判定和版本冻结，自由作品只有当前版本。
 
-/** POST /api/scratch/works —— 新建空白自由作品（Studio 以 ?mode=free&work_id=N 打开） */
-export function createWork (title) {
+/** POST /api/scratch/works —— 新建空白自由作品；公开状态随创建原子写入。 */
+export function createWork (title, isPublic = false) {
     return request('/api/scratch/works', {
         method: 'POST',
-        body: JSON.stringify({title: title || '未命名作品'})
+        body: JSON.stringify({title: title || '未命名作品', is_public: isPublic})
     });
 }
 

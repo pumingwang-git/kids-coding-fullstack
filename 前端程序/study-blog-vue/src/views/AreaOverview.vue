@@ -4,12 +4,22 @@ import { RouterLink, useRoute } from "vue-router";
 import AppIcon from "../components/AppIcon.vue";
 import { request } from "../services/auth";
 import { areaByKey, modulePath } from "../stores/learningCatalog";
+import { moduleLabel } from "../stores/studentNavigation";
 import { session } from "../stores/session";
 
 const route = useRoute();
 const area = computed(() => areaByKey(String(route.params.areaKey)));
 const displayName = computed(() => session.user?.username || "同学");
 const available = computed(() => area.value?.status === "active");
+
+// 守卫拦截后带回来的模块 key（?blocked=courses）。隐藏或未配置的模块拿不到 label，
+// 所以先查下发数据，再退到静态名表。
+const blockedLabel = computed(() => {
+  const key = String(route.query.blocked || "");
+  if (!key) return "";
+  const configured = area.value?.modules?.find((item) => item.module_key === key);
+  return configured?.label || moduleLabel(key) || "该功能";
+});
 
 // —— 继续学习：后端聚合的最近学习记录（无数据 / 接口失败都退化为空态） ——
 const continueItems = ref([]);
@@ -77,6 +87,10 @@ function formatGalleryTime(iso) {
 </script>
 <template>
   <main class="kids-page area-overview" v-if="area">
+    <!-- 被路由守卫挡回来时说清楚原因：静默重定向会让学生以为收藏的链接坏了 -->
+    <p v-if="blockedLabel" class="area-blocked-tip" role="status">
+      「{{ blockedLabel }}」暂未在{{ area.name }}开放，已返回专区首页。
+    </p>
     <section class="kids-welcome">
       <div>
         <p>{{ displayName }}，欢迎来到{{ area.name }}</p>
@@ -178,7 +192,9 @@ function formatGalleryTime(iso) {
       </div>
       <nav class="quick-links">
         <RouterLink
-          v-for="module in area.modules.filter((item) => item.module_key !== 'overview')"
+          v-for="module in area.modules.filter(
+            (item) => item.module_key !== 'overview' && item.status !== 'hidden',
+          )"
           :key="module.module_key"
           :to="modulePath(area.key, module.module_key)"
           ><AppIcon

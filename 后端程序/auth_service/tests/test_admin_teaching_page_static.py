@@ -33,3 +33,11 @@ def test_teaching_page_has_no_inline_style_and_menu_entry_exists():
     layout = ADMIN / "admin-layout.js"
     assert layout.exists()
     assert "teaching.html" in layout.read_text(encoding="utf-8")
+
+
+def test_teaching_page_empty_and_error_states_are_unambiguous():
+    script = (ADMIN / "teaching.js").read_text(encoding="utf-8")
+    assert 'function renderClassOptions(emptyLabel = "暂无班级")' in script
+    assert 'renderClassOptions("班级加载失败")' in script
+    assert 'select.value = state.classes.length ? String(state.classId) : "";' in script
+    assert '${error.message || "加载失败"} 请刷新页面后重试。' not in script

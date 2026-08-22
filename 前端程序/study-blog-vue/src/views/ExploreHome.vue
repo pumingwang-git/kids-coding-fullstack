@@ -81,11 +81,8 @@ async function createWork() {
   creating.value = true;
   createError.value = "";
   try {
-    const work = await request("/api/scratch/works", {
-      method: "POST",
-      body: JSON.stringify({ title: "未命名作品" }),
-    });
-    window.open(`/scratch-studio/?mode=free&work_id=${work.id}`, "_blank");
+    // 先进入编辑器，第一次保存时才创建服务端作品，避免空作品污染作品列表。
+    window.open("/scratch-studio/?mode=free&draft=1", "_blank");
   } catch (e) {
     createError.value = e.message || "创建失败，请检查网络后重试。";
   } finally {

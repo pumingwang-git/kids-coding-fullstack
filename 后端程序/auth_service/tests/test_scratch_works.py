@@ -31,8 +31,11 @@ from test_scratch import (
 # ---------- 小工具 ----------
 
 
-def new_work(sclient, title="我的第一个作品"):
-    resp = sclient.post("/api/scratch/works", headers=scsrf(sclient), json={"title": title})
+def new_work(sclient, title="我的第一个作品", *, is_public=True):
+    resp = sclient.post(
+        "/api/scratch/works", headers=scsrf(sclient),
+        json={"title": title, "is_public": is_public},
+    )
     assert resp.status_code == 201, resp.text
     return resp.json()
 
@@ -93,6 +96,22 @@ def test_create_list_and_detail(tmp_path: Path):
     assert detail["title"] == "小猫散步"
     assert detail["limits"]["max_bytes"] > 0     # Studio 需要的保存上限
     assert detail["content_url"] is None
+
+
+def test_create_defaults_private_and_accepts_explicit_visibility(tmp_path: Path):
+    app = scratch_env(tmp_path)
+    sclient = student_login(app)
+
+    private = sclient.post(
+        "/api/scratch/works", headers=scsrf(sclient), json={"title": "未完成草稿"},
+    )
+    assert private.status_code == 201, private.text
+    assert private.json()["is_public"] is False
+    assert gallery(sclient).json()["items"] == []
+
+    public = new_work(sclient, title="准备展出的作品", is_public=True)
+    assert public["is_public"] is True
+    assert [item["id"] for item in gallery(sclient).json()["items"]] == [public["id"]]
 
 
 def test_work_round_trip_and_dedup(tmp_path: Path):

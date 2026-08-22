@@ -125,6 +125,10 @@ def lesson_block_open(db: Session, user: User | None, lesson: CourseLesson,
     试看前 N 块（first_n）→ 前 trial_block_count 块开放，其余拒绝；
     其余策略（含 video_minutes 二期）→ 拒绝。
     """
+    # 课包不可见时所有块都不可见。这个检查必须先于 granted，避免调用方缓存的
+    # 旧权限结果或误传 True 绕过发布状态。
+    if not course_visible(db.get(Course, lesson.course_id)):
+        return False
     # ``granted`` 是调用方按课时缓存的真实 Gate A 结论；传错会静默放行，不能猜测。
     if granted is None:
         granted = lesson_access(db, user, lesson) is Access.GRANTED

@@ -43,11 +43,15 @@ const PROGRAMMER_AREA = {
   key: "programmer",
   name: "程序员专区",
   theme_key: "programmer",
+  // 题库和工具箱现在由后端种子下发到每个专区（原先是前端硬编码兜底），
+  // fixture 与 /api/learning-areas 的真实返回保持一致。
   modules: [
     { module_key: "overview", label: "概览", status: "available" },
     { module_key: "paths", label: "学习路线", status: "available" },
     { module_key: "courses", label: "课程", status: "available" },
     { module_key: "projects", label: "实战项目", status: "available" },
+    { module_key: "question-bank", label: "题库", status: "available" },
+    { module_key: "toolbox", label: "工具箱", status: "available" },
   ],
 };
 

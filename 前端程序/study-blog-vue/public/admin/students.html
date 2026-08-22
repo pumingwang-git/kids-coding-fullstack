@@ -76,51 +76,6 @@
             </nav>
           </section>
 
-          <section class="card enrollment-card" aria-labelledby="enrollmentTitle">
-            <div class="student-section-head">
-              <div>
-                <h2 id="enrollmentTitle">课程开通</h2>
-                <p class="muted" id="enrollmentMeta" aria-live="polite">加载开通记录</p>
-              </div>
-            </div>
-            <form class="enrollment-form" id="enrollmentGrantForm">
-              <div id="enrollmentStudentPicker"></div>
-              <label>
-                <span>已发布课程</span>
-                <select id="enrollmentCourse" required>
-                  <option value="">加载中</option>
-                </select>
-              </label>
-              <label>
-                <span>开始时间（可选）</span>
-                <input id="enrollmentOpenedAt" type="datetime-local" />
-              </label>
-              <label>
-                <span>到期时间（可选）</span>
-                <input id="enrollmentExpiresAt" type="datetime-local" />
-              </label>
-              <button class="btn" type="submit">开通课程</button>
-            </form>
-            <div class="table-wrap enrollment-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>学员</th>
-                    <th>课程</th>
-                    <th>开通窗口</th>
-                    <th>状态</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody id="enrollmentRows"></tbody>
-              </table>
-            </div>
-            <div class="empty" id="enrollmentEmpty" hidden>暂无课程开通记录</div>
-            <div class="list-error" id="enrollmentError" hidden>
-              <span id="enrollmentErrorText">开通记录加载失败。</span>
-              <button class="btn" id="retryEnrollments" type="button">重新加载</button>
-            </div>
-          </section>
         </main>
       </div>
     </div>

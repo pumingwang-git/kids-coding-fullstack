@@ -305,15 +305,51 @@ class FillAnswer(Base):
 
 
 class ProgrammingDetail(Base):
-    """编程题详情：与测试数据/参考代码物理分离。"""
+    """编程题详情：与测试数据/参考代码物理分离。
+
+    `shape` 是操作题的**形态**，第二个枚举维度，与 `Problem.sub_type`（语言）正交：
+
+      algorithm  标准输入输出的算法题。判分靠 `test_cases` 逐点比对，
+                 `input_format` / `output_format` / 样例 / 隐藏测试点都为它服务。
+      project    作品题——画线、画气球那一类。**没有 stdin/stdout**，
+                 判分靠 `rules_json`（AST 静态规则）+ `rubric_json`（教师量规）。
+
+    **为什么形态在这张表而不在 `problems`**：它只在操作题下有意义，`problems` 已经
+    为操作题背了一个 `sub_type` 稀疏列，再加一个就是把主表当操作题的私有表用。
+    这张 1:1 明细表本来就是放操作题差异的地方。代价是按形态筛题目列表要 join——
+    真需要时再加冗余快照列（`lesson_problem_blocks.problem_type` 已有先例），
+    不要为了一个还没人提的筛选先污染主表。
+
+    **两种形态的字段互斥，由 `schemas.ProgrammingPayload` 在写入前闸住**：算法题不许带
+    starter_code / rules / rubric，作品题不许带 input_format / output_format / 样例 /
+    隐藏测试点。不互斥的话，一道题从算法改成作品之后，库里会同时留着两套判分依据，
+    而"到底按哪套判"这个问题没有任何一处代码能回答。
+
+    `allowed_modules` / `rules_json` / `rubric_json` 都是 JSON 文本：SQLite 与
+    PostgreSQL 都要支持，且只整存整取、不做 SQL 内查询，用 JSON 列换不来检索能力
+    （与 `ScratchChallenge` 同款取舍）。
+    """
     __tablename__ = "programming_details"
     problem_id: Mapped[int] = mapped_column(ForeignKey("problems.id", ondelete="CASCADE"), primary_key=True)
+    shape: Mapped[str] = mapped_column(String(16), default="algorithm", server_default="algorithm")
     input_format: Mapped[str] = mapped_column(Text, default="")
     output_format: Mapped[str] = mapped_column(Text, default="")
     hints: Mapped[str] = mapped_column(Text, default="无")
     pass_condition: Mapped[str] = mapped_column(String(32), default="编译通过")
     time_limit_ms: Mapped[int] = mapped_column(Integer, default=1000)
     memory_limit_mb: Mapped[int] = mapped_column(Integer, default=256)
+    # ---- 以下四列仅 shape="project" 使用 ----
+    # 学生打开编辑器时预置的代码骨架。作品题没有"输入格式"可写，起手式全靠它
+    # （Runestone ActiveCode 的 starter code、nbgrader 的 answer cell 同一角色）。
+    starter_code: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # 允许 import 的模块白名单，JSON 数组。空数组 = 不限制。
+    # 与 `ScratchChallenge.allowed_extensions` 同一角色：作品题要能说清"这节课只准用 turtle"。
+    allowed_modules: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
+    # 声明式 AST 判定规则，JSON 数组。类型表与写入校验在 `app/python_rules.py`。
+    rules_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
+    # 教师量规：准则 × 档位 × 分值。`{}` = 不用量规，批改只给通过/不通过。
+    # 结构与校验在 `app/rubric.py`，与 Scratch 共用同一份，不另立一套。
+    rubric_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}")
 
 
 class ReferenceSolution(Base):

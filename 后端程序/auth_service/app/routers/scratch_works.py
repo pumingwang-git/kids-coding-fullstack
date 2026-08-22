@@ -23,7 +23,7 @@
 
 ## 端点
 
-    POST   /api/scratch/works                  {title?}             新建自由作品
+    POST   /api/scratch/works                  {title?,is_public?}  新建自由作品（默认私密）
     GET    /api/scratch/works                                         我的作品列表
     GET    /api/scratch/works/{id}                                    编辑上下文（本人）
     PUT    /api/scratch/works/{id}             multipart(file)       保存当前版本
@@ -39,6 +39,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -67,6 +68,9 @@ GALLERY_DEFAULT_PAGE_SIZE = 20
 
 class WorkCreate(BaseModel):
     title: str = Field(default="未命名作品", min_length=1, max_length=TITLE_MAX)
+    # 新建与上传是两次 HTTP 请求。默认私密可确保上传失败时空草稿不会出现在广场；
+    # 显式选择公开的客户端则应在创建请求里一并传入，避免再靠后续 PATCH 修正。
+    is_public: bool = False
 
 
 class WorkPatch(BaseModel):
@@ -83,7 +87,7 @@ class WorkShare(BaseModel):
 
 
 def _work_payload(work: ScratchWork, *, mine: bool, author: User | None = None,
-                  with_content_url: bool = True) -> dict:
+                  with_content_url: bool = True, cover_base: str = "/api/scratch/works") -> dict:
     """自由作品的对外形状。mine=True 时带 `content_url`（私密作品只有本人才有取回路径）。"""
     payload: dict = {
         "id": work.id,
@@ -99,6 +103,9 @@ def _work_payload(work: ScratchWork, *, mine: bool, author: User | None = None,
         "created_at": as_utc(work.created_at).isoformat() if work.created_at else None,
         "updated_at": as_utc(work.updated_at).isoformat() if work.updated_at else None,
         "has_content": bool(work.sb3_key),
+        # Scratch VM does not expose a server-side thumbnail, so expose a stable
+        # generated cover rather than making clients guess a missing field.
+        "thumbnail_url": f"{cover_base}/{work.id}/cover.svg",
     }
     if author is not None:
         payload["author"] = {"id": author.id, "username": author.username}
@@ -115,6 +122,28 @@ def _own_work(db: Session, request: Request, work_id: int) -> tuple[User, Scratc
     if work is None or work.student_id != user.id:
         raise HTTPException(404, "作品不存在。")
     return user, work
+
+
+def _cover_svg(work: ScratchWork) -> str:
+    title = html.escape((work.title or "未命名作品")[:32])
+    # A compact, deterministic cover that works before and after an .sb3 upload.
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300">
+<rect width="480" height="300" fill="#f6f7fb"/>
+<rect x="24" y="24" width="432" height="252" rx="18" fill="#ffffff" stroke="#d9deea"/>
+<rect x="48" y="52" width="384" height="164" rx="10" fill="#e8f4ff"/>
+<circle cx="128" cy="134" r="42" fill="#ffbf00"/>
+<circle cx="112" cy="126" r="5" fill="#273142"/><circle cx="144" cy="126" r="5" fill="#273142"/>
+<path d="M112 148c10 9 22 9 32 0" fill="none" stroke="#273142" stroke-width="5" stroke-linecap="round"/>
+<rect x="202" y="100" width="172" height="14" rx="7" fill="#5b6ee1" opacity=".9"/>
+<rect x="202" y="128" width="132" height="12" rx="6" fill="#b9c4df"/>
+<rect x="202" y="153" width="96" height="12" rx="6" fill="#b9c4df"/>
+<text x="48" y="246" font-family="Arial,sans-serif" font-size="20" font-weight="700" fill="#273142">{title}</text>
+</svg>'''
+
+
+def _cover_response(work: ScratchWork) -> Response:
+    return Response(content=_cover_svg(work), media_type="image/svg+xml",
+                    headers={"Cache-Control": "private, max-age=60"})
 
 
 def _save_bytes(work: ScratchWork, raw: bytes, settings) -> None:
@@ -144,7 +173,7 @@ def create_work(payload: WorkCreate, request: Request, db: Session = Depends(db_
     require_csrf(request)
     user = current_user(request, db)
     work = ScratchWork(student_id=user.id, title=payload.title.strip() or "未命名作品",
-                       is_public=True)
+                       is_public=payload.is_public)
     db.add(work)
     db.commit()
     db.refresh(work)
@@ -220,6 +249,12 @@ def work_content(work_id: int, request: Request, db: Session = Depends(db_sessio
         headers={"Content-Disposition": f'attachment; filename="work-{work.id}.sb3"',
                  "Cache-Control": "private, no-store"},
     )
+
+
+@router.get("/works/{work_id}/cover.svg")
+def work_cover(work_id: int, request: Request, db: Session = Depends(db_session)):
+    _user, work = _own_work(db, request, work_id)
+    return _cover_response(work)
 
 
 @router.patch("/works/{work_id}")
@@ -351,7 +386,8 @@ def gallery(request: Request, db: Session = Depends(db_session),
         "total": total,
         "page": page,
         "page_size": size,
-        "items": [_work_payload(w, mine=False, author=authors.get(w.student_id)) for w in rows],
+        "items": [_work_payload(w, mine=False, author=authors.get(w.student_id),
+                                 cover_base="/api/scratch/gallery") for w in rows],
     }
 
 
@@ -365,7 +401,7 @@ def gallery_detail(work_id: int, request: Request, db: Session = Depends(db_sess
     db.commit()
     db.refresh(work)
     author = db.get(User, work.student_id)
-    payload = _work_payload(work, mine=False, author=author)
+    payload = _work_payload(work, mine=False, author=author, cover_base="/api/scratch/gallery")
     payload["mine"] = work.student_id == user.id
     return payload
 
@@ -385,3 +421,10 @@ def gallery_content(work_id: int, request: Request, db: Session = Depends(db_ses
         headers={"Content-Disposition": f'attachment; filename="work-{work.id}.sb3"',
                  "Cache-Control": "private, no-store"},
     )
+
+
+@router.get("/gallery/{work_id}/cover.svg")
+def gallery_cover(work_id: int, request: Request, db: Session = Depends(db_session)):
+    current_user(request, db)
+    work = _gallery_visible(db, work_id)
+    return _cover_response(work)

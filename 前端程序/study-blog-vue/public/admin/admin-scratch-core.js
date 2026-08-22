@@ -1,5 +1,12 @@
 // Scratch 管理端纯逻辑：内容块判定、挑战表单校验、预览 URL。
 // 与 DOM/网络无关，nodes.js / questions.html 的 Scratch 扩展共用，vitest 直接测这里。
+//
+// 规则扁平化、量规归一化、规则帮助文案这三件与题型无关，已抽去
+// `admin-authoring-core.js` 与 Python 作品题共用。这里**原样再导出**，
+// 让既有 import 点（questions.html / nodes.js / scratch-review.js / vitest）不用改。
+import { flattenRules, ruleHelpText, ruleToForm, rubricPayload } from "./admin-authoring-core.js";
+
+export { ruleToForm, rubricPayload };
 
 // 第一阶段允许扩展白名单（与后端 ScratchChallenge.allowed_extensions 契约一致，
 // 见开发文档 21 §5.1：只允许声明式、无硬件/云变量的官方扩展）。
@@ -155,25 +162,13 @@ export const RULE_TYPES = [
   },
 ];
 
-// 后端冻结的规则原文（扁平）→ 表单状态（{type, params}）。type/label 之外
-// 的键都是参数；label 是学生可见文案，不进参数表（表单里不编辑 label）。
-export function ruleToForm(rule) {
-  const params = { ...(rule || {}) };
-  delete params.type;
-  delete params.label;
-  return { type: rule?.type || "", params };
-}
-
 export function ruleTypeLabel(key) {
   return RULE_TYPES.find((t) => t.key === key)?.label || key || "未知规则";
 }
 
-// 悬停/帮助区用的一句话说明。
+// 悬停/帮助区用的一句话说明。规则类型表的渲染逻辑在共用件里。
 export function ruleTypeHelp(key) {
-  const type = RULE_TYPES.find((t) => t.key === key);
-  if (!type) return null;
-  const hints = type.fields.map((f) => `· ${f.label}：${f.hint}`).join("\n");
-  return `${type.desc}\n\n参数怎么填：\n${hints}\n\n示例：${JSON.stringify(type.example, null, 0)}`;
+  return ruleHelpText(key, RULE_TYPES);
 }
 
 // ---- 内容块 ----
@@ -257,37 +252,9 @@ export function buildChallengePayload(form) {
   const title = String(form.title || "").trim();
   if (!title) errors.push("请填写挑战标题。");
   const allowed = (form.allowed_extensions || []).filter((key) => EXTENSION_OPTIONS.some((o) => o.key === key));
-  const rules = [];
-  for (const rule of form.rules || []) {
-    if (!rule || !rule.type) continue;
-    const type = RULE_TYPES.find((t) => t.key === rule.type);
-    const flat = { type: rule.type };
-    for (const field of type?.fields || []) {
-      const raw = rule.params?.[field.key];
-      if (field.type === "number") {
-        if (raw !== "" && raw != null) flat[field.key] = Number(raw);
-      } else if (field.type === "list") {
-        // 逗号/顿号/换行分隔的多值参数（如 require_initialization 的 attributes）
-        const items = String(raw ?? "").split(/[,，、\n]/).map((s) => s.trim()).filter(Boolean);
-        if (items.length) flat[field.key] = items;
-      } else if (field.type === "json") {
-        // 结构描述类参数（require_structure 的 pattern）：填了就必须是合法 JSON，
-        // 坏 JSON 存进库会让全班提交判不出来，所以在保存前就拦下。
-        const text = String(raw ?? "").trim();
-        if (text) {
-          try {
-            flat[field.key] = JSON.parse(text);
-          } catch {
-            errors.push(`规则「${type?.label || rule.type}」的「${field.label}」不是合法 JSON，请检查格式。`);
-          }
-        }
-      } else if (raw != null && String(raw).trim() !== "") {
-        flat[field.key] = String(raw).trim();
-      }
-    }
-    // 后端 rules_json 是扁平结构（参数与 type 同级），不要包 params。
-    rules.push(flat);
-  }
+  // 扁平化在 admin-authoring-core.js，与 Python 作品题共用同一份实现。
+  const { rules, errors: ruleErrors } = flattenRules(form.rules, RULE_TYPES);
+  errors.push(...ruleErrors);
   const hints = String(form.hints_text || "")
     .split("\n")
     .map((line) => line.trim())
@@ -342,29 +309,6 @@ export const DEFAULT_RUBRIC = {
     ] },
   ],
 };
-
-// 归一化为后端 ChallengePayload.rubric 的形状；空/无准则 → {}（= 不用量规）。
-// `max_score` 由前端算出（各准则最高档之和），不交给老师手填——手填错到学生看到
-// 分数才发现的概率极高（文档 23 §附录 A）。
-export function rubricPayload(rubric) {
-  if (!rubric || !Array.isArray(rubric.criteria) || !rubric.criteria.length) return {};
-  const criteria = rubric.criteria.map((c) => ({
-    id: c.id,
-    label: String(c.label || "").trim(),
-    desc: String(c.desc || ""),
-    levels: (c.levels || []).map((lvl) => ({
-      value: lvl.value,
-      label: String(lvl.label || "").trim(),
-      points: Number(lvl.points) || 0,
-      desc: String(lvl.desc || ""),
-    })),
-  }));
-  const max_score = criteria.reduce(
-    (sum, c) => sum + Math.max(...c.levels.map((l) => l.points || 0), 0),
-    0,
-  );
-  return { max_score, criteria };
-}
 
 export const SUBMISSION_STATUS_LABEL = {
   passed: "已通过",

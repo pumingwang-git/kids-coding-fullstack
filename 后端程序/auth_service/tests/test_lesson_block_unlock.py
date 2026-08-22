@@ -20,7 +20,8 @@ from test_admin_course_content import block_payload
 from test_admin_courses import add_section, create_category, create_course
 from test_exam import admin_login, build_app, scsrf, student_login
 
-from app.models import LessonBlockCompletion
+from app.course_access import lesson_block_open
+from app.models import Course, CourseLesson, LessonBlockCompletion
 
 # ---------- 辅助 ----------
 
@@ -77,6 +78,19 @@ def reasons(sclient, lesson_id):
     resp = sclient.get(f"/api/lessons/{lesson_id}")
     assert resp.status_code == 200, resp.text
     return [b["lock_reason"] for b in resp.json()["blocks"]]
+
+
+def test_block_gate_rejects_unpublished_course_even_when_granted_is_true(tmp_path: Path):
+    built = build_lesson_with_blocks(build_app(tmp_path), [{"block_type": "markdown"}])
+    db = built["client"].app.state.session_factory()
+    try:
+        course = db.get(Course, built["course_id"])
+        course.status = "draft"
+        db.commit()
+        lesson = db.get(CourseLesson, built["lesson_id"])
+        assert lesson_block_open(db, None, lesson, 0, granted=True) is False
+    finally:
+        db.close()
 
 
 def complete(sclient, lesson_id, block_id, **body):

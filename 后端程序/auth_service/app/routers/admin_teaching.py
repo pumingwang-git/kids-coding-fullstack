@@ -25,6 +25,9 @@ from .admin_auth import db_session
 router = APIRouter(prefix="/api/admin/teaching", tags=["admin-teaching"])
 
 
+
+
+
 def _readable_class_or_404(class_id: int, request: Request, db: Session) -> ClassGroup:
     admin_classes._require_class_reader(request, db, class_id)
     class_group = db.get(ClassGroup, class_id)

@@ -80,6 +80,38 @@ def revoke_for_membership(
     return len(rows)
 
 
+def revoke_for_class(
+    db: Session, *, class_group: ClassGroup, admin_id: int, request
+) -> int:
+    """Disable every active grant owned by a class when it is archived."""
+    rows = db.scalars(
+        select(Enrollment).where(
+            Enrollment.source == CLASS_BATCH_SOURCE,
+            Enrollment.class_id == class_group.id,
+            Enrollment.status == "active",
+        )
+    ).all()
+    for row in rows:
+        row.status = "disabled"
+        audit(
+            db,
+            request.app.state.settings,
+            "enrollment_status_change",
+            "success",
+            client_ip(request),
+            admin_id,
+            resource_type="enrollment",
+            resource_id=row.id,
+            summary={
+                **_grant_summary(row),
+                "old_status": "active",
+                "new_status": "disabled",
+                "reason_code": "class_archived",
+            },
+        )
+    return len(rows)
+
+
 def sync_class_window(db: Session, *, class_group: ClassGroup, admin_id: int, request) -> int:
     student_ids = db.scalars(
         select(ClassMember.student_id).where(

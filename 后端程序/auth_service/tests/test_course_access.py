@@ -45,6 +45,34 @@ def test_unpublished_course_is_404_for_students(tmp_path: Path):
     assert student.get("/api/courses").json()["total"] == 0
 
 
+def test_unpublished_course_video_block_cannot_mint_play_token(tmp_path: Path):
+    """块级 first_n 判定不能绕过课包发布状态。"""
+    app = build_app(tmp_path)
+    admin, headers = admin_login(app)
+    cat = create_category(admin, headers).json()
+    cid = create_course(admin, headers, cat["id"]).json()["id"]
+    section = add_section(admin, headers, cid, "第一章").json()
+    video = seed_ready_video(app)
+    lesson = admin.post(
+        f"/api/admin/sections/{section['id']}/lessons",
+        headers=headers,
+        json={"title": "草稿试看", "open_policy": "first_n", "trial_block_count": 1},
+    ).json()
+    block = admin.post(
+        f"/api/admin/lessons/{lesson['id']}/blocks",
+        headers=headers,
+        json=block_payload("video", source_type="platform", video_id=video["video_id"]),
+    ).json()
+
+    student = student_login(app)
+    resp = student.post(
+        f"/api/lessons/{lesson['id']}/play",
+        headers=scsrf(student),
+        json={"block_id": block["id"]},
+    )
+    assert resp.status_code == 404
+
+
 def test_catalog_never_carries_content_or_video_id(tmp_path: Path):
     """目录树的防泄露回归线。"""
     app = build_app(tmp_path)

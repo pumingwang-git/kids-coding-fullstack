@@ -218,6 +218,28 @@ describe("CourseDetail.vue 课包简介", () => {
     expect(html).toContain("<h1>课程简介</h1>");
     expect(html).toContain("<li>系统讲解</li>");
   });
+
+  it("已开通课包不显示课时试看标签", async () => {
+    request.mockResolvedValue({
+      course: {
+        id: 9, title: "CSP-J 冲刺营", description: "", difficulty: "beginner",
+        total_minutes: 90,
+      },
+      enrolled: true,
+      sections: [{
+        id: 1,
+        title: "第一章",
+        lessons: [
+          { id: 11, title: "整节课", content_kind: "video", unlocked: true, open_policy: "whole" },
+          { id: 12, title: "前两块", content_kind: "video", unlocked: true, open_policy: "first_n", trial_block_count: 2 },
+        ],
+      }],
+    });
+    const wrapper = mount(CourseDetail);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(wrapper.findAll(".trial")).toHaveLength(0);
+    expect(wrapper.find(".facts").text()).toContain("已开通");
+  });
 });
 
 describe("LessonPlayer.vue 外链视频地址适配", () => {

@@ -41,6 +41,24 @@ def test_classes_page_uses_global_role_options_and_select_transfer_picker():
     assert "Array.isArray(selectOptions)" in admin_ui
 
 
+def test_classes_page_wires_master_data_actions_and_capability_gate():
+    classes_js = (ADMIN_DIR / "classes.js").read_text(encoding="utf-8")
+    classes_html = (ADMIN_DIR / "classes.html").read_text(encoding="utf-8")
+    assert 'adminRequest("/me")' in classes_js
+    assert "can_manage_classes" in classes_js
+    assert 'method: editingClassId ? "PUT" : "POST"' in classes_js
+    assert 'adminRequest(`/classes/${row.id}/archive`' in classes_js
+    assert 'adminRequest(`/classes/${row.id}`, { method: "DELETE" })' in classes_js
+    for element_id in (
+        "createClassBtn",
+        "editClassBtn",
+        "archiveClassBtn",
+        "deleteClassBtn",
+        "classFormMask",
+    ):
+        assert f'id="{element_id}"' in classes_html
+
+
 def test_classes_page_clears_relationship_state_after_load_failure_and_css_is_balanced():
     classes_js = (ADMIN_DIR / "classes.js").read_text(encoding="utf-8")
     css = (ADMIN_DIR / "admin.css").read_text(encoding="utf-8")

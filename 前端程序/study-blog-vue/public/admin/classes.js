@@ -1,7 +1,17 @@
 // 班级列表与详情：可见范围由后端返回，关系变更只调用对应的单条接口。
 import { initLayout } from "./admin-layout.js";
 import { adminDownload, adminRequest } from "./admin-api.js";
-import { confirmDialog, escapeHtml, fmtTime, promptDialog, toast } from "./admin-ui.js";
+import {
+  closeMask,
+  confirmDialog,
+  escapeHtml,
+  fmtTime,
+  openMask,
+  promptDialog,
+  toIso,
+  toLocalInput,
+  toast,
+} from "./admin-ui.js";
 import { mountStudentPicker } from "./student-picker.js";
 
 initLayout();
@@ -15,6 +25,9 @@ let roleOptions = [];
 let memberHistoryVisible = false;
 let teacherHistoryVisible = false;
 let memberBulkPicker = null;
+let canManageClasses = false;
+let editingClassId = null;
+let classFormRelease = null;
 
 function statusClass(status) {
   return `class-status class-status-${String(status || "unknown").replace(/[^a-z0-9_-]/gi, "")}`;
@@ -57,6 +70,10 @@ function renderDetail(row) {
         `<div class="class-detail-field"><dt>${label}</dt><dd>${escapeHtml(String(value))}</dd></div>`,
     )
     .join("");
+  const editable = canManageClasses && row.status !== "archived";
+  $("editClassBtn").hidden = !editable;
+  $("archiveClassBtn").hidden = !canManageClasses || row.status === "archived";
+  $("deleteClassBtn").hidden = !canManageClasses;
   $("classDetail").hidden = false;
 }
 
@@ -88,7 +105,7 @@ function renderMembers() {
       <td><span class="tag ${row.status === "active" ? "" : "gray"}">${escapeHtml(row.status_label)}</span></td>
       <td>${row.enrollment_status_label ? `<span class="tag ${row.enrollment_status === "active" ? "" : "gray"}">${escapeHtml(row.enrollment_status_label)}</span>` : "-"}</td>
       <td>${relationTime(row.joined_at)}</td><td>${relationTime(row.left_at)}</td>
-      <td class="class-relation-actions">${row.status === "active" ? `<button class="btn-text" type="button" data-member-withdraw="${row.id}">退班</button><button class="btn-text" type="button" data-member-transfer="${row.id}">转班</button>` : ""}</td>
+      <td class="class-relation-actions">${canManageClasses && row.status === "active" ? `<button class="btn-text" type="button" data-member-withdraw="${row.id}">退班</button><button class="btn-text" type="button" data-member-transfer="${row.id}">转班</button>` : ""}</td>
     </tr>`,
     )
     .join("");
@@ -124,7 +141,7 @@ function renderTeachers() {
     <tr class="${row.ended_at == null ? "" : "class-history-row"}">
       <td><strong class="class-relation-primary">${escapeHtml(relationName(row, "teacher"))}</strong><small class="class-relation-secondary">#${escapeHtml(row.admin_user_id)}</small></td><td>${escapeHtml(row.role_in_class_label)}</td>
       <td>${relationTime(row.assigned_at)}</td><td>${relationTime(row.ended_at)}</td>
-      <td class="class-relation-actions">${row.ended_at == null ? `<button class="btn-text" type="button" data-teacher-unassign="${row.id}">结束</button>` : ""}</td>
+      <td class="class-relation-actions">${canManageClasses && row.ended_at == null ? `<button class="btn-text" type="button" data-teacher-unassign="${row.id}">结束</button>` : ""}</td>
     </tr>`,
     )
     .join("");
@@ -132,6 +149,137 @@ function renderTeachers() {
 
 function relationError(error) {
   return error?.message || "请求失败，请稍后再试。";
+}
+
+function setManageControls() {
+  [
+    "createClassBtn",
+    "syncClassEnrollments",
+    "enrollMemberForm",
+    "openMemberBulkImport",
+    "assignTeacherForm",
+  ].forEach((id) => {
+    const node = $(id);
+    if (node) node.hidden = !canManageClasses;
+  });
+  if (!canManageClasses) {
+    $("editClassBtn").hidden = true;
+    $("archiveClassBtn").hidden = true;
+    $("deleteClassBtn").hidden = true;
+  }
+}
+
+function setClassFormError(id, message) {
+  const field = $(id);
+  field.hidden = !message;
+  field.textContent = message || "";
+}
+
+function readClassForm() {
+  const name = $("classFormName").value.trim();
+  const courseId = Number($("classFormCourseId").value);
+  const startAt = $("classFormStartAt").value;
+  const endAt = $("classFormEndAt").value;
+  setClassFormError("classFormNameError", name ? "" : "请填写班级名称。");
+  setClassFormError(
+    "classFormCourseIdError",
+    Number.isInteger(courseId) && courseId > 0 ? "" : "请输入有效的课包 ID。",
+  );
+  const invalidDates = startAt && endAt && new Date(endAt) < new Date(startAt);
+  setClassFormError("classFormDateError", invalidDates ? "结束时间不能早于开始时间。" : "");
+  if (!name || !Number.isInteger(courseId) || courseId < 1 || invalidDates) return null;
+  return {
+    name,
+    course_id: courseId,
+    start_at: toIso(startAt),
+    end_at: toIso(endAt),
+  };
+}
+
+function closeClassForm() {
+  if (!$("classFormMask").classList.contains("show")) return;
+  closeMask($("classFormMask"), classFormRelease);
+  classFormRelease = null;
+  editingClassId = null;
+}
+
+function openClassForm(row = null) {
+  if (!canManageClasses) return;
+  editingClassId = row?.id || null;
+  $("classFormTitle").textContent = row ? "编辑班级" : "新建班级";
+  $("classFormHint").textContent = row
+    ? row.status === "archived"
+      ? "当前班级不可编辑。"
+      : "修改结束时间会同步当前成员的课程开通期限。"
+    : "班级创建后由服务端确定当前状态。";
+  $("classFormName").value = row?.name || "";
+  $("classFormCourseId").value = row?.course_id || "";
+  $("classFormStartAt").value = toLocalInput(row?.start_at);
+  $("classFormEndAt").value = toLocalInput(row?.end_at);
+  setClassFormError("classFormNameError", "");
+  setClassFormError("classFormCourseIdError", "");
+  setClassFormError("classFormDateError", "");
+  classFormRelease = openMask($("classFormMask"), { focusSelector: "#classFormName" });
+}
+
+async function saveClassForm() {
+  const payload = readClassForm();
+  if (!payload) return;
+  const button = $("saveClassForm");
+  button.disabled = true;
+  try {
+    await adminRequest(editingClassId ? `/classes/${editingClassId}` : "/classes", {
+      method: editingClassId ? "PUT" : "POST",
+      body: JSON.stringify(payload),
+    });
+    toast(editingClassId ? "班级信息已更新" : "班级已创建");
+    closeClassForm();
+    await loadClasses();
+  } catch (error) {
+    toast(relationError(error), "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function archiveClass() {
+  const row = classes.find((item) => item.id === selectedId);
+  if (!row || !canManageClasses) return;
+  const ok = await confirmDialog({
+    title: "归档班级",
+    message: `确认归档“${row.name}”吗？`,
+    detail: "归档后不能新增成员或指派教师，但历史关系和退出操作仍会保留。",
+    confirmText: "归档",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await adminRequest(`/classes/${row.id}/archive`, { method: "POST" });
+    toast("班级归档完成");
+    await loadClasses();
+  } catch (error) {
+    toast(relationError(error), "error");
+  }
+}
+
+async function deleteClass() {
+  const row = classes.find((item) => item.id === selectedId);
+  if (!row || !canManageClasses) return;
+  const ok = await confirmDialog({
+    title: "删除班级",
+    message: `确认删除“${row.name}”吗？`,
+    detail: "只有没有成员和带班关系的班级可以删除，删除后不可恢复。",
+    confirmText: "删除",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await adminRequest(`/classes/${row.id}`, { method: "DELETE" });
+    toast("班级已删除");
+    await loadClasses();
+  } catch (error) {
+    toast(relationError(error), "error");
+  }
 }
 
 async function loadRelations(classId) {
@@ -206,7 +354,9 @@ async function loadClasses() {
   $("classError").hidden = true;
   $("classRows").innerHTML = '<tr><td class="class-loading" colspan="6">加载中</td></tr>';
   try {
-    const payload = await adminRequest("/classes");
+    const [me, payload] = await Promise.all([adminRequest("/me"), adminRequest("/classes")]);
+    canManageClasses = Boolean(me?.can_manage_classes);
+    setManageControls();
     classes = payload.items || [];
     roleOptions = Array.isArray(payload.role_options) ? payload.role_options : [];
     renderList();
@@ -319,6 +469,13 @@ $("classRows").addEventListener("click", (event) => {
 });
 $("classSearch").addEventListener("input", renderList);
 $("refreshClasses").addEventListener("click", loadClasses);
+$("createClassBtn").addEventListener("click", () => openClassForm());
+$("editClassBtn").addEventListener("click", () => {
+  const row = classes.find((item) => item.id === selectedId);
+  if (row) openClassForm(row);
+});
+$("archiveClassBtn").addEventListener("click", archiveClass);
+$("deleteClassBtn").addEventListener("click", deleteClass);
 $("exportClassRelationships").addEventListener("click", async () => {
   try {
     await adminDownload("/classes/export", "class-relationships.csv");
@@ -329,6 +486,12 @@ $("exportClassRelationships").addEventListener("click", async () => {
 });
 $("retryClasses").addEventListener("click", loadClasses);
 $("closeDetail").addEventListener("click", closeDetail);
+$("closeClassForm").addEventListener("click", closeClassForm);
+$("cancelClassForm").addEventListener("click", closeClassForm);
+$("saveClassForm").addEventListener("click", saveClassForm);
+$("classFormMask").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeClassForm();
+});
 $("openMemberBulkImport").addEventListener("click", openMemberBulkImport);
 $("syncClassEnrollments").addEventListener("click", async () => {
   if (!selectedId) return;

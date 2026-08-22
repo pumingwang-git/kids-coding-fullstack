@@ -6,6 +6,8 @@ import {
   questionBankNavigation,
 } from "../src/stores/studentNavigation";
 
+// 题库和工具箱现在由后端种子下发（原先是前端硬编码兜底），fixture 与
+// /api/learning-areas 的真实返回保持一致。
 const AREA = {
   key: "kids",
   modules: [
@@ -13,6 +15,8 @@ const AREA = {
     { module_key: "courses", label: "课程", status: "available" },
     { module_key: "tasks", label: "学习任务", status: "available" },
     { module_key: "explore", label: "探索创作", status: "available" },
+    { module_key: "question-bank", label: "题库", status: "available" },
+    { module_key: "toolbox", label: "工具箱", status: "available" },
   ],
 };
 
@@ -41,12 +45,22 @@ describe("学生端导航目标", () => {
     ]);
   });
 
-  it("后台明确隐藏的模块不会被前端兜底入口重新加回", () => {
+  it("后台隐藏的模块不出现在导航里，前端不会自己加回来", () => {
     const area = {
       ...AREA,
-      modules: [...AREA.modules, { module_key: "question-bank", label: "题库", status: "hidden" }],
+      modules: AREA.modules.map((item) =>
+        item.module_key === "question-bank" ? { ...item, status: "hidden" } : item,
+      ),
     };
     expect(areaNavigationModules(area).some((item) => item.module_key === "question-bank")).toBe(
+      false,
+    );
+    // 工具箱同样只来自后端配置：没配就没有，不存在硬编码兜底
+    const withoutToolbox = {
+      ...AREA,
+      modules: AREA.modules.filter((item) => item.module_key !== "toolbox"),
+    };
+    expect(areaNavigationModules(withoutToolbox).some((item) => item.module_key === "toolbox")).toBe(
       false,
     );
   });

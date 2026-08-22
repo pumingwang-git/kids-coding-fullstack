@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..learning_catalog import AREA_STATUSES, MODULE_KEYS, MODULE_STATUSES
+from ..learning_catalog import AREA_STATUSES, MODULE_KEYS, MODULE_REGISTRY, MODULE_STATUSES
 from ..models import (
     Course,
     CourseCategory,
@@ -56,11 +56,17 @@ def _serialize_module(row: LearningAreaModule) -> dict:
     }
 
 
-def serialize_area(db: Session, area: LearningArea) -> dict:
-    modules = db.scalars(select(LearningAreaModule).where(
-        LearningAreaModule.area_key == area.key,
-        LearningAreaModule.status != "hidden",
-    ).order_by(LearningAreaModule.sort_order, LearningAreaModule.id)).all()
+def serialize_area(db: Session, area: LearningArea, include_hidden: bool = False) -> dict:
+    """学生端隐藏模块不下发；管理端必须传 include_hidden=True。
+
+    管理端拿不到隐藏行会造成静默删除：那一行从界面消失，下一次「保存导航」是整表替换，
+    会连同标签名和排序一起抹掉。隐藏是展示层状态，不是删除。
+    """
+    conds = [LearningAreaModule.area_key == area.key]
+    if not include_hidden:
+        conds.append(LearningAreaModule.status != "hidden")
+    modules = db.scalars(select(LearningAreaModule).where(*conds)
+                         .order_by(LearningAreaModule.sort_order, LearningAreaModule.id)).all()
     return {
         "key": area.key, "name": area.name, "description": area.description,
         "audience": area.audience, "theme_key": area.theme_key,
@@ -258,11 +264,18 @@ def _editor(request: Request, db: Session):
     return admin
 
 
+@admin_router.get("/module-registry")
+def admin_module_registry(request: Request, db: Session = Depends(db_session)):
+    """管理端渲染能力下拉用：哪些能力存在、哪些还没有真实页面。"""
+    current_admin(request, db)
+    return [{"module_key": key, **value} for key, value in MODULE_REGISTRY.items()]
+
+
 @admin_router.get("/areas")
 def admin_list_areas(request: Request, db: Session = Depends(db_session)):
     current_admin(request, db)
     rows = db.scalars(select(LearningArea).order_by(LearningArea.sort_order, LearningArea.key)).all()
-    return [serialize_area(db, row) for row in rows]
+    return [serialize_area(db, row, include_hidden=True) for row in rows]
 
 
 @admin_router.post("/areas", status_code=201)
@@ -278,7 +291,7 @@ def admin_create_area(payload: AreaPayload, request: Request, db: Session = Depe
     audit(db, request.app.state.settings, "learning_area_create", "success", client_ip(request), admin.id,
           resource_type="learning_area", summary={"key": key})
     db.commit()
-    return serialize_area(db, area)
+    return serialize_area(db, area, include_hidden=True)
 
 
 @admin_router.put("/areas/{area_key}")
@@ -294,7 +307,7 @@ def admin_update_area(area_key: str, payload: AreaPayload, request: Request, db:
     audit(db, request.app.state.settings, "learning_area_update", "success", client_ip(request), admin.id,
           resource_type="learning_area", summary={"key": area_key})
     db.commit()
-    return serialize_area(db, area)
+    return serialize_area(db, area, include_hidden=True)
 
 
 @admin_router.delete("/areas/{area_key}")
@@ -324,11 +337,18 @@ def admin_replace_modules(area_key: str, payload: list[ModulePayload], request: 
     keys = [item.module_key for item in payload]
     if len(keys) != len(set(keys)):
         raise HTTPException(400, "同一个能力模块不能重复配置。")
+    if "overview" not in keys:
+        raise HTTPException(400, "工作台导航必须保留「学习首页」，否则学生端专区首页会失去入口。")
     for item in payload:
         if item.module_key not in MODULE_KEYS:
             raise HTTPException(400, f"能力模块 {item.module_key} 尚未在应用中注册。")
         if item.status not in MODULE_STATUSES:
             raise HTTPException(400, "模块状态不合法。")
+        if item.status == "available" and not MODULE_REGISTRY[item.module_key]["implemented"]:
+            raise HTTPException(
+                400, f"能力模块「{MODULE_REGISTRY[item.module_key]['label']}」还没有真实页面，"
+                     "只能设为规划中或隐藏。",
+            )
     old = db.scalars(select(LearningAreaModule).where(LearningAreaModule.area_key == area_key)).all()
     for row in old:
         db.delete(row)
@@ -338,7 +358,7 @@ def admin_replace_modules(area_key: str, payload: list[ModulePayload], request: 
     audit(db, request.app.state.settings, "learning_area_modules_update", "success", client_ip(request), admin.id,
           resource_type="learning_area", summary={"key": area_key})
     db.commit()
-    return serialize_area(db, db.get(LearningArea, area_key))
+    return serialize_area(db, db.get(LearningArea, area_key), include_hidden=True)
 
 
 @admin_router.get("/categories")

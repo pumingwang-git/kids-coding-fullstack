@@ -124,13 +124,16 @@ def test_tasks_upsert_and_soft_delete():
 def test_stats_streak_only_realtime():
     client = _setup()
     now = datetime.now(timezone.utc)
-    # 昨天一条真实段 + 今天一条真实段 + 今天一条 catchup
+    # 昨天一条真实段 + 今天一条真实段 + 今天一条 catchup。
+    # 使用同一上海自然日内的时间，避免 UTC 凌晨跨过上海日界后夹具漂移。
     days = [
         _session("sess-y1-xxx", started_at=(now - timedelta(days=1, hours=2)).isoformat(),
                  ended_at=(now - timedelta(days=1, hours=1)).isoformat(), actual_ms=10 * 60 * 1000),
-        _session("sess-t1-xxx", started_at=(now - timedelta(hours=3)).isoformat(),
-                 ended_at=(now - timedelta(hours=2)).isoformat(), actual_ms=10 * 60 * 1000),
-        _session("sess-t2-xxx", outcome="catchup", actual_ms=10 * 60 * 1000),
+        _session("sess-t1-xxx", started_at=(now - timedelta(minutes=30)).isoformat(),
+                 ended_at=(now - timedelta(minutes=20)).isoformat(), actual_ms=10 * 60 * 1000),
+        _session("sess-t2-xxx", started_at=(now - timedelta(minutes=10)).isoformat(),
+                 ended_at=(now - timedelta(minutes=5)).isoformat(),
+                 outcome="catchup", actual_ms=10 * 60 * 1000),
     ]
     assert client.post("/api/focus/sessions", headers=scsrf(client), json={"items": days}).status_code == 200
     stats = client.get("/api/focus/stats").json()

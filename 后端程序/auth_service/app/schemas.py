@@ -4,6 +4,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from .python_rules import validate_rules
+from .rubric import validate_rubric
+
 # 编辑器会在保存前收紧为无空格格式；服务端仍兼容用户手工输入时在
 # placeholder、方括号或花括号之间插入的空白字符。
 BLANK_KEY_RE = re.compile(
@@ -147,7 +150,21 @@ class UserResponse(BaseModel):
 
 ProblemType = Literal["choice", "multi_choice", "judge", "fill", "programming"]
 ProgrammingLanguage = Literal["cpp", "python"]
-PassCondition = Literal["编译通过", "样例通过", "全测试点通过"]
+# 操作题形态。algorithm = 标准输入输出的算法题；project = 作品题（画线、画气球那类，
+# 没有 stdin/stdout）。详见 models.ProgrammingDetail.shape 的注释。
+ProgrammingShape = Literal["algorithm", "project"]
+# 通过条件按形态分家：前三个是算法题的（逐点判分链），后两个是作品题的。
+# 跨形态取值由 ProgrammingPayload.shape_fields_are_consistent 拒掉。
+#
+# 「编译通过」对 Python 不是字面意思——judge/gojudge.py 的 LANGUAGES["python"]
+# 里 compile 是 None，Python 根本没有编译步骤，这一档实际等价于"能成功启动"。
+# 保留原样不改：它是历史默认值，改动会让存量 Python 算法题的这一列全部失配。
+PassCondition = Literal[
+    "编译通过", "样例通过", "全测试点通过",   # algorithm
+    "规则全通过", "教师评定",                 # project
+]
+ALGORITHM_PASS_CONDITIONS = frozenset({"编译通过", "样例通过", "全测试点通过"})
+PROJECT_PASS_CONDITIONS = frozenset({"规则全通过", "教师评定"})
 DIFFICULTIES = {"入门", "普及-", "普及", "普及+", "提高-", "提高", "提高+", "省选", "NOI", "普及/提高-", "普及+/提高", "提高+/省选-", "省选/NOI-", "NOI/NOI+/CTSC"}
 SOURCES = {"第三方", "原创", "自命题", "洛谷", "NOIP", "CSP-J", "CSP-S", "USACO"}
 STRUCTURES = {"单项知识点", "多项知识点", "综合应用"}
@@ -281,8 +298,17 @@ class ImportedCasesPayload(BaseModel):
 
 
 class ProgrammingPayload(BaseModel):
+    """操作题内容。两种形态共用这一个模型，靠 `shape` 分家。
+
+    不拆成两个模型是因为**大半字段是共有的**（标题、提示、参考代码、时空限制），
+    拆开会让 router 的读写两条路各写两遍。形态专属字段的互斥由下面的
+    `shape_fields_are_consistent` 一处闸住——闸在一个地方，比分散在两个模型里
+    靠"记得别填"要可靠。
+    """
+
     model_config = ConfigDict(extra="forbid")
     title: str = Field(default="", max_length=200)
+    shape: ProgrammingShape = "algorithm"
     pass_condition: PassCondition = "编译通过"
     input_format: str = Field(default="", max_length=20_000)
     output_format: str = Field(default="", max_length=20_000)
@@ -290,11 +316,75 @@ class ProgrammingPayload(BaseModel):
     samples: list[SamplePayload] = Field(default_factory=list, max_length=20)
     ref_code: RefCodePayload = Field(default_factory=RefCodePayload)
     manual_test_cases: list[ManualTestCasePayload] = Field(default_factory=list, max_length=50)
+    # ---- 仅 shape="project" ----
+    starter_code: str = Field(default="", max_length=200_000)
+    allowed_modules: list[str] = Field(default_factory=list, max_length=30)
+    rules: list[dict] = Field(default_factory=list, max_length=50)
+    rubric: dict = Field(default_factory=dict)
     # 题目级限制。范围推导见交接文档 §3：
     # 时间上限 10s 卡在 judge_timeout_seconds（判题层 clockLimit = 2× cpuLimit）；
     # 内存上限 512MB 由《判题沙箱搭建手册》§二的内存账推出，提到 512 以上必须先加内存重算。
+    #
+    # 作品题也保留这两列：turtle 程序照样会写出死循环，判定引擎落地后仍要靠它兜住。
     time_limit_ms: int = Field(default=1000, ge=100, le=10_000)
     memory_limit_mb: int = Field(default=256, ge=16, le=512)
+
+    @field_validator("allowed_modules")
+    @classmethod
+    def modules_are_identifiers(cls, value: list[str]) -> list[str]:
+        """白名单只收顶层模块名。写 `turtle.forward` 或 `../x` 一律拒——
+        它会被判定引擎当模块名比对，比不上就是全班静默挂人工。"""
+        cleaned: list[str] = []
+        for item in value:
+            name = (item or "").strip()
+            if not name.isidentifier():
+                raise ValueError(f"允许的模块名无效：{item!r}（只能是 turtle、random 这样的顶层模块名）。")
+            if name not in cleaned:
+                cleaned.append(name)
+        return cleaned
+
+    @model_validator(mode="after")
+    def shape_fields_are_consistent(self):
+        """两种形态的字段互斥 + 通过条件必须属于本形态。
+
+        为什么写入就拒而不是存下来忽略：一道题从算法改成作品之后，库里若同时留着
+        测试点和判定规则，"到底按哪套判"这个问题没有任何一处代码能回答。
+        """
+        if self.shape == "algorithm":
+            if self.pass_condition not in ALGORITHM_PASS_CONDITIONS:
+                raise ValueError(
+                    f"算法题的通过条件只能是：{'、'.join(sorted(ALGORITHM_PASS_CONDITIONS))}。")
+            extras = [
+                name for name, filled in (
+                    ("初始代码", bool(self.starter_code.strip())),
+                    ("模块白名单", bool(self.allowed_modules)),
+                    ("判定规则", bool(self.rules)),
+                    ("量规", bool(self.rubric)),
+                ) if filled
+            ]
+            if extras:
+                raise ValueError(f"算法题不能携带作品题字段：{'、'.join(extras)}。")
+            return self
+        # ---- project ----
+        if self.pass_condition not in PROJECT_PASS_CONDITIONS:
+            raise ValueError(
+                f"作品题的通过条件只能是：{'、'.join(sorted(PROJECT_PASS_CONDITIONS))}。")
+        extras = [
+            name for name, filled in (
+                ("输入格式", bool(self.input_format.strip())),
+                ("输出格式", bool(self.output_format.strip())),
+                ("样例", bool(self.samples)),
+                ("隐藏测试点", bool(self.manual_test_cases)),
+            ) if filled
+        ]
+        if extras:
+            raise ValueError(f"作品题没有标准输入输出，不能携带：{'、'.join(extras)}。")
+        try:
+            self.rules = validate_rules(self.rules)
+            self.rubric = validate_rubric(self.rubric)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
 
 
 class ProblemPayload(BaseModel):
@@ -318,6 +408,11 @@ class ProblemPayload(BaseModel):
                 raise ValueError("操作题不能携带选择或填空答案。")
             if self.sub_type == "cpp" and self.programming.manual_test_cases:
                 raise ValueError("C++ 隐藏测试点只能通过 ZIP 上传。")
+            # 作品题这一期只对 Python 开放：它的判定靠 Python AST 静态规则
+            # （app/python_rules.py），C++ 没有对应的规则表，放开等于让 C++ 作品题
+            # 存进来却永远判不了。要开 C++ 得先有 cpp_rules.py。
+            if self.programming.shape == "project" and self.sub_type != "python":
+                raise ValueError("作品题目前只支持 Python 操作题。")
             return self
         if self.sub_type is not None or self.programming is not None:
             raise ValueError("非操作题不能设置 sub_type。")

@@ -23,9 +23,18 @@ def test_students_page_renders_status_label_from_the_api():
 
 
 def test_students_page_renders_enrollment_status_from_the_api():
-    students_js = (ADMIN_DIR / "students.js").read_text(encoding="utf-8")
-    assert "row.status_label" in students_js
-    assert "row.allowed_actions" in students_js
-    assert "row.status ===" not in students_js
-    assert "/enrollments" in students_js
-    assert "data-enrollment-status" in students_js
+    enrollments_js = (ADMIN_DIR / "enrollments.js").read_text(encoding="utf-8")
+    assert "row.status_label" in enrollments_js
+    assert "row.allowed_actions" in enrollments_js
+    assert "row.status ===" not in enrollments_js
+    assert "/enrollments" in enrollments_js
+    assert "data-enrollment-status" in enrollments_js
+
+
+def test_course_enrollment_is_a_separate_admin_page():
+    page = (ADMIN_DIR / "enrollments.html").read_text(encoding="utf-8")
+    layout = (ADMIN_DIR / "admin-layout.js").read_text(encoding="utf-8")
+    students_page = (ADMIN_DIR / "students.html").read_text(encoding="utf-8")
+    assert 'src="enrollments.js"' in page
+    assert 'page: "enrollments.html"' in layout
+    assert "课程开通" not in students_page

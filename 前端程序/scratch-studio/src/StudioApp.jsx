@@ -22,6 +22,24 @@ import DemoBar from './components/DemoBar';
 import ReviewBar from './components/ReviewBar';
 import FreeBar from './components/FreeBar';
 import PreviewBar from './components/PreviewBar';
+import StudioBar from './components/StudioBar';
+import ToastHost from './components/Toast';
+import {applyBranding} from './gui/menuBarSlot';
+import {capabilitiesFor} from './gui/studioCapabilities';
+import {subscribeProjectTitle} from './gui/projectTitle';
+
+/**
+ * `setProjectTitle` 的 action type。
+ *
+ * scratch-gui 的包入口没有导出这个 action creator（`exported-reducers.ts` 里没有它），
+ * 而 `reducers/project-title.js` 是包内路径——babel-loader 排除了 node_modules，
+ * import 进来不会被编译。所以这里照抄常量自己发，比改整条构建划算。
+ * 出处：`node_modules/@scratch/scratch-gui/src/reducers/project-title.js:1`
+ */
+const SET_PROJECT_TITLE = 'projectTitle/SET_PROJECT_TITLE';
+
+/** 平台品牌标。主站资源，生产同源；Studio 直连 8602 时会 404，那时保留猫标。 */
+const PLATFORM_LOGO = '/assets/otter-avatar-128.webp';
 
 /** 等待官方 GUI 完成默认项目加载（loadingState 进入 SHOWING_*） */
 function waitUntilShown (store, timeout = 15000) {
@@ -108,9 +126,46 @@ export default function StudioApp () {
     const adminReview = mode === 'admin_review';
     const studentDemo = mode === 'student_demo';
     const freeEdit = mode === 'free';
+    const draftEdit = freeEdit && !workId && params.get('draft') === '1';
     const galleryPreview = mode === 'preview';
     // 非法 / 缺省的 authoring_target 按 starter 处理：录制入口不该因为拼错参数打不开。
     const target = resolveAuthoringTarget(params.get('authoring_target'));
+
+    // 六种形态收敛成一个名字，能力查表（`gui/studioCapabilities.js`）。
+    // 别在 JSX 里就地拼布尔表达式——上一版就是那么写的，写出了一条"注释说关掉、
+    // 实际开着"的文件菜单，学生能把作业下载走。
+    const studioMode = adminReview ? 'admin_review'
+        : adminPreview ? 'admin_preview'
+            : studentDemo ? 'student_demo'
+                : freeEdit ? 'free'
+                    : galleryPreview ? 'gallery_preview'
+                        : 'challenge';
+    const caps = capabilitiesFor(studioMode);
+
+    // 作品标题走官方菜单栏里那个标题输入框（`canEditTitle`），我们自己的栏里不再放
+    // 第二个输入框。redux 的 `projectTitle` 是唯一事实来源：进来时把上下文里的标题
+    // 写进去，学生改完再读回来，保存时取的就是它。
+    const [workTitle, setWorkTitle] = useState('未命名作品');
+
+    useEffect(() => {
+        if (!ctx) return;
+        const title = ctx.title || (ctx.challenge && ctx.challenge.title) || '未命名作品';
+        // 官方 TitledHOC 挂载时会先把标题设成默认值（"Scratch Project"）。我们的
+        // 上下文是异步到的，落在它之后，所以这次覆盖有效。
+        store.dispatch({type: SET_PROJECT_TITLE, title});
+    }, [ctx, store]);
+
+    useEffect(() => {
+        return subscribeProjectTitle(store, next => {
+            setWorkTitle(prev => (prev === next ? prev : next));
+        });
+    }, [store]);
+
+    // 换标 + 注入菜单栏样式。放在这里而不是 index.jsx：它依赖菜单栏已经渲染出来，
+    // 而菜单栏是 GUI 的一部分，与本组件同一次提交挂载。
+    useEffect(() => {
+        applyBranding({logoSrc: PLATFORM_LOGO, logoAlt: '汪蒲明学习平台'});
+    }, []);
 
     // 保存成功后，用后端返回的 _serialize 结果刷新 ctx 里对应 target 的地址。
     // AuthoringBar 的「重新载入」读的就是那个地址，若保存后不同步，首次保存
@@ -118,6 +173,14 @@ export default function StudioApp () {
     const handleProjectSaved = useCallback((saved) => {
         setCtx(prev => mergeSavedProject(target, prev, saved));
     }, [target]);
+
+    // 提交成功后只刷新作业元数据（判定、示范项目开放状态等），不重新加载 VM 项目，
+    // 避免学生刚完成提交就被服务器版本覆盖当前编辑中的内容。
+    const handleChallengeSubmitted = useCallback(async () => {
+        if (!blockId) return;
+        const fresh = await fetchLessonBlockContext(blockId);
+        setCtx(fresh);
+    }, [blockId]);
 
     // 必须在 GUI 的 ProjectFetcher 已挂载后再发起加载。默认项目 id=0 已内置在
     // scratch-gui 的 LegacyStorage 中，不需要联网；它会建立舞台和默认角色，保证
@@ -129,7 +192,7 @@ export default function StudioApp () {
     useEffect(() => {
         const missing = adminReview ? !submissionId
             : adminPreview ? !challengeId
-                : (freeEdit || galleryPreview) ? !workId
+            : (freeEdit || galleryPreview) ? (!workId && !draftEdit)
                     : !blockId;
         if (missing) {
             setStatus('error');
@@ -149,7 +212,9 @@ export default function StudioApp () {
                     ? await fetchAdminReviewContext(submissionId)
                     : adminPreview
                         ? await fetchAdminStudioContext(challengeId)
-                        : freeEdit
+                            : draftEdit
+                                ? {id: null, title: '未命名作品', is_public: false, has_content: false}
+                            : freeEdit
                             ? await fetchWorkContext(workId)
                             : galleryPreview
                                 ? await fetchGalleryWork(workId)
@@ -181,7 +246,7 @@ export default function StudioApp () {
                     // 第三条互斥支路：只装示范项目，不碰学生作品，也不碰初始项目。
                     const buf = await fetchDemoSb3(blockId);
                     if (!cancelled) await vm.loadProject(buf);
-                } else if (freeEdit) {
+                } else if (freeEdit && !draftEdit) {
                     // 第五条互斥支路：装**自己的**自由作品，可编辑可保存回 PUT /works/{id}。
                     // 与 preview 共用 work_id 参数但上下文来源不同（/works/{id} 是本人视图），
                     // 且这条路径的保存目标只能是同一份作品——结构上不可能写进别人的作品。
@@ -222,25 +287,40 @@ export default function StudioApp () {
         return () => {
             cancelled = true;
         };
-    }, [adminPreview, adminReview, studentDemo, freeEdit, galleryPreview,
+    }, [adminPreview, adminReview, studentDemo, freeEdit, draftEdit, galleryPreview,
         blockId, challengeId, submissionId, workId, target, vm, store]);
 
     const loadingText = studentDemo ? '正在加载教师示范项目…'
         : adminReview ? '正在加载提交快照…'
-            : freeEdit ? '正在加载我的作品…'
+        : freeEdit ? (draftEdit ? '正在打开新的创作…' : '正在加载我的作品…')
                 : galleryPreview ? '正在加载作品预览…'
                     : '正在加载挑战与初始项目…';
     const backHref = freeEdit ? '/areas/kids/explore/projects'
         : galleryPreview ? '/areas/kids/explore'
             : lessonId && blockId ? `/learn/${lessonId}?block=${blockId}` : null;
+    const demoHref = lessonId && blockId
+        ? `?lesson_id=${encodeURIComponent(lessonId)}&block_id=${encodeURIComponent(blockId)}&mode=student_demo`
+        : null;
 
+    /**
+     * 六种形态的**栏内内容**（不再是六条独立横栏）。
+     *
+     * 内容统一交给 `StudioBar`：它把这些节点 portal 进 Scratch 原生菜单栏内部的槽位，
+     * 页面上只剩一条 48px 的栏；拿不到槽位（GUI 版本换了结构）时退回独立横条。
+     *
+     * `tone` 决定身份色带：合并前"这不是学生视图"靠整条栏的薄荷底色，合并后底色没了，
+     * 由色带 + 栏内常驻标签接手。教研与批改台都算后台视图。
+     */
     const bar = () => {
         if (!ctx) return null;
+        let tone = 'student';
+        let content = null;
         if (adminReview) {
-            return <ReviewBar ctx={ctx} />;
-        }
-        if (adminPreview) {
-            return (
+            tone = 'admin';
+            content = <ReviewBar ctx={ctx} />;
+        } else if (adminPreview) {
+            tone = 'admin';
+            content = (
                 <AuthoringBar
                     ctx={ctx}
                     vm={vm}
@@ -248,33 +328,68 @@ export default function StudioApp () {
                     onProjectSaved={handleProjectSaved}
                 />
             );
+        } else if (studentDemo) {
+            // 无权查看时连只读栏也不渲染：那一屏只该有一句为什么看不到。
+            if (status === 'locked') return null;
+            tone = 'readonly';
+            content = <DemoBar ctx={ctx} backHref={backHref} />;
+        } else if (freeEdit) {
+            content = <FreeBar ctx={ctx} vm={vm} title={workTitle} />;
+        } else if (galleryPreview) {
+            tone = 'readonly';
+            content = <PreviewBar ctx={ctx} backHref={backHref} />;
+        } else {
+            content = (
+                <SaveSubmitBar
+                    ctx={ctx}
+                    vm={vm}
+                    backHref={backHref}
+                    demoHref={demoHref}
+                    onSubmitted={handleChallengeSubmitted}
+                />
+            );
         }
-        // 无权查看时连只读栏也不渲染：那一屏只该有一句为什么看不到。
-        if (studentDemo) {
-            return status === 'locked' ? null : <DemoBar ctx={ctx} backHref={backHref} />;
-        }
-        if (freeEdit) {
-            return <FreeBar ctx={ctx} vm={vm} />;
-        }
-        if (galleryPreview) {
-            return <PreviewBar ctx={ctx} backHref={backHref} />;
-        }
-        return <SaveSubmitBar ctx={ctx} vm={vm} />;
+        return <StudioBar tone={tone} hideDebug={!caps.showDebug}>{content}</StudioBar>;
     };
 
     return (
         <div style={{display: 'flex', flexDirection: 'column', height: '100%'}}>
+            {/* 操作结果浮层。栏高被 48px 钉死之后，消息没地方挂了，只能走浮层。 */}
+            <ToastHost />
             {bar()}
             <div style={{flex: 1, minHeight: 0, position: 'relative'}}>
                 {/* canManageFiles=false 关掉整个「文件」菜单——里面的「保存到你的电脑」
                     不受 canSave 控制，留着就等于给学生一个一键下载答案的按钮。
                     这是移除入口，不是防篡改：真正的边界在后端的提交闸。 */}
                 <GUI
+                    /* canSave 必须保持 false。打开它等于把保存交给官方
+                       ProjectSaverHOC：它会先把脏素材 `scratchStorage.store()` 推给
+                       Scratch 官方素材服务器，再调 `storage.saveProject`——我们的后端
+                       一个字节都收不到，而学生会看到一串莫名其妙的保存失败。
+                       平台的保存按钮长在菜单栏槽位里，走自己的 PUT。 */
                     canSave={false}
-                    canEditTitle={false}
-                    // 自由作品是学生自己的创作，允许下载/上传文件；闯关（防下载答案）
-                    // 与只读模式（student_demo / preview / adminReview）一律关掉。
-                    canManageFiles={freeEdit || !(studentDemo || galleryPreview || adminReview)}
+                    /* 同理不开 canShare：那条路会连带触发官方保存链路（menu-bar.jsx
+                       handleClickShare），且文案不可控。公开/私密由 FreeBar 自己管。 */
+                    canShare={false}
+                    /* 标题是唯一交给官方组件的东西：ProjectTitleInput 只 dispatch
+                       setProjectTitle，不碰任何保存链路（已核 project-title-input.jsx）。
+                       只有自由创作能改名；作业/闯关的名字是老师定的，只读渲染。 */
+                    canEditTitle={caps.canEditTitle}
+                    /* 右上角账号区：本站没有 Scratch 会话，全部关掉，省得出现
+                       "登录 / 我的东西"这类指向官方社区的入口。 */
+                    accountMenuOptions={{
+                        canHaveSession: false,
+                        canRegister: false,
+                        canLogin: false,
+                        canLogout: false
+                    }}
+                    /* 文件菜单（新建 / 从电脑上传 / 保存到你的电脑）按形态查表。
+                       ⚠️ 这里曾经写成
+                           freeEdit || !(studentDemo || galleryPreview || adminReview)
+                       注释说"闯关一律关掉"，可闯关那支真算出来是 true——作业模式下
+                       学生一直能把作业导出、也能拿别人的 .sb3 顶上来交。表在
+                       gui/studioCapabilities.js，有测试钉着。 */
+                    canManageFiles={caps.canManageFiles}
                 />
                 {status !== 'ready' && (
                     <div style={overlayStyle}>

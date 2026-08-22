@@ -41,6 +41,7 @@ function canOpen(lesson) {
 }
 
 function trialChip(lesson) {
+  if (enrolled.value) return "";
   if (lesson.open_policy === "whole") return "试看";
   if (lesson.open_policy === "first_n") return `前 ${lesson.trial_block_count || 0} 块试看`;
   return "";

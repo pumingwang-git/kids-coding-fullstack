@@ -8,10 +8,14 @@
 - sessions 批次上限 50
 - audio 参数校验 + 游客可访问（不鉴权）
 """
+import os
 import tempfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from test_exam import build_app, student_login, scsrf
+from test_exam import build_app, scsrf, student_login
 
 TYPING_ROUTES = [
     "/api/typing/bootstrap",
@@ -113,19 +117,122 @@ def test_audio_validates_word():
 def test_audio_guest_accessible(monkeypatch):
     """游客（未登录）也能发音：audio 不鉴权，且 502/200 都算"端点活着"。"""
     import httpx
-
     from fastapi.testclient import TestClient
 
     class FakeResp:
         status_code = 200
-        content = b"fake-mp3"
+        headers = {"content-length": "8"}
 
-    def fake_get(self, url, *args, **kwargs):
-        return FakeResp()
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def iter_bytes(self): yield b"fake-mp3"
 
-    monkeypatch.setattr(httpx.Client, "get", fake_get)
-    app = build_app(Path(tempfile.mkdtemp()))
+    monkeypatch.setattr(httpx.Client, "stream", lambda *_args, **_kwargs: FakeResp())
+    root = Path(tempfile.mkdtemp())
+    app = build_app(root)
+    app.state.settings.typing_audio_cache_root = str(root / "audio")
     guest = TestClient(app)
     r = guest.get("/api/typing/audio", params={"word": "apple"})
     assert r.status_code == 200
     assert r.content == b"fake-mp3"
+
+
+def test_audio_limits_upstream_size_and_removes_partial_file(monkeypatch, tmp_path):
+    import httpx
+    from fastapi.testclient import TestClient
+
+    class LargeResp:
+        status_code = 200
+        headers = {}
+
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def iter_bytes(self):
+            yield b"12345678"
+            yield b"overflow"
+
+    monkeypatch.setattr(httpx.Client, "stream", lambda *_args, **_kwargs: LargeResp())
+    app = build_app(tmp_path)
+    cache = tmp_path / "audio"
+    app.state.settings.typing_audio_cache_root = str(cache)
+    app.state.settings.typing_audio_response_max_bytes = 16 * 1024
+    # 绕过 Settings 的配置下限，直接用大于 16 KiB 的假响应验证实际流式上限。
+    LargeResp.iter_bytes = lambda self: iter((b"a" * 12_000, b"b" * 12_000))
+    r = TestClient(app).get("/api/typing/audio", params={"word": "oversized"})
+    assert r.status_code == 502
+    assert list(cache.glob("*")) == []
+
+
+def test_audio_rate_limits_by_ip(monkeypatch, tmp_path):
+    import httpx
+    from fastapi.testclient import TestClient
+
+    class FakeResp:
+        status_code = 200
+        headers = {}
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def iter_bytes(self): yield b"mp3"
+
+    monkeypatch.setattr(httpx.Client, "stream", lambda *_args, **_kwargs: FakeResp())
+    app = build_app(tmp_path)
+    app.state.settings.typing_audio_cache_root = str(tmp_path / "audio")
+    app.state.settings.typing_audio_rate_limit_per_minute = 2
+    guest = TestClient(app)
+    assert guest.get("/api/typing/audio", params={"word": "one"}).status_code == 200
+    assert guest.get("/api/typing/audio", params={"word": "one"}).status_code == 200
+    assert guest.get("/api/typing/audio", params={"word": "one"}).status_code == 429
+
+
+def test_audio_concurrent_same_word_fetches_once(monkeypatch, tmp_path):
+    import httpx
+    from fastapi.testclient import TestClient
+
+    calls = 0
+    calls_lock = threading.Lock()
+
+    class SlowResp:
+        status_code = 200
+        headers = {}
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def iter_bytes(self):
+            time.sleep(0.05)
+            yield b"same-mp3"
+
+    def fake_stream(*_args, **_kwargs):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        return SlowResp()
+
+    monkeypatch.setattr(httpx.Client, "stream", fake_stream)
+    app = build_app(tmp_path)
+    app.state.settings.typing_audio_cache_root = str(tmp_path / "audio")
+    guest = TestClient(app)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        responses = list(pool.map(
+            lambda _: guest.get("/api/typing/audio", params={"word": "concurrent"}),
+            range(4),
+        ))
+    assert [response.status_code for response in responses] == [200, 200, 200, 200]
+    assert calls == 1
+
+
+def test_audio_cache_prunes_oldest_files_for_quota(tmp_path):
+    from app.routers.typing import _prune_audio_cache
+
+    cache = tmp_path / "audio"
+    cache.mkdir()
+    oldest = cache / "oldest.mp3"
+    middle = cache / "middle.mp3"
+    newest = cache / "newest.mp3"
+    for index, path in enumerate((oldest, middle, newest), start=1):
+        path.write_bytes(b"x" * 10)
+        os.utime(path, (index, index))
+
+    _prune_audio_cache(cache, max_bytes=25, max_files=3, incoming_bytes=10)
+
+    assert not oldest.exists()
+    assert not middle.exists()
+    assert newest.exists()

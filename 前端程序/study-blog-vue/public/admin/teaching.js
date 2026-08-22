@@ -35,10 +35,12 @@ function selectedClass() {
   return state.classes.find((item) => Number(item.id) === Number(state.classId));
 }
 
-function renderClassOptions() {
+function renderClassOptions(emptyLabel = "暂无班级") {
   const select = $("classSelect");
-  select.innerHTML = state.classes.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name || item.title || `班级 ${item.id}`)}</option>`).join("");
-  select.value = String(state.classId);
+  select.innerHTML = state.classes.length
+    ? state.classes.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name || item.title || `班级 ${item.id}`)}</option>`).join("")
+    : `<option value="">${escapeHtml(emptyLabel)}</option>`;
+  select.value = state.classes.length ? String(state.classId) : "";
   select.disabled = !state.classes.length;
 }
 
@@ -155,6 +157,7 @@ async function loadClasses() {
   try {
     const payload = await adminRequest("/teaching/classes");
     state.classes = payload.items || [];
+    renderClassOptions();
     if (!state.classes.length) {
       $("classesState").textContent = "当前没有可查看的班级。";
       return;
@@ -165,7 +168,9 @@ async function loadClasses() {
     $("workbench").hidden = false;
     await loadWorkbench();
   } catch (error) {
-    $("classesState").textContent = `${error.message || "加载失败"} 请刷新页面后重试。`;
+    state.classes = [];
+    renderClassOptions("班级加载失败");
+    $("classesState").textContent = error.message || "班级加载失败，请刷新页面后重试。";
   }
 }
 

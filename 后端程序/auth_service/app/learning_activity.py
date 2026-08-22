@@ -14,6 +14,7 @@ from .models import (
     LessonProblemAttempt,
     LessonVideoWatch,
 )
+from .security import as_utc
 
 INACTIVE_DAYS_DEFAULT = 7
 
@@ -32,7 +33,7 @@ def activity_status(
             "active": False,
         }
 
-    inactive_days = (now - last_seen).days
+    inactive_days = (now - as_utc(last_seen)).days
     return {
         "last_activity_at": last_seen,
         "never_active": False,

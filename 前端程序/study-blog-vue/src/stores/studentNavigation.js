@@ -1,9 +1,24 @@
 import { modulePath } from "./learningCatalog";
 
-const FALLBACK_MODULES = [
-  { module_key: "question-bank", label: "题库", status: "available" },
-  { module_key: "toolbox", label: "工具箱", status: "available" },
-];
+// 题库和工具箱曾经在这里硬编码兜底，后端 MODULE_KEYS 又不认这两个 key，
+// 于是后台想配都配不了。两者现已收进后端能力注册表与专区种子，导航数据源
+// 收敛到 /api/learning-areas 一处——前端不再自己往里加东西。
+// 被守卫拦下的模块通常不在下发数据里（隐藏或未配置），拿不到 label，
+// 这份表只用于提示文案兜底，key 与后端 MODULE_REGISTRY 保持一致。
+const MODULE_LABELS = {
+  overview: "学习首页",
+  courses: "课程",
+  tasks: "学习任务",
+  explore: "探索创作",
+  "question-bank": "题库",
+  toolbox: "工具箱",
+  paths: "学习路线",
+  projects: "实战项目",
+};
+
+export function moduleLabel(moduleKey) {
+  return MODULE_LABELS[moduleKey] || "";
+}
 
 const MODULE_ICONS = {
   overview: "home",
@@ -40,14 +55,8 @@ const ROUTE_MODULES = {
 export function areaNavigationModules(area) {
   if (!area) return [];
 
-  const allConfigured = area.modules || [];
-  const configured = allConfigured.filter((item) => item.status !== "hidden");
-  const modules = [...configured];
-  for (const fallback of FALLBACK_MODULES) {
-    if (!allConfigured.some((item) => item.module_key === fallback.module_key)) {
-      modules.push({ ...fallback });
-    }
-  }
+  // 公开接口已经滤掉 hidden，这里再滤一次是防御：接口哪天改成下发全量也不会漏出隐藏项。
+  const modules = (area.modules || []).filter((item) => item.status !== "hidden");
 
   return modules.map((item) => ({
     ...item,

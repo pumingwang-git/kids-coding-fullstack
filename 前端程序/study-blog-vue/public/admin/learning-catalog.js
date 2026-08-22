@@ -4,10 +4,13 @@ import { closeMask, confirmDialog, escapeHtml, openMask, toast } from "./admin-u
 
 initLayout();
 const $ = (id) => document.getElementById(id);
-const MODULES = [
+// 能力清单由后端 module-registry 下发（含 implemented 标记）。接口失败时回落到这份
+// 兜底，只是为了页面不至于渲染出空下拉——真正的合法性以后端校验为准。
+let MODULES = [
   ["overview", "概览"], ["courses", "课程"], ["tasks", "学习任务"],
   ["explore", "探索创作"], ["paths", "学习路线"], ["projects", "实战项目"],
 ];
+let moduleRegistry = [];
 const STATUS_LABEL = { active: "已开放", planning: "规划中", hidden: "已隐藏" };
 const MODULE_STATUS = { available: "可使用", planning: "规划中", hidden: "隐藏" };
 let readOnly = false;
@@ -123,14 +126,25 @@ async function loadDetails() {
   renderModules(); renderCategoryTree(); renderSimpleRows("types"); renderSimpleRows("tags");
 }
 
+function isImplemented(moduleKey) {
+  const hit = moduleRegistry.find((item) => item.module_key === moduleKey);
+  return hit ? hit.implemented !== false : true;
+}
+
 function moduleRow(item = {}) {
   const options = MODULES.map(([key, label]) => `<option value="${key}" ${item.module_key === key ? "selected" : ""}>${label}</option>`).join("");
-  return `<div class="catalog-row module-row">
+  const hidden = item.status === "hidden";
+  // 没有真实页面的能力不允许标成「可使用」，否则学生点进去是占位页，状态与事实相反。
+  const usable = isImplemented(item.module_key || MODULES[0]?.[0]);
+  // 隐藏行必须留在列表里并且看得出是隐着的。之前后端对管理端也滤掉了 hidden，
+  // 那一行从界面消失、下次「保存导航」整表替换时被真删——名称和排序一起丢。
+  return `<div class="catalog-row module-row${hidden ? " module-row-hidden" : ""}">
     <select class="module-key" aria-label="工作台能力">${options}</select>
     <input class="module-label" aria-label="导航名称" maxlength="50" value="${escapeHtml(item.label || "")}" placeholder="导航名称" />
-    <select class="module-status" aria-label="模块状态"><option value="available" ${item.status === "available" ? "selected" : ""}>可使用</option><option value="planning" ${!item.status || item.status === "planning" ? "selected" : ""}>规划中</option><option value="hidden" ${item.status === "hidden" ? "selected" : ""}>隐藏</option></select>
+    <select class="module-status" aria-label="模块状态"><option value="available" ${item.status === "available" ? "selected" : ""} ${usable ? "" : "disabled"}>可使用${usable ? "" : "（暂无页面）"}</option><option value="planning" ${!item.status || item.status === "planning" ? "selected" : ""}>规划中</option><option value="hidden" ${hidden ? "selected" : ""}>隐藏</option></select>
     <input class="module-sort" type="number" value="${item.sort_order ?? 0}" aria-label="排序" />
     <button class="btn-text link danger" data-remove-row type="button">移除</button>
+    <span class="module-hidden-flag">${hidden ? "学生端不显示" : ""}</span>
   </div>`;
 }
 
@@ -344,6 +358,26 @@ document.querySelector(".zone-tabs")?.addEventListener("keydown", (event) => {
 });
 $("addModuleBtn").addEventListener("click", () => { if ($("moduleRows").querySelector(".empty")) $("moduleRows").innerHTML = ""; $("moduleRows").insertAdjacentHTML("beforeend", moduleRow()); });
 $("moduleRows").addEventListener("click", (event) => event.target.closest("[data-remove-row]")?.closest(".catalog-row")?.remove());
+// 状态改成隐藏时立刻灰显并打标，运营不用等保存就知道这一行学生端看不到；
+// 换能力时同步「可使用」是否可选，避免提交后才被后端 400 顶回来。
+$("moduleRows").addEventListener("change", (event) => {
+  const row = event.target.closest(".module-row");
+  if (!row) return;
+  if (event.target.closest(".module-status")) {
+    const hidden = event.target.value === "hidden";
+    row.classList.toggle("module-row-hidden", hidden);
+    const flag = row.querySelector(".module-hidden-flag");
+    if (flag) flag.textContent = hidden ? "学生端不显示" : "";
+  }
+  if (event.target.closest(".module-key")) {
+    const usable = isImplemented(event.target.value);
+    const status = row.querySelector(".module-status");
+    const available = status.querySelector('option[value="available"]');
+    available.disabled = !usable;
+    available.textContent = usable ? "可使用" : "可使用（暂无页面）";
+    if (!usable && status.value === "available") status.value = "planning";
+  }
+});
 $("saveModulesBtn").addEventListener("click", async () => {
   const rows = [...$("moduleRows").querySelectorAll(".module-row")].map((row) => ({
     module_key: row.querySelector(".module-key").value, label: row.querySelector(".module-label").value.trim(),
@@ -377,6 +411,10 @@ for (const [id, kind, label] of [["typeRows", "types", "课程类型"], ["tagRow
   try {
     readOnly = (await adminMe())?.role === "reviewer";
     applyReadOnlyState();
+    try {
+      moduleRegistry = await adminRequest("/learning-catalog/module-registry");
+      if (moduleRegistry.length) MODULES = moduleRegistry.map((item) => [item.module_key, item.label]);
+    } catch { /* 拉不到就用兜底清单渲染，合法性最终以后端校验为准 */ }
     await loadAreas();
   } catch (error) { toast(error.message, "error"); }
 })();

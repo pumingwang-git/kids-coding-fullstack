@@ -1,0 +1,1683 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>教学工作台 · 改版 DEMO</title>
+<link rel="stylesheet" href="admin.css" />
+<!--
+  教学工作台 UI 改版 DEMO —— 只看界面，别拿它验收逻辑。
+
+  为什么是单文件、样式和脚本都内联：
+  1. `tests/test_admin_teaching_page_static.py` 里 FILES = [teaching.html, *glob("teaching*.js")]，
+     新建 teaching-demo.js 会被 glob 进去，mock 里的 phase_label 会把守卫测试打红。
+     所以脚本内联在 html 里，文件名不叫 teaching.js 家族。
+  2. 项目纪律「管理端样式只改 admin.css」是对**上线代码**说的。这里的 <style> 是提案层，
+     落地时整段搬进 admin.css（选择器已全部加 .tw- / .teaching-v2 前缀，不与现有类冲突）。
+
+  参考来源：https://ant.design/components/checkbox-cn
+  借的是**结构与交互**（32px 控件高、6px 圆角、8px 间距节奏、表头填充、
+  Checkbox 三态 + 全选联动 + 行选择 + 批量操作条、4px 焦点环）。
+  配色一律用 admin.css 已有令牌（--paper/--ink/--accent/--mint/--muted/--line/--danger/--warn），
+  没有引入任何 Ant Design 的蓝色。
+
+  所有文案（指标名、状态名、筛选项名）都来自下方 MOCK 对象——它扮演接口。
+  前端不自备状态文案是硬纪律，MOCK 里出现的每个 label 都对应一处需要后端补的返回字段，
+  详见文件末尾的「接口缺口」注释。
+-->
+<style>
+/* ===================== 令牌层（作用域限定，不污染全局 :root） ===================== */
+.teaching-v2 {
+  --tw-radius: 6px;
+  --tw-radius-sm: 4px;
+  --tw-radius-lg: 8px;
+  --tw-h: 32px;
+  --tw-h-sm: 24px;
+  --tw-elevated: color-mix(in srgb, var(--paper) 55%, #fff);
+  --tw-fill-head: color-mix(in srgb, var(--mint) 34%, var(--tw-elevated));
+  --tw-fill-hover: color-mix(in srgb, var(--mint) 26%, var(--tw-elevated));
+  --tw-fill-active: color-mix(in srgb, var(--mint) 52%, var(--tw-elevated));
+  --tw-fill-disabled: color-mix(in srgb, var(--ink) 5%, var(--paper));
+  --tw-line-soft: color-mix(in srgb, var(--line) 60%, transparent);
+  --tw-shadow: 0 1px 2px rgba(34, 43, 40, .04), 0 2px 8px rgba(34, 43, 40, .04);
+  --tw-ring: color-mix(in srgb, var(--accent) 20%, transparent);
+  --tw-motion: .2s cubic-bezier(.645, .045, .355, 1);
+}
+
+/* ===================== 页面骨架 ===================== */
+.teaching-v2 .content { padding: 0 0 56px; }
+.tw-page { max-width: 1400px; margin: 0 auto; padding: 0 28px; }
+
+.tw-demo-note {
+  padding: 7px 28px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--warn) 12%, var(--paper));
+  color: color-mix(in srgb, var(--warn) 80%, var(--ink));
+  font-size: 12px;
+}
+
+.tw-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+  padding: 20px 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.tw-head h1 { margin: 0; font: 500 24px/32px var(--font-display); letter-spacing: -.5px; }
+.tw-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 20px; }
+.tw-head-actions { display: flex; align-items: flex-end; gap: 8px; }
+
+.tw-field { display: grid; gap: 4px; min-width: 220px; }
+.tw-field > span { color: var(--muted); font-size: 12px; line-height: 18px; }
+
+.tw-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 16px; }
+.tw-stack { display: grid; gap: 16px; margin-bottom: 16px; }
+
+/* ===================== 卡片（AntD Card：细边 + 头部分隔线，不用重阴影） ===================== */
+.tw-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--tw-radius-lg);
+  background: var(--tw-elevated);
+  box-shadow: var(--tw-shadow);
+  overflow: hidden;
+}
+.tw-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.tw-card-head h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; }
+.tw-card-head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 20px; }
+.tw-card-head-extra { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.tw-card-body { padding: 16px; }
+.tw-card-body--flush { padding: 0; }
+.tw-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+.tw-spacer { flex: 1; }
+
+/* ===================== 统计（AntD Statistic：小标题在上，数值 tabular） ===================== */
+.tw-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.tw-stat { padding: 16px; border-right: 1px solid var(--tw-line-soft); }
+.tw-stat:last-child { border-right: 0; }
+.tw-stat-label { color: var(--muted); font-size: 13px; line-height: 20px; }
+.tw-stat-value {
+  margin-top: 2px;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 34px;
+  font-variant-numeric: tabular-nums;
+}
+.tw-stat-value em { font-style: normal; font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 3px; }
+.tw-stat-foot { margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 18px; }
+.tw-stat--warn .tw-stat-value { color: var(--warn); }
+.tw-stat--risk .tw-stat-value { color: var(--danger); }
+
+/* ===================== 按钮（32px 控件高，6px 圆角） ===================== */
+.tw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--tw-h);
+  padding: 0 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--tw-radius);
+  background: var(--tw-elevated);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--tw-motion), border-color var(--tw-motion), background var(--tw-motion);
+}
+.tw-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tw-btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tw-btn--primary:hover { background: color-mix(in srgb, var(--accent) 84%, #fff); border-color: color-mix(in srgb, var(--accent) 84%, #fff); color: #fff; }
+.tw-btn--sm { height: var(--tw-h-sm); padding: 0 8px; font-size: 12px; }
+.tw-btn--link { height: auto; padding: 0; border: 0; background: none; color: var(--accent); font-size: 13px; }
+.tw-btn--link:hover { color: color-mix(in srgb, var(--accent) 78%, #000); }
+.tw-btn:disabled {
+  background: var(--tw-fill-disabled);
+  border-color: var(--line);
+  color: color-mix(in srgb, var(--ink) 28%, var(--paper));
+  cursor: not-allowed;
+}
+.tw-btn:focus-visible { outline: 4px solid var(--tw-ring); outline-offset: 0; }
+
+/* ===================== 输入 / 下拉 ===================== */
+.tw-input, .tw-select {
+  height: var(--tw-h);
+  min-width: 0;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--tw-radius);
+  background: var(--tw-elevated);
+  color: var(--ink);
+  font-size: 14px;
+  transition: border-color var(--tw-motion), box-shadow var(--tw-motion);
+}
+.tw-select {
+  padding-right: 28px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2368716d' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.tw-input:hover, .tw-select:hover { border-color: var(--accent); }
+.tw-input:focus, .tw-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--tw-ring);
+  outline: 0;
+}
+.tw-input:disabled, .tw-select:disabled {
+  background: var(--tw-fill-disabled);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.tw-input--num { width: 92px; }
+
+/* ===================== Checkbox（AntD 三态复刻，主色换成 --accent） ===================== */
+.tw-check {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+  user-select: none;
+}
+.tw-check input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.tw-check-box {
+  position: relative;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--tw-radius-sm);
+  background: var(--tw-elevated);
+  transition: background var(--tw-motion), border-color var(--tw-motion);
+}
+.tw-check-box::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 22%;
+  width: 5px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-top: 0;
+  border-left: 0;
+  opacity: 0;
+  transform: rotate(45deg) scale(0) translate(-50%, -50%);
+  transition: all .1s cubic-bezier(.71, -.46, .88, .6), opacity .1s;
+}
+.tw-check:hover .tw-check-box { border-color: var(--accent); }
+.tw-check input:checked ~ .tw-check-box { background: var(--accent); border-color: var(--accent); }
+.tw-check input:checked ~ .tw-check-box::after {
+  opacity: 1;
+  transform: rotate(45deg) scale(1) translate(-50%, -50%);
+  transition: all .2s cubic-bezier(.12, .4, .29, 1.46) .1s;
+}
+/* 半选：方块，不是对钩 */
+.tw-check.is-indeterminate input ~ .tw-check-box { background: var(--tw-elevated); border-color: var(--line); }
+.tw-check.is-indeterminate input ~ .tw-check-box::after {
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border: 0;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  transition: none;
+}
+.tw-check.is-indeterminate:hover .tw-check-box { border-color: var(--accent); }
+.tw-check input:focus-visible ~ .tw-check-box { outline: 4px solid var(--tw-ring); outline-offset: 0; }
+.tw-check:has(input:disabled) { cursor: not-allowed; color: var(--muted); }
+.tw-check input:disabled ~ .tw-check-box { background: var(--tw-fill-disabled); border-color: var(--line); }
+.tw-check input:disabled:checked ~ .tw-check-box::after { border-color: var(--muted); }
+.tw-check:has(input:disabled):hover .tw-check-box { border-color: var(--line); }
+
+.tw-check-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+.tw-check-count { color: var(--muted); font-size: 12px; }
+
+/* ===================== 工具条 / 批量操作条 ===================== */
+.tw-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--mint) 14%, var(--tw-elevated));
+}
+.tw-toolbar-label { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.tw-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.tw-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: var(--tw-radius);
+  background: color-mix(in srgb, var(--mint) 58%, var(--tw-elevated));
+  font-size: 13px;
+}
+.tw-selection b { font-weight: 600; }
+
+/* 联动约束条。刻意和「已选 N 位」的薄荷绿分开配色：
+   选择是老师主动做的，约束是从别处点进来的，撤销路径也不同，长得一样会被当成同一个东西。 */
+.tw-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 34%, transparent);
+  border-radius: var(--tw-radius);
+  background: color-mix(in srgb, var(--warn) 10%, var(--tw-elevated));
+  font-size: 13px;
+}
+.tw-scope b { font-weight: 600; }
+
+/* 可点的统计块。整块可点，不是只有数字可点——32px 的点击区太小。 */
+.tw-stat--link {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-right: 1px solid var(--tw-line-soft);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--tw-motion);
+}
+.tw-stat--link:last-child { border-right: 0; }
+.tw-stat--link:hover { background: var(--tw-fill-hover); }
+.tw-stat--link:focus-visible { outline: 4px solid var(--tw-ring); outline-offset: -4px; }
+.tw-stat--link .tw-stat-label { text-decoration: underline dotted color-mix(in srgb, var(--ink) 30%, transparent); text-underline-offset: 3px; }
+
+/* 可点的标签（学员行的「待批改 N」）。 */
+.tw-tag--action { font: inherit; font-size: 12px; cursor: pointer; transition: border-color var(--tw-motion); }
+.tw-tag--action:hover { border-color: currentColor; }
+.tw-tag--action:focus-visible { outline: 4px solid var(--tw-ring); outline-offset: 0; }
+
+.tw-body-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 6px; }
+
+/* ===================== 表格 ===================== */
+.tw-table-wrap { min-width: 0; overflow-x: auto; }
+.tw-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+.tw-table th {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--tw-fill-head);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+}
+.tw-table td {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--tw-line-soft);
+  line-height: 22px;
+  vertical-align: middle;
+}
+.tw-table tbody tr { transition: background var(--tw-motion); }
+.tw-table tbody tr:hover { background: var(--tw-fill-hover); }
+.tw-table tbody tr.is-selected { background: var(--tw-fill-active); }
+.tw-table tbody tr:last-child td { border-bottom: 0; }
+.tw-table .tw-col-check { width: 46px; padding-right: 0; }
+.tw-table .tw-col-num { text-align: right; font-variant-numeric: tabular-nums; }
+.tw-name { display: grid; gap: 1px; }
+.tw-name b { font-weight: 600; }
+.tw-name span { color: var(--muted); font-size: 12px; line-height: 18px; }
+
+/* ===================== 标签 / 状态点 ===================== */
+.tw-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid;
+  border-radius: var(--tw-radius-sm);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.tw-tag--ok { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); background: color-mix(in srgb, var(--mint) 52%, var(--tw-elevated)); }
+.tw-tag--warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 34%, transparent); background: color-mix(in srgb, var(--warn) 10%, var(--tw-elevated)); }
+.tw-tag--risk { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 34%, transparent); background: color-mix(in srgb, var(--danger) 10%, var(--tw-elevated)); }
+.tw-tag--idle { color: var(--muted); border-color: var(--line); background: color-mix(in srgb, var(--ink) 4%, var(--tw-elevated)); }
+
+.tw-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.tw-status::before { content: ""; flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.tw-status--ok { color: var(--accent); }
+.tw-status--warn { color: var(--warn); }
+.tw-status--risk { color: var(--danger); }
+.tw-status--idle { color: var(--muted); }
+
+.tw-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tw-count--warn { background: var(--warn); }
+
+/* ===================== 折叠项（作业 / 考试） ===================== */
+.tw-item { border-bottom: 1px solid var(--tw-line-soft); }
+.tw-item:last-child { border-bottom: 0; }
+.tw-item > summary {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  list-style: none;
+  cursor: pointer;
+  transition: background var(--tw-motion);
+}
+.tw-item > summary::-webkit-details-marker { display: none; }
+.tw-item > summary:hover { background: var(--tw-fill-hover); }
+.tw-item > summary:focus-visible { outline: 4px solid var(--tw-ring); outline-offset: -4px; }
+.tw-item-arrow {
+  width: 16px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  transition: transform var(--tw-motion);
+}
+.tw-item[open] .tw-item-arrow { transform: rotate(90deg); }
+.tw-item-title { min-width: 0; display: grid; gap: 3px; }
+.tw-item-title b { font-weight: 600; overflow-wrap: anywhere; }
+.tw-item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.tw-item-stat { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.tw-item-stat b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tw-item-body { padding: 0 16px 14px 44px; }
+.tw-progress { width: 128px; height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 9%, var(--tw-elevated)); overflow: hidden; }
+.tw-progress i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .3s var(--tw-motion); }
+.tw-progress--warn i { background: var(--warn); }
+.tw-names { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.tw-names span {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--tw-radius-sm);
+  background: var(--tw-elevated);
+  font-size: 12px;
+  line-height: 20px;
+}
+.tw-body-label { color: var(--muted); font-size: 12px; }
+
+/* ===================== 任务内「逐题表现」 ===================== */
+.tw-analysis { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.tw-analysis-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.tw-analysis-head b { font-size: 13px; font-weight: 600; }
+.tw-analysis-head span { color: var(--muted); font-size: 12px; }
+.tw-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 30px;
+  margin-bottom: 10px;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--tw-line-soft);
+}
+.tw-spark i {
+  flex: 1 1 6px;
+  max-width: 14px;
+  min-height: 2px;
+  border-radius: 1px 1px 0 0;
+  background: var(--accent);
+  opacity: .8;
+}
+.tw-spark i.is-warn { background: var(--warn); }
+.tw-spark i.is-risk { background: var(--danger); }
+.tw-spark i.is-focus { opacity: 1; outline: 1px solid color-mix(in srgb, var(--ink) 30%, transparent); }
+.tw-item-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.tw-item-table td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--tw-line-soft); vertical-align: middle; }
+.tw-item-table tr:last-child td { border-bottom: 0; }
+.tw-item-table td:last-child { padding-right: 0; }
+.tw-item-no { width: 32px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tw-item-type { width: 60px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.tw-item-rate { width: 62px; text-align: right; }
+.tw-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  list-style: none;
+  cursor: pointer;
+}
+.tw-more > summary::-webkit-details-marker { display: none; }
+.tw-more > summary::after { content: "▾"; font-size: 10px; }
+.tw-more[open] > summary::after { content: "▴"; }
+.tw-analysis-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 18px; }
+/* 提示不是测量值。得分率标签是实心色块，suspect 是虚线框 + ⚑，
+   否则 30–60% 那档的 warn 色率标签和 suspect 徽标会长得一模一样。 */
+.tw-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px dashed color-mix(in srgb, var(--danger) 46%, transparent);
+  border-radius: var(--tw-radius-sm);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.tw-flag::before { content: "⚑"; font-size: 10px; }
+
+/* ===================== 跨任务最弱题 ===================== */
+.tw-source-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--tw-radius-sm);
+  background: var(--tw-elevated);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color var(--tw-motion), color var(--tw-motion);
+}
+.tw-source-chip:hover { border-color: var(--accent); color: var(--accent); }
+.tw-source-chip:disabled { color: var(--muted); cursor: not-allowed; }
+.tw-source-chip:focus-visible { outline: 4px solid var(--tw-ring); outline-offset: 0; }
+.tw-orphan-note {
+  margin: 0;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--warn) 8%, var(--tw-elevated));
+  color: color-mix(in srgb, var(--warn) 78%, var(--ink));
+  font-size: 12px;
+  line-height: 18px;
+}
+.tw-flash { animation: tw-flash 1.2s ease-out; }
+@keyframes tw-flash {
+  0%, 40% { background: color-mix(in srgb, var(--mint) 70%, var(--tw-elevated)); }
+  100% { background: transparent; }
+}
+
+/* ===================== 队列 ===================== */
+.tw-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--tw-line-soft);
+  transition: background var(--tw-motion);
+}
+.tw-queue-row:last-child { border-bottom: 0; }
+.tw-queue-row:hover { background: var(--tw-fill-hover); }
+.tw-queue-row > div { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.tw-queue-row b { font-weight: 600; overflow-wrap: anywhere; }
+.tw-queue-row span { color: var(--muted); font-size: 12px; }
+
+/* ===================== 空 / 载入 / 出错态 ===================== */
+.tw-empty { padding: 28px 16px; color: var(--muted); font-size: 13px; text-align: center; }
+.tw-empty::before {
+  content: "";
+  display: block;
+  width: 40px;
+  height: 26px;
+  margin: 0 auto 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--tw-radius-sm);
+  background: linear-gradient(var(--tw-fill-head), var(--tw-fill-head)) no-repeat center / 60% 1px;
+}
+.tw-empty--error { color: var(--danger); }
+.tw-page-state { min-height: 20px; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
+
+/* ===================== 响应式 ===================== */
+@media (max-width: 1180px) {
+  .tw-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 860px) {
+  .teaching-v2 .sidebar { display: none; }
+  .teaching-v2 .topbar { height: auto; min-height: 56px; padding: 12px 16px; }
+  .teaching-v2 .topbar-right .muted { display: none; }
+  .tw-page, .tw-demo-note { padding-left: 16px; padding-right: 16px; }
+  .tw-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .tw-head-actions { flex-wrap: wrap; }
+  .tw-field { min-width: 0; }
+  .tw-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tw-stat { border-right: 0; border-bottom: 1px solid var(--tw-line-soft); }
+  .tw-stat:nth-child(odd) { border-right: 1px solid var(--tw-line-soft); }
+  .tw-table, .tw-table tbody, .tw-table tr, .tw-table td { display: block; width: 100%; }
+  /* 表头整体收起，但带行选择的表要留一条「全选本页」，否则移动端拿不到全选。 */
+  .tw-table thead { display: none; }
+  .tw-table thead:has(.tw-col-check) { display: block; }
+  .tw-table thead tr {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--tw-fill-head);
+  }
+  .tw-table thead th { display: none; }
+  .tw-table thead th.tw-col-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+  .tw-table thead th.tw-col-check::after {
+    content: "全选本页";
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .tw-table tbody tr { position: relative; padding: 10px 16px 10px 46px; border-bottom: 1px solid var(--tw-line-soft); }
+  .tw-table td { padding: 3px 0; border: 0; display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; }
+  .tw-table td::before { content: attr(data-label); color: var(--muted); font-size: 12px; }
+  .tw-table td.tw-col-check { position: absolute; left: 16px; top: 12px; width: auto; padding: 0; display: block; }
+  .tw-table td.tw-col-check::before { content: none; }
+  .tw-table td.tw-col-num { text-align: left; }
+  .tw-item > summary { grid-template-columns: 16px minmax(0, 1fr); }
+  .tw-item-stat { grid-column: 2; }
+  .tw-item-body { padding-left: 44px; }
+}
+</style>
+</head>
+<body class="admin-teaching teaching-v2">
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <p class="tw-demo-note">DEMO：本页数据全部由页内 mock 提供，不连后端。用来评审视觉与交互，不代表已实现。</p>
+    <div class="content">
+      <div class="tw-page">
+
+        <section class="tw-head">
+          <div>
+            <h1 id="teachingTitle">教学工作台</h1>
+            <p>按班级查看学习活动、任务进度与需要处理的事项。</p>
+          </div>
+          <div class="tw-head-actions">
+            <label class="tw-field" for="classSelect">
+              <span>当前班级</span>
+              <select class="tw-select" id="classSelect"></select>
+            </label>
+            <button class="tw-btn" id="refreshBtn" type="button">刷新</button>
+            <button class="tw-btn tw-btn--primary" id="exportBtn" type="button">导出学情</button>
+          </div>
+        </section>
+
+        <p class="tw-page-state" id="classesState" role="status" aria-live="polite"></p>
+
+        <section id="workbench" aria-live="polite">
+
+          <!-- 班级概览 -->
+          <div class="tw-stack">
+            <section class="tw-card" aria-labelledby="overviewTitle">
+              <div class="tw-card-head">
+                <div>
+                  <h2 id="overviewTitle">班级概览</h2>
+                  <p id="overviewHint"></p>
+                </div>
+              </div>
+              <div class="tw-card-body tw-card-body--flush">
+                <div class="tw-stats" id="overviewMetrics"></div>
+              </div>
+            </section>
+          </div>
+
+          <div class="tw-grid tw-stack">
+
+            <!-- 学员学习活动：checkbox 三态 + 行选择 + 批量条 -->
+            <section class="tw-card" aria-labelledby="studentsTitle">
+              <div class="tw-card-head">
+                <div>
+                  <h2 id="studentsTitle">学员学习活动</h2>
+                  <p>按最近活动排序；勾选后可对所选学员批量处理。</p>
+                </div>
+              </div>
+
+              <form class="tw-toolbar" id="studentFilter">
+                <span class="tw-toolbar-label">快捷筛选</span>
+                <div class="tw-check-group" id="quickFilters"></div>
+                <div class="tw-toolbar-row">
+                  <label class="tw-toolbar-label" for="inactiveDays">连续未学习 ≥</label>
+                  <input class="tw-input tw-input--num" id="inactiveDays" inputmode="numeric" min="0" name="inactiveDays" type="number" />
+                  <span class="tw-toolbar-label">天</span>
+                  <button class="tw-btn" type="submit">筛选</button>
+                  <button class="tw-btn tw-btn--link" id="clearStudentFilter" type="button">清除</button>
+                </div>
+              </form>
+
+              <div class="tw-scope" id="scopeBar" hidden>
+                <span>名单已被约束为：<b id="scopeLabel"></b></span>
+                <span class="tw-spacer"></span>
+                <button class="tw-btn tw-btn--link" id="scopeClear" type="button">取消约束</button>
+              </div>
+
+              <div class="tw-selection" id="selectionBar" hidden>
+                <span>已选 <b id="selectionCount">0</b> 位学员</span>
+                <button class="tw-btn tw-btn--sm" id="bulkExport" type="button">导出所选</button>
+                <button class="tw-btn tw-btn--sm" id="bulkFollow" type="button">标记跟进</button>
+                <span class="tw-spacer"></span>
+                <button class="tw-btn tw-btn--link" id="selectionClear" type="button">清空选择</button>
+              </div>
+
+              <div class="tw-card-body tw-card-body--flush">
+                <div class="tw-table-wrap">
+                  <table class="tw-table">
+                    <thead>
+                      <tr>
+                        <th class="tw-col-check" scope="col">
+                          <label class="tw-check" id="selectAllLabel">
+                            <input id="selectAll" type="checkbox" aria-label="全选本页学员" />
+                            <span class="tw-check-box"></span>
+                          </label>
+                        </th>
+                        <th scope="col">学员</th>
+                        <th scope="col">最近活动</th>
+                        <th class="tw-col-num" scope="col">未学习天数</th>
+                        <th scope="col">学习状态</th>
+                        <th scope="col">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="studentRows"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tw-card-foot" id="studentPagination"></div>
+            </section>
+
+            <!-- 待批改队列 -->
+            <section class="tw-card" aria-labelledby="reviewTitle">
+              <div class="tw-card-head">
+                <div>
+                  <h2 id="reviewTitle">待批改队列</h2>
+                  <p>按提交时间排列，等待越久越靠前。</p>
+                </div>
+                <div class="tw-card-head-extra"><span class="tw-count tw-count--warn" id="reviewCount">0</span></div>
+              </div>
+              <div class="tw-scope" id="reviewScope" hidden>
+                <span>只看 <b id="reviewScopeLabel"></b></span>
+                <span class="tw-spacer"></span>
+                <button class="tw-btn tw-btn--link" id="reviewScopeClear" type="button">看全部</button>
+              </div>
+              <div class="tw-card-body tw-card-body--flush">
+                <div id="reviewRows"></div>
+              </div>
+            </section>
+          </div>
+
+          <!-- 作业完成情况 -->
+          <div class="tw-stack">
+            <section class="tw-card" aria-labelledby="homeworkTitle">
+              <div class="tw-card-head">
+                <div>
+                  <h2 id="homeworkTitle">作业完成情况</h2>
+                  <p>展开可看未提交名单；展示内容以接口返回为准。</p>
+                </div>
+              </div>
+              <div class="tw-card-body tw-card-body--flush">
+                <div id="homeworkRows"></div>
+              </div>
+            </section>
+          </div>
+
+          <div class="tw-grid tw-stack">
+            <section class="tw-card" aria-labelledby="examTitle">
+              <div class="tw-card-head">
+                <div>
+                  <h2 id="examTitle">考试参与</h2>
+                  <p>名单未知时不显示推断出的未参与人数。</p>
+                </div>
+              </div>
+              <div class="tw-card-body tw-card-body--flush">
+                <div id="examRows"></div>
+              </div>
+            </section>
+
+            <section class="tw-card" aria-labelledby="weakTitle">
+              <div class="tw-card-head">
+                <div>
+                  <h2 id="weakTitle">跨任务最弱题</h2>
+                  <p>全班所有已作答题目按表现升序，点来源可跳到对应任务。</p>
+                </div>
+              </div>
+              <div class="tw-card-body tw-card-body--flush">
+                <div class="tw-table-wrap">
+                  <table class="tw-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">题目</th>
+                        <th scope="col">来源</th>
+                        <th class="tw-col-num" scope="col">表现</th>
+                      </tr>
+                    </thead>
+                    <tbody id="weakRows"></tbody>
+                  </table>
+                </div>
+              </div>
+              <p class="tw-orphan-note" id="weakOrphan" hidden></p>
+            </section>
+          </div>
+
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+// ---------- 让共享布局在无后端时也能渲染 ----------
+const realFetch = window.fetch.bind(window);
+window.fetch = async (url, options = {}) => {
+  const path = String(url);
+  if (path.includes("/api/admin/me")) {
+    return new Response(
+      JSON.stringify({ id: 1, display_name: "演示账号", role: "teacher", can_manage_admin_roles: false }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  return realFetch(url, options);
+};
+const { initLayout } = await import("./admin-layout.js");
+initLayout();
+document.querySelector(".crumb").innerHTML = "后台管理 / <b>运营 / 教学工作台（DEMO）</b>";
+
+// ---------- MOCK：扮演 /api/admin/teaching/* ----------
+// 每个 label 字段都是「接口应该返回、前端不许自备」的文案。文件末尾列了缺口清单。
+const DAY = 86400000;
+const ago = (days, hour = 10) => {
+  const date = new Date(Date.now() - days * DAY);
+  date.setHours(hour, days % 2 ? 12 : 40, 0, 0);
+  return date.toISOString();
+};
+
+// 名单里的一个人。id 是必须的——「未提交名单 → 筛选这几位」这条联动传的是 student_ids，
+// 传名字会在重名时静默筛错人。build_homework_roster 本来就返回 {"id":…, "username":…}。
+const P = (id, username) => ({ student: { id, username } });
+
+const CLASSES = [
+  { id: 3, name: "C++ 入门 · 三班", course_title: "C++ 入门（秋季）· 王老师带班" },
+  { id: 4, name: "Scratch 创意 · 一班", course_title: "Scratch 创意编程（秋季）· 王老师带班" },
+];
+
+const MOCK = {
+  3: {
+    overview: {
+      class_id: 3,
+      insight: { enrolled_people: 28 },
+      // 建议新增：接口直接给 label，前端别再拿 key.replace(/_/g," ") 凑
+      metrics: [
+        { key: "enrolled_people", label: "在读学员", value: 28, unit: "人" },
+        { key: "active_7d_people", label: "近 7 天活跃", value: 21, unit: "人", hint: "占在读 75%" },
+        // filter_key：这块统计点一下就把学员表约束到同一批人。
+        // 前端不认识 "inactive_7d" 是什么意思，只负责带着这个 key 去勾对应筛选项——
+        // 判据留在后端，指标和筛选因此天然同源，不会出现「点 4 人筛出 3 人」。
+        { key: "inactive_7d_people", label: "连续 7 天未学习", value: 4, unit: "人", tone: "warn",
+          hint: "含 1 位从未学习", filter_key: "inactive_7d" },
+        { key: "pending_review_items", label: "待批改作品", value: 6, unit: "件", tone: "warn",
+          hint: "最久已等 3 天", focus: "reviewTitle" },
+        { key: "homework_on_time_rate", label: "作业按时提交率", value: "82%", hint: "较上周 +6%" },
+      ],
+    },
+    students: {
+      total: 28,
+      // 建议新增：快捷筛选项由接口下发，避免前端自备状态文案
+      // count 必须和勾上之后筛出来的人数逐字相等，否则联动一点就露馅。
+      // 真实实现里 count 是服务端在全班算的、行是当前分页——本 mock 把两者收敛到同一批人。
+      filters: [
+        { key: "inactive_7d", label: "连续 7 天未学习", count: 4 },
+        { key: "never_active", label: "从未学习", count: 1 },
+        { key: "has_pending_review", label: "有待批改作品", count: 3 },
+        { key: "homework_missing", label: "本周作业未提交", count: 5 },
+      ],
+      items: [
+        { student: { id: 101, username: "陈屿" }, last_activity_at: ago(0, 9), inactive_days: 0, never_active: false,
+          activity_label: "活跃", activity_tone: "ok", pending_review: 2, flags: ["has_pending_review"],
+          profile_endpoint: "#student-101" },
+        { student: { id: 102, username: "林知遥" }, last_activity_at: ago(1), inactive_days: 1, never_active: false,
+          activity_label: "活跃", activity_tone: "ok", pending_review: 0, flags: [], profile_endpoint: "#student-102" },
+        { student: { id: 103, username: "苏见山" }, last_activity_at: ago(2), inactive_days: 2, never_active: false,
+          activity_label: "活跃", activity_tone: "ok", pending_review: 3, flags: ["has_pending_review"],
+          profile_endpoint: "#student-103" },
+        { student: { id: 104, username: "赵行之" }, last_activity_at: ago(5), inactive_days: 5, never_active: false,
+          activity_label: "需关注", activity_tone: "warn", pending_review: 0, flags: ["homework_missing"],
+          profile_endpoint: "#student-104" },
+        { student: { id: 105, username: "何砚秋" }, last_activity_at: ago(9), inactive_days: 9, never_active: false,
+          activity_label: "掉队风险", activity_tone: "risk", pending_review: 1,
+          flags: ["inactive_7d", "has_pending_review", "homework_missing"], profile_endpoint: "#student-105" },
+        { student: { id: 106, username: "周桉" }, last_activity_at: ago(14), inactive_days: 14, never_active: false,
+          activity_label: "掉队风险", activity_tone: "risk", pending_review: 0, flags: ["inactive_7d", "homework_missing"],
+          profile_endpoint: "#student-106" },
+        { student: { id: 107, username: "吴听澜" }, last_activity_at: null, inactive_days: null, never_active: true,
+          activity_label: "从未学习", activity_tone: "risk", pending_review: 0, flags: ["never_active", "inactive_7d", "homework_missing"],
+          profile_endpoint: "#student-107" },
+        // 课包资格已过期：build_homework_roster 已经在返回 access_blocked
+        // （course_id not in enrolled_course_ids(db, user)）。人还在班里、还要出现在名单和统计里，
+        // 但布置不了新任务，所以复选框禁用并给出原因——这是 checkbox disabled 态的真实用途。
+        { student: { id: 108, username: "郑允" }, last_activity_at: ago(31), inactive_days: 31, never_active: false,
+          activity_label: "掉队风险", activity_tone: "risk", pending_review: 0,
+          flags: ["inactive_7d", "homework_missing"],
+          access_blocked: true, access_label: "课包已到期",
+          selectable: false, unselectable_reason: "课包已到期，无法接收新任务", profile_endpoint: "#student-108" },
+      ],
+    },
+    // 队列条目数按学员汇总，必须与学员表那一列 pending_review 逐条对得上
+    //（陈屿 2、苏见山 3、何砚秋 1 = 6），否则点学员行上的「待批改 3」筛出来不是 3 条。
+    review: {
+      total: 6,
+      items: [
+        { submission_id: 9012, student: { id: 103, username: "苏见山" }, task_title: "第 6 课 · 弹球小游戏",
+          submitted_at: ago(3, 20), waiting_label: "已等 3 天", waiting_tone: "risk", review_endpoint: "#review-9012" },
+        { submission_id: 9013, student: { id: 101, username: "陈屿" }, task_title: "第 6 课 · 弹球小游戏",
+          submitted_at: ago(2, 19), waiting_label: "已等 2 天", waiting_tone: "warn", review_endpoint: "#review-9013" },
+        { submission_id: 9016, student: { id: 103, username: "苏见山" }, task_title: "第 4 课 · 打地鼠",
+          submitted_at: ago(2, 18), waiting_label: "已等 2 天", waiting_tone: "warn", review_endpoint: "#review-9016" },
+        { submission_id: 9017, student: { id: 101, username: "陈屿" }, task_title: "第 5 课 · 迷宫寻路",
+          submitted_at: ago(1, 20), waiting_label: "已等 1 天", waiting_tone: "warn", review_endpoint: "#review-9017" },
+        { submission_id: 9014, student: { id: 105, username: "何砚秋" }, task_title: "第 5 课 · 迷宫寻路",
+          submitted_at: ago(0, 21), waiting_label: "今天提交", waiting_tone: "ok", review_endpoint: "#review-9014" },
+        { submission_id: 9015, student: { id: 103, username: "苏见山" }, task_title: "第 5 课 · 迷宫寻路",
+          submitted_at: ago(0, 22), waiting_label: "今天提交", waiting_tone: "ok", review_endpoint: "#review-9015" },
+      ],
+    },
+    // 注意：/homework 只走 block_type ∈ {homework, scratch}（lesson_homework_kinds.KINDS），
+    // block_type == "practice" 不在这里——但 build_weak_items 会为 practice 出题目。
+    // 这条不对称是下面「未归属」那段的由来，mock 照实还原，不要"顺手补齐"。
+    homework: {
+      items: [
+        { source_type: "lesson_homework", source_id: 61, title: "第 6 课 · 循环与判断 课后卷",
+          roster_people: 28, submitted_people: 23, not_submitted_people: 5, submitted_attempts: 31,
+          phase_label: "进行中", phase_tone: "ok", due_label: "8 月 24 日 22:00 截止",
+          // 这 5 位正好就是快捷筛选「本周作业未提交」的那 5 位——两处是同一份事实的两个投影，
+          // 所以点开这份作业的「筛选这 5 位」和点那个筛选项，落到学员表上必须是同一批人。
+          not_submitted: [P(104, "赵行之"), P(105, "何砚秋"), P(106, "周桉"), P(107, "吴听澜"), P(108, "郑允")] },
+        { source_type: "lesson_homework", source_id: 55, title: "第 5 课 · 数组基础 课后卷",
+          roster_people: 28, submitted_people: 26, not_submitted_people: 2, submitted_attempts: 34,
+          phase_label: "已批改", phase_tone: "ok", due_label: "8 月 17 日 22:00 已截止",
+          not_submitted: [P(107, "吴听澜"), P(108, "郑允")] },
+        // Scratch 作业：build_weak_items 根本不走 scratch 块，永远没有逐题统计。
+        // 必须说"没有这回事"，不能渲染成空列表（那看着像"全对"）。
+        { source_type: "lesson_scratch", source_id: 63, title: "第 6 课 · 弹球小游戏（Scratch）",
+          roster_people: 28, submitted_people: 23, not_submitted_people: 5, submitted_attempts: 26,
+          phase_label: "进行中", phase_tone: "ok", due_label: "8 月 25 日 22:00 截止",
+          analysis_unavailable: "kind_unsupported",
+          analysis_unavailable_label: "Scratch 作业按作品批改，没有逐题得分率。",
+          not_submitted: [P(104, "赵行之"), P(105, "何砚秋"), P(106, "周桉"), P(107, "吴听澜"), P(108, "郑允")] },
+        // 有题但一个代表作答都没有：_paper_items 过滤掉 score_rate is None，
+        // 整份作业会一题都不返回。这时是"还没人交"，同样不能说成"暂无数据"。
+        // 刚布置，全班未交。真实接口这里会返回 28 条；mock 只造了学员表第一页那 8 位，
+        // 所以「筛选这几位」的按钮文案取名单长度而不是 not_submitted_people。
+        { source_type: "lesson_homework", source_id: 70, title: "第 7 课 · 指针入门 课后卷",
+          roster_people: 28, submitted_people: 0, not_submitted_people: 28, submitted_attempts: 0,
+          phase_label: "待完成", phase_tone: "idle", due_label: "8 月 31 日 22:00 截止",
+          analysis_unavailable: "no_attempts",
+          analysis_unavailable_label: "还没有代表作答，逐题得分率要等有人提交后才有。",
+          not_submitted: [P(101, "陈屿"), P(102, "林知遥"), P(103, "苏见山"), P(104, "赵行之"),
+                          P(105, "何砚秋"), P(106, "周桉"), P(107, "吴听澜"), P(108, "郑允")] },
+      ],
+    },
+    // exam_participation 返回的键是 exam_link_id，不是 id/source_id——
+    // 和 weak item 的 (source="exam_link", source_id) 对得上，但键名不同名。
+    exams: {
+      items: [
+        { exam_link_id: 12, name: "三班期中考", roster_people: 28, submitted_people: 27, not_submitted_people: 1,
+          submitted_attempts: 27, phase_label: "已结束", phase_tone: "idle", due_label: "8 月 10 日 14:00–15:30",
+          not_submitted: [P(107, "吴听澜")] },
+        { exam_link_id: 18, name: "第三单元小测", roster_people: null, submitted_people: 12, not_submitted_people: null,
+          submitted_attempts: 12, phase_label: "进行中", phase_tone: "ok", due_label: "8 月 22 日 20:00 截止",
+          analysis_unavailable: "roster_unknown",
+          analysis_unavailable_label: "名单未知，得分率的分母不可信，暂不展示逐题统计。",
+          not_submitted: [] },
+      ],
+    },
+    // /weak-items 的真实语义：**全部已作答题目**按得分率升序，不只是"低正确率"那几道。
+    // 所以按任务分组后可以直接画出整份卷子的逐题剖面，不用再开接口。
+    weak: {
+      // build_item_analysis 的 grouping 现在被 _paper_items 丢掉了（`_grouping, items = ...`）。
+      // 没有它，前端分不清"区分度没算"和"算出来是 0"。这里按"接口应该带上"来 mock。
+      grouping: {
+        "lesson_homework:61": { enabled: true, participants: 23, min_participants: 20, stable: false },
+        "lesson_homework:55": { enabled: true, participants: 26, min_participants: 20, stable: false },
+        "exam_link:12": { enabled: true, participants: 27, min_participants: 20, stable: false },
+        "lesson_practice:48": { enabled: false, participants: 18, min_participants: 20, stable: false },
+        "lesson_practice:32": { enabled: false, participants: 12, min_participants: 20, stable: false },
+        "exam_link:19": { enabled: false, participants: 9, min_participants: 20, stable: false },
+      },
+      items: [
+        // ---- 第 6 课 · 循环与判断 课后卷（lesson_homework:61，12 题）----
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 7, type_label: "编程题", title: "循环嵌套输出图形", full_score: 20, answered: 23,
+          paper_score_rate: 0.18, discrimination: 0.04, suspect: "all_low", suspect_label: "全员偏低，先查题" },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 11, type_label: "编程题", title: "统计成绩区间分布", full_score: 20, answered: 23,
+          paper_score_rate: 0.31, discrimination: 0.22, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 4, type_label: "多选题", title: "break 与 continue 的作用范围", full_score: 4, answered: 23,
+          paper_score_rate: 0.39, discrimination: -0.18, suspect: "negative_discrimination", suspect_label: "高分组反而更差，先查题" },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 9, type_label: "填空题", title: "补全 while 循环的终止条件", full_score: 4, answered: 23,
+          paper_score_rate: 0.52, discrimination: 0.31, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 2, type_label: "单选题", title: "for 循环三个表达式的执行顺序", full_score: 3, answered: 23,
+          paper_score_rate: 0.61, discrimination: 0.28, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 6, type_label: "判断题", title: "do-while 至少执行一次", full_score: 2, answered: 23,
+          paper_score_rate: 0.7, discrimination: 0.19, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 12, type_label: "编程题", title: "水仙花数", full_score: 20, answered: 23,
+          paper_score_rate: 0.74, discrimination: 0.33, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 1, type_label: "单选题", title: "循环体执行次数", full_score: 3, answered: 23,
+          paper_score_rate: 0.83, discrimination: 0.21, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 3, type_label: "单选题", title: "if-else 配对规则", full_score: 3, answered: 23,
+          paper_score_rate: 0.87, discrimination: 0.15, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 5, type_label: "判断题", title: "continue 会跳出整个循环", full_score: 2, answered: 23,
+          paper_score_rate: 0.91, discrimination: 0.12, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 8, type_label: "填空题", title: "写出循环输出结果", full_score: 4, answered: 23,
+          paper_score_rate: 0.93, discrimination: 0.1, suspect: null },
+        { source: "lesson_homework", source_id: 61, source_title: "第 6 课 · 循环与判断 课后卷", rate_label: "得分率",
+          sort_order: 10, type_label: "单选题", title: "嵌套循环的执行总次数", full_score: 3, answered: 23,
+          paper_score_rate: 0.96, discrimination: 0.08, suspect: null },
+
+        // ---- 第 5 课 · 数组基础 课后卷（lesson_homework:55，6 题）----
+        { source: "lesson_homework", source_id: 55, source_title: "第 5 课 · 数组基础 课后卷", rate_label: "得分率",
+          sort_order: 5, type_label: "编程题", title: "二维数组求列和", full_score: 20, answered: 26,
+          paper_score_rate: 0.34, discrimination: 0.29, suspect: null },
+        { source: "lesson_homework", source_id: 55, source_title: "第 5 课 · 数组基础 课后卷", rate_label: "得分率",
+          sort_order: 6, type_label: "编程题", title: "字符串反转（不使用库函数）", full_score: 20, answered: 26,
+          paper_score_rate: 0.42, discrimination: 0.35, suspect: null },
+        { source: "lesson_homework", source_id: 55, source_title: "第 5 课 · 数组基础 课后卷", rate_label: "得分率",
+          sort_order: 3, type_label: "填空题", title: "数组下标越界的后果", full_score: 4, answered: 26,
+          paper_score_rate: 0.66, discrimination: 0.24, suspect: null },
+        { source: "lesson_homework", source_id: 55, source_title: "第 5 课 · 数组基础 课后卷", rate_label: "得分率",
+          sort_order: 1, type_label: "单选题", title: "数组名的含义", full_score: 3, answered: 26,
+          paper_score_rate: 0.81, discrimination: 0.18, suspect: null },
+        { source: "lesson_homework", source_id: 55, source_title: "第 5 课 · 数组基础 课后卷", rate_label: "得分率",
+          sort_order: 2, type_label: "单选题", title: "数组初始化的合法写法", full_score: 3, answered: 26,
+          paper_score_rate: 0.88, discrimination: 0.14, suspect: null },
+        { source: "lesson_homework", source_id: 55, source_title: "第 5 课 · 数组基础 课后卷", rate_label: "得分率",
+          sort_order: 4, type_label: "判断题", title: "数组长度可以运行时改变", full_score: 2, answered: 26,
+          paper_score_rate: 0.94, discrimination: 0.09, suspect: null },
+
+        // ---- 三班期中考（exam_link:12，6 题）----
+        { source: "exam_link", source_id: 12, source_title: "三班期中考", rate_label: "得分率",
+          sort_order: 6, type_label: "编程题", title: "冒泡排序（要求原地）", full_score: 25, answered: 27,
+          paper_score_rate: 0.29, discrimination: 0.41, suspect: null },
+        { source: "exam_link", source_id: 12, source_title: "三班期中考", rate_label: "得分率",
+          sort_order: 4, type_label: "多选题", title: "while 与 do-while 的差别", full_score: 4, answered: 27,
+          paper_score_rate: 0.55, discrimination: -0.12, suspect: "negative_discrimination", suspect_label: "高分组反而更差，先查题" },
+        { source: "exam_link", source_id: 12, source_title: "三班期中考", rate_label: "得分率",
+          sort_order: 5, type_label: "填空题", title: "补全递推公式", full_score: 5, answered: 27,
+          paper_score_rate: 0.63, discrimination: 0.3, suspect: null },
+        { source: "exam_link", source_id: 12, source_title: "三班期中考", rate_label: "得分率",
+          sort_order: 2, type_label: "单选题", title: "运算符优先级", full_score: 3, answered: 27,
+          paper_score_rate: 0.78, discrimination: 0.26, suspect: null },
+        { source: "exam_link", source_id: 12, source_title: "三班期中考", rate_label: "得分率",
+          sort_order: 1, type_label: "单选题", title: "变量作用域", full_score: 3, answered: 27,
+          paper_score_rate: 0.85, discrimination: 0.2, suspect: null },
+        { source: "exam_link", source_id: 12, source_title: "三班期中考", rate_label: "得分率",
+          sort_order: 3, type_label: "判断题", title: "整数除法向零取整", full_score: 2, answered: 27,
+          paper_score_rate: 0.92, discrimination: 0.11, suspect: null },
+
+        // ---- 未归属①：练习块。/homework 不返回 practice，这些题在页面上没有宿主行 ----
+        { source: "lesson_practice", source_id: 48, source_title: "第 4 课 · 课堂随练", rate_label: "正确率",
+          sort_order: "2", type_label: "单选题", title: "循环变量的初值该取多少", full_score: 1, answered: 18,
+          practice_correct_rate: 0.22, discrimination: null, suspect: null },
+        { source: "lesson_practice", source_id: 48, source_title: "第 4 课 · 课堂随练", rate_label: "正确率",
+          sort_order: "3", type_label: "单选题", title: "循环条件写反的表现", full_score: 1, answered: 18,
+          practice_correct_rate: 0.44, discrimination: null, suspect: null },
+        { source: "lesson_practice", source_id: 32, source_title: "第 2 课 · 课堂随练", rate_label: "正确率",
+          sort_order: "1", type_label: "判断题", title: "变量必须先声明后使用", full_score: 1, answered: 12,
+          practice_correct_rate: 0.5, discrimination: null, suspect: null },
+
+        // ---- 未归属②：已停用的考试链接。build_weak_items 不看 ExamLink.status，
+        //      /exams 看（status == "active"），所以它出题、但没有宿主行 ----
+        { source: "exam_link", source_id: 19, source_title: "上学期旧卷补测（已停用）", rate_label: "得分率",
+          sort_order: 2, type_label: "编程题", title: "最大公约数", full_score: 20, answered: 9,
+          paper_score_rate: 0.37, discrimination: null, suspect: null },
+      ],
+    },
+  },
+  // 二班：全空，用来看空态
+  4: {
+    overview: { class_id: 4, insight: { enrolled_people: 0 }, metrics: [] },
+    students: { total: 0, filters: [], items: [] },
+    review: { total: 0, items: [] },
+    homework: { items: [] },
+    exams: { items: [] },
+    weak: { items: [] },
+  },
+};
+
+// ---------- 工具 ----------
+const $ = (id) => document.getElementById(id);
+const PAGE_SIZE = 5;
+const state = {
+  classId: CLASSES[0].id, page: 1, inactiveDays: "", quick: new Set(), selected: new Set(),
+  // 联动落点①：任务的未提交名单 → 学员表。按 student_ids 精确约束到这一份任务的这批人，
+  // 不复用 flag——flag 是跨任务的并集，点具体某份作业时会多筛出别的作业欠的人。
+  scopeIds: null, scopeLabel: "",
+  // 联动落点②：学员行的「待批改 N」→ 队列只看这个人。
+  reviewStudent: null,
+};
+
+const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+
+function formatDate(value) {
+  if (!value) return "暂无记录";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf())
+    ? String(value)
+    : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+const formatNumber = (value) => (value == null ? "名单未知" : String(value));
+const empty = (message) => `<p class="tw-empty">${esc(message)}</p>`;
+
+// ---------- 渲染 ----------
+function renderClassOptions() {
+  $("classSelect").innerHTML = CLASSES
+    .map((item) => `<option value="${item.id}">${esc(item.name)}</option>`)
+    .join("");
+  $("classSelect").value = String(state.classId);
+}
+
+function renderOverview(payload) {
+  const current = CLASSES.find((item) => item.id === state.classId);
+  $("overviewHint").textContent = current?.course_title || "";
+  const metrics = payload.metrics || [];
+  if (!metrics.length) {
+    $("overviewMetrics").innerHTML = empty("这个班级还没有可展示的概览数据。");
+    return;
+  }
+  $("overviewMetrics").innerHTML = metrics.map((metric) => {
+    // 带 filter_key / focus 的指标是可点的入口，其余是纯读数。可点的必须看起来可点。
+    const link = metric.filter_key || metric.focus;
+    const tag = link ? "button" : "div";
+    const attrs = link
+      ? ` type="button" class="tw-stat tw-stat--link${metric.tone ? ` tw-stat--${esc(metric.tone)}` : ""}"`
+        + (metric.filter_key ? ` data-metric-filter="${esc(metric.filter_key)}"` : "")
+        + (metric.focus ? ` data-metric-focus="${esc(metric.focus)}"` : "")
+      : ` class="tw-stat${metric.tone ? ` tw-stat--${esc(metric.tone)}` : ""}"`;
+    return `<${tag}${attrs}>
+      <div class="tw-stat-label">${esc(metric.label)}</div>
+      <div class="tw-stat-value">${esc(metric.value)}${metric.unit ? `<em>${esc(metric.unit)}</em>` : ""}</div>
+      <div class="tw-stat-foot">${esc(metric.hint || "")}</div>
+    </${tag}>`;
+  }).join("");
+}
+
+function renderQuickFilters(filters) {
+  $("quickFilters").innerHTML = filters.map((filter) => `
+    <label class="tw-check">
+      <input type="checkbox" value="${esc(filter.key)}"${state.quick.has(filter.key) ? " checked" : ""} />
+      <span class="tw-check-box"></span>
+      <span>${esc(filter.label)} <span class="tw-check-count">${filter.count}</span></span>
+    </label>`).join("");
+}
+
+function visibleStudents(payload) {
+  let rows = payload.items;
+  if (state.scopeIds) rows = rows.filter((row) => state.scopeIds.includes(row.student.id));
+  if (state.quick.size) rows = rows.filter((row) => [...state.quick].every((key) => (row.flags || []).includes(key)));
+  if (state.inactiveDays !== "") {
+    const threshold = Number(state.inactiveDays);
+    rows = rows.filter((row) => row.inactive_days != null && row.inactive_days >= threshold);
+  }
+  return rows;
+}
+
+// 联动进来的约束要显式显示、且随手能撤销。看不见来源的筛选比不筛更糟——
+// 老师会以为「这个班就剩这几个人」。
+function renderScopeBar() {
+  const bar = $("scopeBar");
+  bar.hidden = !state.scopeLabel;
+  if (state.scopeLabel) $("scopeLabel").textContent = state.scopeLabel;
+}
+
+function applyScope(ids, label) {
+  state.scopeIds = ids;
+  state.scopeLabel = label;
+  state.page = 1;
+  state.selected.clear();
+  renderScopeBar();
+  renderStudents(MOCK[state.classId].students);
+  $("studentsTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function renderStudents(payload) {
+  const rows = visibleStudents(payload);
+  const start = (state.page - 1) * PAGE_SIZE;
+  const pageRows = rows.slice(start, start + PAGE_SIZE);
+
+  $("studentRows").innerHTML = pageRows.length
+    ? pageRows.map((row) => {
+        const id = row.student.id;
+        const selectable = row.selectable !== false;
+        const checked = state.selected.has(id);
+        return `<tr data-student="${id}"${checked ? ' class="is-selected"' : ""}>
+          <td class="tw-col-check">
+            <label class="tw-check"${selectable ? "" : ` title="${esc(row.unselectable_reason)}"`}>
+              <input type="checkbox" data-row-check="${id}"${checked ? " checked" : ""}${selectable ? "" : " disabled"}
+                     aria-label="选择 ${esc(row.student.username)}" />
+              <span class="tw-check-box"></span>
+            </label>
+          </td>
+          <td data-label="学员">
+            <div class="tw-name"><b>${esc(row.student.username)}</b><span>ID ${id}</span></div>
+          </td>
+          <td data-label="最近活动">${esc(formatDate(row.last_activity_at))}</td>
+          <td class="tw-col-num" data-label="未学习天数">${row.never_active ? "—" : esc(row.inactive_days ?? "—")}</td>
+          <td data-label="学习状态">
+            <span class="tw-status tw-status--${esc(row.activity_tone)}">${esc(row.activity_label)}</span>
+            ${row.pending_review
+              ? `<button class="tw-tag tw-tag--warn tw-tag--action" type="button" data-review-student="${id}"
+                   title="队列只看这位学员">待批改 ${row.pending_review}</button>`
+              : ""}
+            ${row.access_blocked ? `<span class="tw-tag tw-tag--idle">${esc(row.access_label)}</span>` : ""}
+          </td>
+          <td data-label="操作"><a class="tw-btn tw-btn--link" href="${esc(row.profile_endpoint)}">查看档案</a></td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="6">${empty("当前筛选条件下没有学员。")}</td></tr>`;
+
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  $("studentPagination").innerHTML = `
+    <span>共 ${rows.length} 位${rows.length !== payload.total ? `（全班 ${payload.total} 位）` : ""}</span>
+    <span class="tw-spacer"></span>
+    <span>第 ${state.page} / ${pages} 页</span>
+    <button class="tw-btn tw-btn--sm" data-page="prev" type="button"${state.page <= 1 ? " disabled" : ""}>上一页</button>
+    <button class="tw-btn tw-btn--sm" data-page="next" type="button"${state.page >= pages ? " disabled" : ""}>下一页</button>`;
+
+  syncSelectAll(pageRows);
+  syncSelectionBar();
+}
+
+// AntD 全选三态：全不选 / 半选 / 全选。半选靠 class 切换，不靠 :indeterminate 伪类，
+// 因为半选样式要压过 :checked 的对钩，用 class 更好控优先级。
+function syncSelectAll(pageRows) {
+  const selectable = pageRows.filter((row) => row.selectable !== false);
+  const picked = selectable.filter((row) => state.selected.has(row.student.id));
+  const box = $("selectAll");
+  box.disabled = !selectable.length;
+  box.checked = selectable.length > 0 && picked.length === selectable.length;
+  box.indeterminate = picked.length > 0 && picked.length < selectable.length;
+  $("selectAllLabel").classList.toggle("is-indeterminate", box.indeterminate);
+}
+
+function syncSelectionBar() {
+  const count = state.selected.size;
+  $("selectionBar").hidden = count === 0;
+  $("selectionCount").textContent = String(count);
+}
+
+function renderReview(payload) {
+  const rows = state.reviewStudent
+    ? payload.items.filter((row) => row.student.id === state.reviewStudent)
+    : payload.items;
+  // 过滤时 badge 显示的是过滤后的条数，不是 total——否则「只看苏见山」还挂着 6 会看不懂。
+  $("reviewCount").textContent = String(state.reviewStudent ? rows.length : payload.total);
+  $("reviewScope").hidden = !state.reviewStudent;
+  if (state.reviewStudent) {
+    $("reviewScopeLabel").textContent =
+      payload.items.find((row) => row.student.id === state.reviewStudent)?.student.username || "";
+  }
+  $("reviewRows").innerHTML = rows.length
+    ? rows.map((row) => `
+      <div class="tw-queue-row">
+        <div>
+          <b>${esc(row.student.username)}</b>
+          <span>${esc(row.task_title)} · ${esc(formatDate(row.submitted_at))}</span>
+        </div>
+        <span class="tw-tag tw-tag--${esc(row.waiting_tone)}">${esc(row.waiting_label)}</span>
+        <a class="tw-btn tw-btn--sm" href="${esc(row.review_endpoint)}">批改</a>
+      </div>`).join("")
+    : empty(state.reviewStudent ? "这位学员没有待批改的作品。" : "当前没有需要处理的作品。");
+}
+
+// ---------- 逐题表现 ----------
+// /weak-items 的语义是「全部已作答题目按得分率升序」，不是只给低分那几道。
+// 所以按 (source, source_id) 分组后，每个任务能直接拿到自己整份卷子的逐题剖面。
+const TOP_N = 3;
+
+const rateOf = (item) => {
+  // practice 是真·正确率（对/答），paper 是得分率（含部分分）。两者不同口径，
+  // 所以列头文案跟着 item.rate_label 走，不在前端写死。
+  const value = item.practice_correct_rate ?? item.paper_score_rate ?? item.score_rate;
+  return typeof value === "number" ? value : null;
+};
+const toneOfRate = (value) => (value == null ? "idle" : value < 0.3 ? "risk" : value < 0.6 ? "warn" : "ok");
+const asPercent = (value) => (value == null ? "—" : `${Math.round(value * 100)}%`);
+const sourceKey = (source, id) => `${source}:${id}`;
+// 作业行的键是 source_type + source_id，考试行是 exam_link_id——接口键名不统一，这里兜住。
+const taskKey = (row) => (row.exam_link_id != null
+  ? sourceKey("exam_link", row.exam_link_id)
+  : sourceKey(row.source_type, row.source_id));
+
+function groupWeakItems(payload) {
+  const grouped = new Map();
+  payload.items.forEach((item) => {
+    const key = sourceKey(item.source, item.source_id);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  });
+  return grouped;
+}
+
+const byOrderAsc = (a, b) =>
+  String(a.sort_order).localeCompare(String(b.sort_order), "zh", { numeric: true });
+const byRateAsc = (a, b) => (rateOf(a) ?? 1) - (rateOf(b) ?? 1);
+
+function itemTable(items) {
+  return `<table class="tw-item-table"><tbody>${items.map((item) => {
+    const value = rateOf(item);
+    return `<tr>
+      <td class="tw-item-no">${esc(item.sort_order)}</td>
+      <td class="tw-item-type">${esc(item.type_label || "")}</td>
+      <td>${esc(item.title)}${item.suspect ? ` <span class="tw-flag">${esc(item.suspect_label)}</span>` : ""}</td>
+      <td class="tw-item-rate"><span class="tw-tag tw-tag--${toneOfRate(value)}">${asPercent(value)}</span></td>
+    </tr>`;
+  }).join("")}</tbody></table>`;
+}
+
+// 三种「没有逐题数据」必须分开说：不支持这种作业 / 还没人交 / 名单未知。
+// 都渲染成「暂无数据」等于骗人——老师会把「还没人交」读成「全对」。
+function analysisBlock(row, grouped, groupingMap) {
+  const head = '<div class="tw-analysis-head"><b>逐题表现</b>';
+  if (row.analysis_unavailable) {
+    return `<div class="tw-analysis">${head}</div><p class="tw-analysis-note">${esc(row.analysis_unavailable_label)}</p></div>`;
+  }
+  const items = grouped.get(taskKey(row));
+  if (!items?.length) {
+    return `<div class="tw-analysis">${head}</div><p class="tw-analysis-note">接口没有返回这份任务的逐题数据。</p></div>`;
+  }
+  const ordered = [...items].sort(byOrderAsc);
+  const worst = [...items].sort(byRateAsc);
+  const rest = worst.slice(TOP_N);
+  const grouping = groupingMap[taskKey(row)];
+  const spark = ordered.map((item) => {
+    const value = rateOf(item);
+    return `<i class="is-${toneOfRate(value)}" style="height:${Math.max(2, Math.round((value ?? 0) * 30))}px"
+      title="第 ${esc(item.sort_order)} 题 · ${esc(item.title)} · ${asPercent(value)}"></i>`;
+  }).join("");
+  return `<div class="tw-analysis">
+    ${head}<span>${esc(items[0].rate_label)} · ${ordered.length} 题 · 代表作答 ${esc(items[0].answered)} 人</span></div>
+    <div class="tw-spark" aria-hidden="true">${spark}</div>
+    ${itemTable(worst.slice(0, TOP_N))}
+    ${rest.length ? `<details class="tw-more"><summary>展开其余 ${rest.length} 题</summary>${itemTable(rest)}</details>` : ""}
+    ${grouping && !grouping.enabled
+      ? `<p class="tw-analysis-note">代表作答 ${grouping.participants} 人，未达 ${grouping.min_participants} 人，没做高低分组，因此这份任务不给区分度提示。</p>`
+      : ""}
+  </div>`;
+}
+
+// 「未提交名单是空的」有四种原因，原来的写法把后三种都说成「全员已提交」——
+// 那是会让老师做出错误决定的假话。
+function rosterBlock(row) {
+  if (row.roster_people == null || row.not_submitted_people == null) {
+    return '<div class="tw-body-label">名单未知，不推断未参与人数。</div>';
+  }
+  if (row.not_submitted_people === 0) return '<div class="tw-body-label">全员已提交。</div>';
+  if (!row.not_submitted?.length) return '<div class="tw-body-label">接口未返回未提交名单。</div>';
+  const ids = row.not_submitted.map((person) => person.student.id).join(",");
+  return `<div class="tw-body-head">
+      <span class="tw-body-label">未提交名单</span>
+      <button class="tw-btn tw-btn--sm" type="button"
+        data-scope-ids="${esc(ids)}" data-scope-label="${esc(`${row.title || row.name} · 未提交`)}">
+        筛选这 ${row.not_submitted.length} 位
+      </button>
+    </div>
+    <div class="tw-names">${row.not_submitted.map((person) => `<span>${esc(person.student.username)}</span>`).join("")}</div>`;
+}
+
+function taskRow(row, index, grouped, groupingMap) {
+  const known = row.roster_people != null && row.submitted_people != null;
+  const percent = known && row.roster_people ? Math.round((row.submitted_people / row.roster_people) * 100) : null;
+  const bar = percent == null
+    ? ""
+    : `<div class="tw-progress${percent < 70 ? " tw-progress--warn" : ""}"><i style="width:${percent}%"></i></div>`;
+  return `<details class="tw-item" data-source-key="${esc(taskKey(row))}"${index === 0 ? " open" : ""}>
+    <summary>
+      <span class="tw-item-arrow">▶</span>
+      <span class="tw-item-title">
+        <b>${esc(row.title || row.name)}</b>
+        <span class="tw-item-meta">
+          <span class="tw-tag tw-tag--${esc(row.phase_tone)}">${esc(row.phase_label)}</span>
+          <span>${esc(row.due_label || "")}</span>
+        </span>
+      </span>
+      <span class="tw-item-stat">
+        ${bar}
+        <span>已交 <b>${esc(formatNumber(row.submitted_people))}</b> / ${esc(formatNumber(row.roster_people))}</span>
+        <span>未交 <b>${esc(formatNumber(row.not_submitted_people))}</b></span>
+      </span>
+    </summary>
+    <div class="tw-item-body">
+      ${rosterBlock(row)}
+      ${analysisBlock(row, grouped, groupingMap)}
+    </div>
+  </details>`;
+}
+
+function renderTasks(host, payload, grouped, groupingMap, emptyText) {
+  host.innerHTML = payload.items.length
+    ? payload.items.map((row, index) => taskRow(row, index, grouped, groupingMap)).join("")
+    : empty(emptyText);
+}
+
+// 跨任务视角：回答的是「全班最难的题在哪」，和任务内那段不是同一个问题，所以两边都留。
+function renderWeak(payload, hostKeys) {
+  const ranked = [...payload.items].sort(byRateAsc).slice(0, 8);
+  $("weakRows").innerHTML = ranked.length
+    ? ranked.map((item) => {
+        const key = sourceKey(item.source, item.source_id);
+        const orphan = !hostKeys.has(key);
+        const value = rateOf(item);
+        return `<tr>
+          <td data-label="题目">${esc(item.title)}</td>
+          <td data-label="来源">
+            <button class="tw-source-chip" type="button" data-jump="${esc(key)}"${orphan ? " disabled" : ""}
+              title="${esc(orphan ? "这道题没有对应的任务行" : `跳到「${item.source_title}」`)}">${esc(item.source_title)}</button>
+          </td>
+          <td class="tw-col-num" data-label="表现">
+            <span class="tw-tag tw-tag--${toneOfRate(value)}">${asPercent(value)}</span>
+            <span class="tw-item-type">${esc(item.rate_label)}</span>
+          </td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="3">${empty("这个班级还没有可分析的题目数据。")}</td></tr>`;
+
+  // 前端 join 会漏掉的那些：练习块不在 /homework 里，停用的考试链接不在 /exams 里。
+  // 静默丢弃是最糟的处理方式，所以把它们点出来。
+  const orphanTitles = [...new Set(payload.items
+    .filter((item) => !hostKeys.has(sourceKey(item.source, item.source_id)))
+    .map((item) => item.source_title))];
+  const note = $("weakOrphan");
+  note.hidden = orphanTitles.length === 0;
+  note.textContent = orphanTitles.length
+    ? `另有 ${orphanTitles.length} 个来源的题目在上面的作业/考试里找不到对应行：${orphanTitles.join("、")}。`
+      + "课堂随练不在作业接口的返回范围内，已停用的考试链接也不在考试接口里——这两类题目当前无处可挂。"
+    : "";
+}
+
+function load() {
+  const data = MOCK[state.classId];
+  const grouped = groupWeakItems(data.weak);
+  const groupingMap = data.weak.grouping || {};
+  const hostKeys = new Set([...data.homework.items, ...data.exams.items].map(taskKey));
+  renderOverview(data.overview);
+  renderQuickFilters(data.students.filters);
+  renderScopeBar();
+  renderStudents(data.students);
+  renderReview(data.review);
+  renderTasks($("homeworkRows"), data.homework, grouped, groupingMap, "这个班级没有可展示的作业数据。");
+  renderTasks($("examRows"), data.exams, grouped, groupingMap, "这个班级没有可展示的考试数据。");
+  renderWeak(data.weak, hostKeys);
+  $("classesState").textContent = "";
+}
+
+// ---------- 交互 ----------
+$("classSelect").addEventListener("change", (event) => {
+  state.classId = Number(event.target.value);
+  state.page = 1;
+  state.quick.clear();
+  state.selected.clear();
+  state.inactiveDays = "";
+  state.scopeIds = null;
+  state.scopeLabel = "";
+  state.reviewStudent = null;
+  $("inactiveDays").value = "";
+  load();
+});
+
+$("refreshBtn").addEventListener("click", () => {
+  $("classesState").textContent = "已按当前筛选条件重新载入。";
+  load();
+  setTimeout(() => { $("classesState").textContent = ""; }, 2000);
+});
+
+$("exportBtn").addEventListener("click", () => {
+  $("classesState").textContent = "DEMO：真实页面会调 /teaching/classes/{id}/export 下载 CSV。";
+});
+
+$("quickFilters").addEventListener("change", (event) => {
+  const input = event.target.closest("input[type=checkbox]");
+  if (!input) return;
+  if (input.checked) state.quick.add(input.value);
+  else state.quick.delete(input.value);
+  state.page = 1;
+  renderStudents(MOCK[state.classId].students);
+});
+
+$("studentFilter").addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.inactiveDays = $("inactiveDays").value;
+  state.page = 1;
+  renderStudents(MOCK[state.classId].students);
+});
+
+$("clearStudentFilter").addEventListener("click", () => {
+  state.inactiveDays = "";
+  state.quick.clear();
+  state.scopeIds = null;
+  state.scopeLabel = "";
+  state.page = 1;
+  state.selected.clear();
+  $("inactiveDays").value = "";
+  renderScopeBar();
+  renderQuickFilters(MOCK[state.classId].students.filters);
+  renderStudents(MOCK[state.classId].students);
+});
+
+$("selectAll").addEventListener("change", (event) => {
+  const payload = MOCK[state.classId].students;
+  const start = (state.page - 1) * PAGE_SIZE;
+  const pageRows = visibleStudents(payload).slice(start, start + PAGE_SIZE)
+    .filter((row) => row.selectable !== false);
+  pageRows.forEach((row) => {
+    if (event.target.checked) state.selected.add(row.student.id);
+    else state.selected.delete(row.student.id);
+  });
+  renderStudents(payload);
+});
+
+$("studentRows").addEventListener("change", (event) => {
+  const input = event.target.closest("input[data-row-check]");
+  if (!input) return;
+  const id = Number(input.dataset.rowCheck);
+  if (input.checked) state.selected.add(id);
+  else state.selected.delete(id);
+  renderStudents(MOCK[state.classId].students);
+});
+
+$("selectionClear").addEventListener("click", () => {
+  state.selected.clear();
+  renderStudents(MOCK[state.classId].students);
+});
+
+$("bulkExport").addEventListener("click", () => {
+  $("classesState").textContent = `DEMO：将导出所选 ${state.selected.size} 位学员的学情 CSV。`;
+});
+
+$("bulkFollow").addEventListener("click", () => {
+  $("classesState").textContent = `DEMO：将为所选 ${state.selected.size} 位学员建跟进记录（需后端新增接口）。`;
+});
+
+$("studentPagination").addEventListener("click", (event) => {
+  const direction = event.target.closest("button[data-page]")?.dataset.page;
+  if (!direction) return;
+  state.page += direction === "next" ? 1 : -1;
+  renderStudents(MOCK[state.classId].students);
+});
+
+// 概览指标 → 学员表 / 队列。指标只带 key，不带判据。
+$("overviewMetrics").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-metric-filter], button[data-metric-focus]");
+  if (!button) return;
+  const { metricFilter, metricFocus } = button.dataset;
+  if (metricFocus) {
+    $(metricFocus).scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  state.quick.clear();
+  state.quick.add(metricFilter);
+  state.scopeIds = null;
+  state.scopeLabel = "";
+  state.page = 1;
+  state.selected.clear();
+  renderScopeBar();
+  renderQuickFilters(MOCK[state.classId].students.filters);
+  renderStudents(MOCK[state.classId].students);
+  $("studentsTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+// 作业/考试的未提交名单 → 学员表（按 student_ids 精确约束）
+[$("homeworkRows"), $("examRows")].forEach((host) => {
+  host.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-scope-ids]");
+    if (!button) return;
+    applyScope(button.dataset.scopeIds.split(",").map(Number), button.dataset.scopeLabel);
+  });
+});
+
+$("scopeClear").addEventListener("click", () => {
+  state.scopeIds = null;
+  state.scopeLabel = "";
+  state.page = 1;
+  state.selected.clear();
+  renderScopeBar();
+  renderStudents(MOCK[state.classId].students);
+});
+
+// 学员行的「待批改 N」→ 队列只看这个人
+$("studentRows").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-review-student]");
+  if (!button) return;
+  state.reviewStudent = Number(button.dataset.reviewStudent);
+  renderReview(MOCK[state.classId].review);
+  $("reviewTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+$("reviewScopeClear").addEventListener("click", () => {
+  state.reviewStudent = null;
+  renderReview(MOCK[state.classId].review);
+});
+
+// 跨任务表 → 跳到对应任务并展开
+$("weakRows").addEventListener("click", (event) => {
+  const key = event.target.closest("button[data-jump]")?.dataset.jump;
+  if (!key) return;
+  const host = document.querySelector(`details[data-source-key="${CSS.escape(key)}"]`);
+  if (!host) return;
+  host.open = true;
+  host.scrollIntoView({ behavior: "smooth", block: "center" });
+  host.classList.remove("tw-flash");
+  void host.offsetWidth;
+  host.classList.add("tw-flash");
+});
+
+renderClassOptions();
+load();
+
+/* ==================== 落地时的接口缺口 ====================
+ 1. GET /teaching/classes/{id}/overview
+    现在只返回 {"insight": {"enrolled_people": N}}，前端拿 key.replace(/_/g," ")
+    渲染成 "enrolled people"。需改成 metrics: [{key,label,value,unit,hint,tone}]，
+    label/tone 由后端给（前端不得自备文案）。
+ 2. GET /teaching/classes/{id}/students
+    需补 activity_label + activity_tone（"活跃/需关注/掉队风险/从未学习"）、
+    pending_review 计数、flags（供快捷筛选）、selectable + unselectable_reason（退班保留历史）。
+    快捷筛选项本身也应由接口下发 filters: [{key,label,count}]。
+ 3. GET /teaching/review-queue
+    现在只有 submission_id/student_id/submitted_at，缺 student.username、task_title、
+    waiting_label + waiting_tone。前端算等待时长会把「文案源头在后端」的纪律破掉。
+ 4. GET /teaching/classes/{id}/homework | /exams
+    已有 phase_label，需补 phase_tone 与 due_label；roster_people 为 null 时
+    not_submitted_people 必须同为 null（现有 D4 语义不变，UI 已按此渲染「名单未知」）。
+ 5. GET /teaching/classes/{id}/weak-items —— 把逐题表现挂进任务，卡在这条上
+    a) grouping 被 weak_items._paper_items 丢掉了（`_grouping, items = build_item_analysis(...)`）。
+       没有它，前端分不清「区分度没算」和「区分度算出来是 0」。
+       ITEM_ANALYSIS_MIN_PARTICIPANTS = 20，班级规模常在 20 上下，这个区别天天发生。
+    b) 缺 rate_label。practice 是真·正确率（correct/answered），paper 是得分率
+       （sum(score)/(n*full)，含部分分）。现在两者塞进同一列，口径被静默合并。
+    c) 缺 type_label、suspect_label。suspect 的取值是 results_common.suspect_flag 的
+       "all_low" / "negative_discrimination"，文案必须后端给。
+    d) 键名不齐：weak item 是 (source, source_id)，作业行是 (source_type, source_id)，
+       考试行是 exam_link_id。值对得上，名字不对——建议统一成 source_key 字符串。
+
+ 6. 覆盖范围不对称 —— 纯前端 join 会静默丢题，这是「内嵌 vs 前端 join」的决定性一条
+    a) build_weak_items 为 block_type == "practice" 出题，但 _class_homework_items 只走
+       KINDS 的 block_type ∈ {homework, scratch}，练习块根本不在 /homework 的返回里。
+    b) build_weak_items 选考试链接时不看 ExamLink.status，_class_exam_items 看
+       （status == "active"）。停用链接会出题、但没有宿主行。
+    c) SCRATCH_KIND 永远不产 item，必须显式说「没有逐题统计这回事」，
+       不能渲染成空列表——那看着像「全对」。
+    结论：第一版可以前端 join + 「未归属」兜底（本 DEMO 就是这么做的）；
+    第二版应由后端把 items 内嵌进 homework/exam 的 DTO，让覆盖范围由一处定义。
+
+ 7. 批量操作
+    「导出所选」可复用 /classes/{id}/export 加 student_ids 参数；
+    「标记跟进」是新能力，需要新接口 + 权限判定（范围闸走 404，功能闸走 403）。
+=========================================================== */
+</script>
+</body>
+</html>

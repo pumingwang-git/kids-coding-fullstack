@@ -17,7 +17,20 @@ from .models import (
 
 AREA_STATUSES = {"planning", "active", "hidden"}
 MODULE_STATUSES = {"available", "planning", "hidden"}
-MODULE_KEYS = {"overview", "courses", "tasks", "explore", "paths", "projects"}
+
+# 工作台能力注册表。implemented=False 表示学生端还没有真实页面，只能配成规划中或隐藏——
+# 否则管理端标着「可使用」，学生点进去看到的却是「功能尚未开放」的占位页，状态与事实相反。
+MODULE_REGISTRY = {
+    "overview": {"label": "学习首页", "implemented": True},
+    "courses": {"label": "课程", "implemented": True},
+    "tasks": {"label": "学习任务", "implemented": True},
+    "explore": {"label": "探索创作", "implemented": True},
+    "question-bank": {"label": "题库", "implemented": True},
+    "toolbox": {"label": "工具箱", "implemented": True},
+    "paths": {"label": "学习路线", "implemented": False},
+    "projects": {"label": "实战项目", "implemented": False},
+}
+MODULE_KEYS = set(MODULE_REGISTRY)
 
 AREA_SEEDS = [
     {
@@ -31,8 +44,14 @@ AREA_SEEDS = [
         "modules": [
             ("overview", "学习首页", "available", 10),
             ("courses", "课程", "available", 20),
-            ("tasks", "学习任务", "planning", 30),
-            ("explore", "探索创作", "planning", 40),
+            # 这两项有真实页面（TasksHome / ExploreHome、我的作品），标 planning 会被
+            # 路由守卫挡进占位页。planning 的含义是「运营暂不开放」，不是「页面没做完」。
+            ("tasks", "学习任务", "available", 30),
+            ("explore", "探索创作", "available", 40),
+            # 题库和工具箱原先是前端硬编码兜底，后端不认这两个 key，导致后台想配也配不了。
+            # 收进种子后前端兜底才能删掉，导航数据源收敛到后端一处。
+            ("question-bank", "题库", "available", 50),
+            ("toolbox", "工具箱", "available", 60),
         ],
     },
     {
@@ -48,6 +67,9 @@ AREA_SEEDS = [
             ("paths", "学习路线", "planning", 20),
             ("courses", "课程", "planning", 30),
             ("projects", "实战项目", "planning", 40),
+            # 前端兜底原本对所有专区生效，两个专区都要补，删兜底后行为才不变。
+            ("question-bank", "题库", "available", 50),
+            ("toolbox", "工具箱", "available", 60),
         ],
     },
 ]

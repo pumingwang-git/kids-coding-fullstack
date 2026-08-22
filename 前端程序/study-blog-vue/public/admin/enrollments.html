@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>课程开通 · 后台</title>
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body class="admin-enrollments">
+    <div class="app">
+      <aside class="sidebar" id="sidebar"></aside>
+      <div class="main">
+        <header class="topbar" id="topbar"></header>
+        <main class="content enrollment-page">
+          <div class="page-head">
+            <div>
+              <h1>课程开通</h1>
+              <p>为学员开通已发布课程，并管理访问时间窗</p>
+            </div>
+            <button class="btn" id="refreshEnrollments" type="button">刷新记录</button>
+          </div>
+
+          <section class="card enrollment-grant-card" aria-labelledby="grantTitle">
+            <div class="student-section-head">
+              <div>
+                <h2 id="grantTitle">开通课程</h2>
+                <p class="muted">先选择学员，再配置课程访问时间</p>
+              </div>
+            </div>
+            <form class="enrollment-form" id="enrollmentGrantForm">
+              <div id="enrollmentStudentPicker"></div>
+              <div class="enrollment-fields">
+                <label><span>已发布课程</span><select id="enrollmentCourse" required><option value="">加载中</option></select></label>
+                <label><span>开始时间 <em>可选</em></span><input id="enrollmentOpenedAt" type="datetime-local" /></label>
+                <label><span>到期时间 <em>可选</em></span><input id="enrollmentExpiresAt" type="datetime-local" /></label>
+                <button class="btn primary" type="submit">开通课程</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="card enrollment-list-card" aria-labelledby="enrollmentListTitle">
+            <div class="student-section-head">
+              <div>
+                <h2 id="enrollmentListTitle">开通记录</h2>
+                <p class="muted" id="enrollmentMeta" aria-live="polite">加载中</p>
+              </div>
+              <form class="enrollment-filters" id="enrollmentFilterForm">
+                <label><span>状态</span><select id="enrollmentStatus"><option value="">全部状态</option><option value="active">已开通</option><option value="not_started">未开始</option><option value="expired">已过期</option><option value="disabled">已停用</option></select></label>
+                <button class="btn" type="submit">筛选</button>
+              </form>
+            </div>
+            <div class="table-wrap enrollment-table-wrap">
+              <table>
+                <caption class="sr-only">学员课程开通记录</caption>
+                <thead><tr><th scope="col">学员</th><th scope="col">课程</th><th scope="col">开通窗口</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+                <tbody id="enrollmentRows"></tbody>
+              </table>
+            </div>
+            <div class="empty" id="enrollmentEmpty" hidden>暂无符合条件的课程开通记录</div>
+            <div class="list-error" id="enrollmentError" hidden><span id="enrollmentErrorText">开通记录加载失败。</span><button class="btn" id="retryEnrollments" type="button">重新加载</button></div>
+            <nav class="pager" id="enrollmentPager" aria-label="课程开通记录分页" hidden>
+              <button class="btn" id="previousEnrollmentPage" type="button">上一页</button>
+              <span id="enrollmentPageMeta"></span><span class="spacer"></span>
+              <button class="btn" id="nextEnrollmentPage" type="button">下一页</button>
+            </nav>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script type="module" src="enrollments.js"></script>
+  </body>
+</html>

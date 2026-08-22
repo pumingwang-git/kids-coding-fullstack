@@ -438,6 +438,8 @@ def test_teaching_homework_route_uses_existing_roster_dto(tmp_path: Path):
         "submitted_attempts": 1,
     }
     assert [row["student"]["id"] for row in item["not_submitted"]] == [blocked.id]
+    blocked_row = next(row for row in item["roster"] if row["student"]["id"] == blocked.id)
+    assert blocked_row["access_blocked"] is True
     assert submitted.id not in {
         row["student"]["id"] for row in item["not_submitted"]
     }
@@ -565,6 +567,7 @@ def test_teaching_weak_items_route_projects_practice_correct_rate(tmp_path: Path
     assert row["practice_correct_rate"] == 1.0
     assert "score_rate" not in row
     assert "paper_score_rate" not in row
+    assert "problem_id_no" not in row
 
 
 def test_student_profile_reuses_class_workbench_data_without_sensitive_fields(tmp_path: Path):

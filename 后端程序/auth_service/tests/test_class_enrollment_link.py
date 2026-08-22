@@ -6,7 +6,8 @@ from sqlalchemy import select
 from test_admin_classes import seed_course, seed_student
 from test_exam import admin_login, build_app
 
-from app.models import Enrollment
+from app.course_access import enrolled_course_ids
+from app.models import Enrollment, User
 from app.security import as_utc
 
 
@@ -52,6 +53,40 @@ def test_withdraw_disables_only_its_class_source(tmp_path: Path):
         ("class_batch", class_id, "disabled"),
         ("admin", None, "active"),
     }
+
+
+def test_archiving_class_disables_class_grants_but_keeps_personal_grants(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    seed_student(app, student_id=1)
+    seed_student(app, student_id=2)
+    course_id = seed_course(app)
+    class_id = create_class(client, headers, course_id, "归档撤销班")
+    client.post(f"/api/admin/classes/{class_id}/members", headers=headers, json={"student_id": 1})
+    client.post(f"/api/admin/classes/{class_id}/members", headers=headers, json={"student_id": 2})
+
+    db = app.state.session_factory()
+    try:
+        db.add(Enrollment(student_id=1, course_id=course_id, source="admin", status="active"))
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(f"/api/admin/classes/{class_id}/archive", headers=headers)
+    assert response.status_code == 200, response.text
+    rows = enrollments(app, 1) + enrollments(app, 2)
+    assert {(row.student_id, row.source, row.status) for row in rows} == {
+        (1, "class_batch", "disabled"),
+        (1, "admin", "active"),
+        (2, "class_batch", "disabled"),
+    }
+
+    db = app.state.session_factory()
+    try:
+        assert enrolled_course_ids(db, db.get(User, 1)) == {course_id}
+        assert enrolled_course_ids(db, db.get(User, 2)) == set()
+    finally:
+        db.close()
 
 
 def test_transfer_replaces_source_class_enrollment(tmp_path: Path):

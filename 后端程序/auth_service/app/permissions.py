@@ -151,3 +151,8 @@ def can_read_students(admin) -> bool:
 def can_manage_enrollments(admin) -> bool:
     """课程开通属于教务动作，内容编辑角色不因此获得资格管理权。"""
     return admin.role in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE}
+
+
+def can_manage_classes(admin) -> bool:
+    """班级主数据与成员/带班关系只允许教务和超管维护。"""
+    return admin.role in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE}

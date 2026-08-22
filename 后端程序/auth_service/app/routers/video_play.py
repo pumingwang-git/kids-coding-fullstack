@@ -34,8 +34,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import video_sign
-from ..course_access import Access, lesson_access, lesson_block_open
-from ..models import CourseLesson, CourseLessonBlock, LessonVideoBlock, Video, VideoVariant
+from ..course_access import Access, course_visible, lesson_access, lesson_block_open
+from ..models import Course, CourseLesson, CourseLessonBlock, LessonVideoBlock, Video, VideoVariant
 from ..s3_multipart import get_minio_client, play_token_minutes
 from .auth_secure import current_user, db_session, require_csrf
 
@@ -61,6 +61,8 @@ def mint_play_url(request: Request, lesson_id: int, db: Session = Depends(db_ses
     user = current_user(request, db)
     lesson = db.get(CourseLesson, lesson_id)
     if lesson is None:
+        raise HTTPException(404, "课时不存在。")
+    if not course_visible(db.get(Course, lesson.course_id)):
         raise HTTPException(404, "课时不存在。")
     settings = request.app.state.settings
 

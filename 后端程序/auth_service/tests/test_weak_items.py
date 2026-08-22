@@ -149,13 +149,24 @@ def test_paper_items_are_the_existing_item_analysis_rows_without_recalculation(t
             if (item["source"], item["source_id"]) == ("exam_link", link.id)
         )
         assert {key: value for key, value in homework_actual.items() if key not in {
-            "source", "source_id", "source_title"
-        }} == homework_expected[0]
+            "source", "source_id", "source_title", "problem_id_no"
+        }} == {key: value for key, value in homework_expected[0].items()
+               if key != "problem_id_no"}
         assert {key: value for key, value in exam_actual.items() if key not in {
-            "source", "source_id", "source_title"
-        }} == exam_expected[0]
+            "source", "source_id", "source_title", "problem_id_no"
+        }} == {key: value for key, value in exam_expected[0].items()
+               if key != "problem_id_no"}
+        assert "problem_id_no" not in homework_actual
+        assert "problem_id_no" not in exam_actual
         assert homework_actual["judge_failed"] == 1
+        # The in-class partial answer is 5/10; the outsider's zero must not enter
+        # the denominator or lower the class rate to 1/4.
+        assert homework_actual["answered"] == 1
         assert homework_actual["score_rate"] == 0.5
+        # The class has one submitted exam answer worth zero; the outsider's 10/10
+        # must not turn this class rate into 0.5.
+        assert exam_actual["answered"] == 1
+        assert exam_actual["score_rate"] == 0.0
     finally:
         db.close()
         engine.dispose()
@@ -193,10 +204,11 @@ def test_practice_rate_is_based_on_people_not_attempt_count(tmp_path):
         actual = build_weak_items(db, class_group.id)
         assert actual == [{
             "source": "lesson_practice", "source_id": block.id, "source_title": "课中练习",
-            "sort_order": "1", "problem_id_no": "PR-1", "full_score": 10,
+            "sort_order": "1", "full_score": 10,
             "type": "choice", "title": "课中题", "missing": False,
             "answered": 3, "correct": 1, "score_rate": 0.3333,
         }]
+        assert "problem_id_no" not in actual[0]
     finally:
         db.close()
         engine.dispose()

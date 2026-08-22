@@ -249,9 +249,9 @@ function mockWork (id, title, overrides = {}) {
     };
 }
 
-export function createWork (title) {
+export function createWork (title, isPublic = false) {
     const id = mockWorkSeq++;
-    const work = mockWork(id, title || '未命名作品');
+    const work = mockWork(id, title || '未命名作品', {is_public: isPublic});
     mockWorks.set(id, work);
     return delay().then(() => ({...work, limits: {...mockChallenge.limits}}));
 }
