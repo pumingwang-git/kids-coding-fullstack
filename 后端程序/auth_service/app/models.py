@@ -139,6 +139,91 @@ class AdminUser(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class Notification(Base):
+    """A single rendered in-app notification, shared by its receipts."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_created_at_id", "created_at", "id"),
+        CheckConstraint(
+            "(source_type IS NULL AND source_id IS NULL) OR "
+            "(source_type IS NOT NULL AND source_id IS NOT NULL)",
+            name="ck_notifications_source_pair",
+        ),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    target_type: Mapped[str] = mapped_column(String(64))
+    target_id: Mapped[int] = mapped_column(Integer)
+    source_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    link_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    request_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    revoked_by: Mapped[int | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
+class NotificationReceipt(Base):
+    """Per-recipient state for a notification; exactly one account type owns it."""
+
+    __tablename__ = "notification_receipts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    notification_id: Mapped[int] = mapped_column(
+        ForeignKey("notifications.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    admin_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (
+        CheckConstraint(
+            "(user_id IS NOT NULL AND admin_user_id IS NULL) OR "
+            "(user_id IS NULL AND admin_user_id IS NOT NULL)",
+            name="ck_notification_receipts_one_recipient",
+        ),
+        Index(
+            "uq_notification_receipts_notification_user", "notification_id", "user_id", unique=True,
+            sqlite_where=sa.text("user_id IS NOT NULL"),
+            postgresql_where=sa.text("user_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_notification_receipts_notification_admin", "notification_id", "admin_user_id", unique=True,
+            sqlite_where=sa.text("admin_user_id IS NOT NULL"),
+            postgresql_where=sa.text("admin_user_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_notification_receipts_user_unread", "user_id", "read_at", "notification_id",
+            sqlite_where=sa.text("user_id IS NOT NULL"),
+            postgresql_where=sa.text("user_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_notification_receipts_admin_unread", "admin_user_id", "read_at", "notification_id",
+            sqlite_where=sa.text("admin_user_id IS NOT NULL"),
+            postgresql_where=sa.text("admin_user_id IS NOT NULL"),
+        ),
+    )
+
+
 class AdminSession(Base):
     """管理员会话：短 access + 轮换 refresh，与学生会话同模式。"""
     __tablename__ = "admin_sessions"
