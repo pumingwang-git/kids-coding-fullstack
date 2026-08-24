@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
@@ -862,11 +861,10 @@ def _review_payload(submission: ScratchSubmission) -> dict | None:
 
 def _review_idempotency(
     submission: ScratchSubmission, *, action: str, payload: BaseModel,
-    idempotency_key: str | None,
+    idempotency_key: str,
 ) -> bool:
     """Validate a review retry and return whether it is an accepted duplicate."""
-    key = idempotency_key or f"legacy-scratch-{action}:{submission.id}:{uuid4()}"
-    key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
     input_hash = request_hash({
         "action": action,
         "submission_id": submission.id,
@@ -1094,6 +1092,8 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     submission = _load_visible_submission(db, admin, submission_id, student_ids)
+    if not idempotency_key:
+        raise HTTPException(422, "缺少 Idempotency-Key。")
     if _review_idempotency(submission, action="review", payload=payload,
                            idempotency_key=idempotency_key):
         return {"submission": _submission_row(db, submission, detail=True),
@@ -1164,6 +1164,8 @@ def return_submission(submission_id: int, payload: ReturnPayload, request: Reque
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     submission = _load_visible_submission(db, admin, submission_id, student_ids)
+    if not idempotency_key:
+        raise HTTPException(422, "缺少 Idempotency-Key。")
     if _review_idempotency(submission, action="return", payload=payload,
                            idempotency_key=idempotency_key):
         return {"submission": _submission_row(db, submission, detail=True),

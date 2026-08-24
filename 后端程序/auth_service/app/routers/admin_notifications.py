@@ -6,9 +6,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from ..class_groups import active_students_for_class
-from ..models import Notification, NotificationReceipt
+from ..models import Notification, NotificationReceipt, ClassGroup, CourseLesson, CourseLessonBlock
 from ..notification_domain import notification_kind_label
-from ..notification_links import announcement_link
+from ..notification_links import announcement_link, parse_announcement_target
 from ..notification_service import create_notification, revoke_notification
 from ..permissions import (
     ACADEMIC_ADMIN_ROLE,
@@ -85,6 +85,7 @@ def list_notifications(request: Request, box: str = Query("inbox", pattern="^(in
     if box == "inbox":
         stmt = select(Notification, NotificationReceipt).join(NotificationReceipt).where(
             NotificationReceipt.admin_user_id == admin.id)
+        stmt = stmt.where(Notification.revoked_at.is_(None))
         if tab == "unread":
             stmt = stmt.where(NotificationReceipt.read_at.is_(None))
         total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
@@ -131,6 +132,7 @@ def detail(notification_id: int, request: Request, admin=Depends(current_admin),
 @router.post("/{notification_id}/read")
 def mark_read(notification_id: int, request: Request, admin=Depends(current_admin), db: Session = Depends(db_session)):
     require_csrf(request)
+    limit(request, "admin-notification-read", str(admin.id), 60, 60)
     _, receipt, _ = _admin_notification_or_404(db, admin, notification_id)
     if receipt is None:
         raise HTTPException(404, "通知不存在。")
@@ -143,6 +145,7 @@ def mark_read(notification_id: int, request: Request, admin=Depends(current_admi
 @router.post("/read-all")
 def mark_all_read(request: Request, admin=Depends(current_admin), db: Session = Depends(db_session)):
     require_csrf(request)
+    limit(request, "admin-notification-read-all", str(admin.id), 10, 60)
     now = utcnow()
     db.execute(update(NotificationReceipt).where(NotificationReceipt.admin_user_id == admin.id,
                NotificationReceipt.read_at.is_(None)).values(read_at=now))
@@ -172,6 +175,19 @@ def announce(class_id: int, payload: AnnouncementPayload, request: Request,
     if not can_read_students(admin):
         raise HTTPException(403, "没有发布班级公告的权限。")
     admin_classes._require_class_reader(request, db, class_id)
+    target = parse_announcement_target(payload.link_url)
+    if target and target["kind"] == "course":
+        course_id = int(target["ids"][0])
+        if db.scalar(select(ClassGroup.id).where(ClassGroup.id == class_id, ClassGroup.course_id == course_id)) is None:
+            raise HTTPException(422, "公告链接不属于当前班级课程。")
+    elif target and target["kind"] == "homework":
+        lesson_id, block_id = map(int, target["ids"])
+        valid = db.scalar(select(CourseLessonBlock.id).join(CourseLesson, CourseLesson.id == CourseLessonBlock.lesson_id)
+                          .join(ClassGroup, ClassGroup.course_id == CourseLesson.course_id)
+                          .where(ClassGroup.id == class_id, CourseLesson.id == lesson_id,
+                                 CourseLessonBlock.id == block_id))
+        if valid is None:
+            raise HTTPException(422, "公告链接不属于当前班级课程。")
     limit(request, "class-announcement", f"{admin.id}:{class_id}", 5, 60)
     students = active_students_for_class(db, class_id)
     if not students:
@@ -179,7 +195,7 @@ def announce(class_id: int, payload: AnnouncementPayload, request: Request,
     notification = create_notification(
         db, kind="class_announcement", title=plain_text(payload.title), body=plain_text(payload.body),
         target_type="class", target_id=class_id, source_type="class", source_id=class_id,
-        link_url=announcement_link(payload.link_url), created_by=admin.id,
+        link_url=payload.link_url, created_by=admin.id,
         idempotency_key=idempotency_key or "",
         recipients=[{"user_id": student.id, "admin_user_id": None} for student in students],
         request_input={"class_id": class_id, **payload.model_dump()},

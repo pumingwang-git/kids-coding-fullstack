@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..models import Notification, NotificationReceipt, User
 from ..notification_domain import notification_kind_label
 from ..security import utcnow
-from .auth_secure import current_user, db_session, require_csrf
+from .auth_secure import current_user, db_session, require_csrf, limit
 
 router = APIRouter(prefix="/api/student/notifications", tags=["student-notifications"])
 
@@ -54,6 +54,7 @@ def list_notifications(
     stmt = select(Notification, NotificationReceipt).join(
         NotificationReceipt, NotificationReceipt.notification_id == Notification.id
     ).where(NotificationReceipt.user_id == user.id)
+    stmt = stmt.where(Notification.revoked_at.is_(None))
     if tab == "unread":
         stmt = stmt.where(NotificationReceipt.read_at.is_(None))
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
@@ -90,6 +91,7 @@ def notification_detail(notification_id: int, request: Request,
 def mark_notification_read(notification_id: int, request: Request,
                            user: User = Depends(current_user), db: Session = Depends(db_session)):
     require_csrf(request)
+    limit(request, "student-notification-read", str(user.id), 60, 60)
     receipt = _receipt(db, user.id, notification_id)
     if receipt.read_at is None:
         receipt.read_at = utcnow()
@@ -100,6 +102,7 @@ def mark_notification_read(notification_id: int, request: Request,
 @router.post("/read-all")
 def mark_all_notifications_read(request: Request, user: User = Depends(current_user), db: Session = Depends(db_session)):
     require_csrf(request)
+    limit(request, "student-notification-read-all", str(user.id), 10, 60)
     now = utcnow()
     db.execute(update(NotificationReceipt).where(
         NotificationReceipt.user_id == user.id,

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..class_groups import active_teacher_assignments_for_class
 from ..course_access import lesson_access, Access
-from ..notification_links import help_request_link
+from ..notification_links import admin_help_request_link, student_help_request_link
 from ..models import (
     ClassGroup, ClassMember, Course, CourseLesson, CourseLessonBlock, HelpMessage, HelpRequest,
     LessonProblemAttempt, LessonProblemBlock, Problem, User,
@@ -150,7 +150,7 @@ def create_help_request(payload: HelpRequestPayload, request: Request,
     db.flush()
     create_notification(db, kind="help_request_created", title="新的学生联系",
                         body="有学生发起了一条联系请求。", target_type="help_request", target_id=row.id,
-                        source_type="help_request", source_id=row.id, link_url=help_request_link(row.id),
+                        source_type="help_request", source_id=row.id, link_url=admin_help_request_link(row.id),
                         idempotency_key=f"help-request-created:{row.id}:{row.assigned_admin_user_id}",
                         recipients=[{"user_id": None, "admin_user_id": row.assigned_admin_user_id}])
     db.commit()
@@ -229,7 +229,7 @@ def reply(request_id: int, payload: HelpMessagePayload, request: Request,
         row.answered_at = utcnow()
     create_notification(db, kind="teacher_reply", title="教师回复了你的联系",
                         body="你的教师联系收到了新回复。", target_type="help_request", target_id=row.id,
-                        source_type="help_request", source_id=row.id, link_url=help_request_link(row.id),
+                        source_type="help_request", source_id=row.id, link_url=student_help_request_link(row.id),
                         idempotency_key=f"teacher-reply:{message.id}:{row.student_id}",
                         recipients=[{"user_id": row.student_id, "admin_user_id": None}])
     db.commit()

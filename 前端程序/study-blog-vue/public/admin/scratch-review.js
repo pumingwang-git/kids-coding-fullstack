@@ -247,7 +247,8 @@ async function doAction(kind) {
     const path = kind === "returned"
       ? `/scratch/submissions/${current.id}/return`
       : `/scratch/submissions/${current.id}/review`;
-    const result = await scratchRequest(path, { method: "POST", body: JSON.stringify(body) });
+    const result = await scratchRequest(path, { method: "POST", body: JSON.stringify(body),
+      headers: { "Idempotency-Key": crypto.randomUUID() } });
     const verdictText = { passed: "通过", failed: "不通过", returned: "退回重做" }[kind];
     toast(`已${verdictText}：${escapeHtml(current.student_name || "")} 的提交。`);
     if (kind === "passed" && result?.completed) {

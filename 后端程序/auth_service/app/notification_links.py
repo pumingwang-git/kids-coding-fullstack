@@ -29,14 +29,18 @@ def exam_attempt_link(access_token: str) -> str:
     return f"/exam/{quote(access_token, safe='-._~')}"
 
 
-def help_request_link(request_id: int) -> str:
-    """Return the existing student-visible notification page for a ticket.
-
-    Ticket detail UI is scheduled separately; until then, linking to the
-    notification inbox is reachable for both a student and an assigned admin.
-    """
+def student_help_request_link(request_id: int) -> str:
     _positive_id(request_id)
     return "/notifications"
+
+
+def admin_help_request_link(request_id: int) -> str:
+    _positive_id(request_id)
+    return "/admin/notifications.html"
+
+
+def help_request_link(request_id: int) -> str:
+    return student_help_request_link(request_id)
 
 
 _ANNOUNCEMENT_ROUTES = (
@@ -57,3 +61,17 @@ def announcement_link(value: str | None) -> str | None:
         if match:
             return build(match)
     raise ValueError("通知跳转地址必须是受支持的站内页面。")
+
+
+def parse_announcement_target(value: str | None) -> dict | None:
+    canonical = announcement_link(value)
+    if canonical is None:
+        return None
+    for pattern, kind in ((r"^/courses/(\d+)$", "course"),
+                          (r"^/learn/(\d+)/homework/(\d+)$", "homework"),
+                          (r"^/exam/([^/?#]+)$", "exam"),
+                          (r"^/notifications$", "notifications")):
+        match = re.fullmatch(pattern, canonical)
+        if match:
+            return {"url": canonical, "kind": kind, "ids": match.groups()}
+    return {"url": canonical, "kind": "notifications", "ids": ()}
