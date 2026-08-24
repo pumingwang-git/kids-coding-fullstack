@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
+from ..audit_summary import ensure_known_event_type
 from ..models import AdminSession, AdminUser, AuditEvent, SliderCaptchaChallenge
 from ..permissions import (
     KNOWN_ROLE_NAMES,
@@ -85,9 +86,11 @@ def audit(
     user_id: int | None = None,
     summary: dict | None = None,
 ):
+    event_type = f"admin_{event}"
+    ensure_known_event_type(event_type, settings.environment)
     db.add(
         AuditEvent(
-            event_type=f"admin_{event}",
+            event_type=event_type,
             outcome=outcome,
             admin_user_id=admin_user_id,
             user_id=user_id,

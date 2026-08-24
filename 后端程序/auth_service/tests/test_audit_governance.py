@@ -2,12 +2,14 @@
 
 import ast
 import json
+import logging
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from app.audit_summary import diff_summary
-from app.audit_summary import EVENT_CATEGORY, RETENTION_DAYS
+from app.audit_summary import EVENT_CATEGORY, RETENTION_DAYS, ensure_known_event_type, CATEGORY_GRADE
 from app.models import AuditEvent
 from test_admin_auth import ADMIN_PASSWORD, admin_client, admin_csrf_headers, admin_login
 from test_admin_classes import seed_course
@@ -15,6 +17,10 @@ from test_exam import admin_login as root_login, build_app
 from test_admin_role_change import login_as, seed_admin
 
 APP = Path(__file__).resolve().parents[1] / "app"
+HISTORICAL_EVENT_TYPES = {
+    "admin_problem_clone", "admin_problem_offline",
+    "exam_judge_failed",
+}
 
 
 def test_diff_summary_is_allowlisted_versioned_and_redacted():
@@ -59,17 +65,112 @@ def test_audit_event_has_no_delete_or_update_mutation_in_app():
                     assert not (isinstance(node.args[0], ast.Name) and node.args[0].id == "AuditEvent")
 
 
-def test_every_literal_router_audit_event_has_a_retention_category():
+def test_every_audit_event_constructor_is_guarded():
+    constructors = []
+    for path in APP.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        if path.name == "models.py":
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "AuditEvent"):
+                continue
+            owner = next((candidate for candidate in ast.walk(tree)
+                          if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef))
+                          and candidate.lineno <= node.lineno <= getattr(candidate, "end_lineno", node.lineno)), None)
+            constructors.append((path, node, owner))
+    assert len(constructors) == 3
+    assert all(owner and any(isinstance(call, ast.Name) and call.id == "ensure_known_event_type"
+                             for call in ast.walk(owner))
+               for _, _, owner in constructors)
+
+
+# 动态事件名里允许出现的变量及其**全部**取值。新变量必须先登记，否则
+# _expand_event_name() 直接报错——不允许静默漏掉一个事件名（N7）。
+DYNAMIC_EVENT_VALUES = {
+    "kind": {"starter", "demo"},
+    "action": {"submit", "approve", "reject"},
+}
+
+
+def _expand_event_name(node: ast.JoinedStr, path: Path) -> set[str]:
+    """按插值的真实位置逐段展开 f-string 事件名。
+
+    旧实现有两个坑，都是 N7 暴露的：
+    1. 它把取值恒定拼到首个字面量后面，不看插值位置——`f"{kind}_challenge"`
+       会被算成 `_challengestarter` 这种不存在的名字，反而假性满足守卫；
+    2. 展不开就返回空集，静默放行。于是缺漏不在守卫处红，而是等运行时断言
+       在毫不相干的业务测试里炸（N5 就是这么漏出去的）。
+    """
+    segments: list[set[str]] = []
+    for value in node.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            segments.append({value.value})
+        elif isinstance(value, ast.FormattedValue) and isinstance(value.value, ast.Name):
+            name = value.value.id
+            choices = DYNAMIC_EVENT_VALUES.get(name)
+            assert choices, (
+                f"{path.name}:{node.lineno} 的审计事件名插了未登记的变量 {name!r}；"
+                "请把它的全部取值登记进 DYNAMIC_EVENT_VALUES，或改用字面量事件名。"
+            )
+            segments.append(set(choices))
+        else:
+            raise AssertionError(
+                f"{path.name}:{node.lineno} 的审计事件名含无法静态展开的表达式；"
+                "事件名必须是字面量，或仅由字面量与已登记变量拼接。"
+            )
+    names = {""}
+    for segment in segments:
+        names = {prefix + choice for prefix in names for choice in segment}
+    return names
+
+
+def _literal_audit_event_types() -> set[str]:
     events = set()
     for path in (APP / "routers").glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or getattr(node.func, "id", None) != "audit":
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
                 continue
-            if len(node.args) >= 3 and isinstance(node.args[2], ast.Constant):
-                events.add(node.args[2].value)
+            event_positions = {"audit": 2, "_audit": 2, "_audit_success": 2,
+                               "_audit_admin_user_event": 2, "_audit_paper": 2,
+                               "_audit_problem": 2}
+            event_position = event_positions.get(node.func.id)
+            if event_position is None or len(node.args) <= event_position:
+                continue
+            event = node.args[event_position]
+            prefix = "" if path.name in ("auth_secure.py", "exam.py") else "admin_"
+            if isinstance(event, ast.Constant) and isinstance(event.value, str):
+                events.add(f"{prefix}{event.value}")
+            elif isinstance(event, ast.JoinedStr):
+                events.update(f"{prefix}{name}" for name in _expand_event_name(event, path))
+    return events
+
+
+def test_every_literal_router_audit_event_has_a_retention_category():
+    events = _literal_audit_event_types()
     assert events <= EVENT_CATEGORY.keys()
     assert set(EVENT_CATEGORY.values()) <= RETENTION_DAYS.keys()
+    assert (set(EVENT_CATEGORY) - HISTORICAL_EVENT_TYPES) <= events
+
+
+def test_exam_events_are_grade_retained():
+    assert EVENT_CATEGORY["exam_start"] == CATEGORY_GRADE
+    assert EVENT_CATEGORY["exam_entry_denied"] == CATEGORY_GRADE
+    assert EVENT_CATEGORY["exam_submit"] == CATEGORY_GRADE
+
+
+def test_runtime_audit_category_guard_raises_outside_production_and_warns_in_production(caplog):
+    with pytest.raises(AssertionError, match="未归类的审计 event_type：admin_unknown"):
+        ensure_known_event_type("admin_unknown", "test")
+    with caplog.at_level(logging.WARNING):
+        ensure_known_event_type("admin_unknown", "production")
+    assert "admin_unknown" in caplog.text
+
+
+def test_export_download_uses_five_year_authorization_retention():
+    assert EVENT_CATEGORY["admin_export_download"] == "authz"
+    assert RETENTION_DAYS[EVENT_CATEGORY["admin_export_download"]] == 5 * 365
 
 
 def test_reviewer_keeps_existing_resource_audit_access(tmp_path):

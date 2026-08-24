@@ -61,6 +61,7 @@ from ..models import (
     Video,
     VideoVariant,
 )
+from ..audit_summary import ensure_known_event_type
 from ..course_access import Access, block_gate, completed_block_ids, course_visible, lesson_access
 from ..oj_testdata import JudgeDataUnavailable, read_case_content
 from ..schemas import SaveAnswerPayload, SubmitCodePayload
@@ -109,6 +110,7 @@ def _iso(value: datetime | None) -> str | None:
 
 def _audit(db: Session, request: Request, event: str, outcome: str, user_id: int | None,
            *, resource_type: str | None = None, resource_id: int | None = None, summary: dict | None = None):
+    ensure_known_event_type(event, request.app.state.settings.environment)
     db.add(AuditEvent(
         event_type=event, outcome=outcome, user_id=user_id,
         ip_hmac=hash_ip(request.app.state.settings, client_ip(request)),

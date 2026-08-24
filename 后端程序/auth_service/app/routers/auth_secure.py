@@ -8,6 +8,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..audit_summary import ensure_known_event_type
 from ..mailer import deliver_outbox
 from ..models import (
     AuditEvent,
@@ -80,6 +81,7 @@ def client_ip(request: Request) -> str:
 
 
 def audit(db, settings, event, outcome, ip, user_id=None):
+    ensure_known_event_type(event, settings.environment)
     db.add(
         AuditEvent(
             event_type=event, outcome=outcome, user_id=user_id, ip_hmac=hash_ip(settings, ip)
