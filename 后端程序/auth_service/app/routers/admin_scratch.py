@@ -37,6 +37,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..course_access import completed_block_ids
+from ..notification_links import lesson_homework_link
 from ..models import (
     AdminUser,
     Course,
@@ -1133,7 +1134,7 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
         body="你的 Scratch 作品已完成批改，请查看结果。",
         target_type="scratch_submission", target_id=submission.id,
         source_type="scratch_submission", source_id=submission.id,
-        link_url=f"/learn/{submission.lesson_id}/homework/{submission.lesson_block_id}",
+        link_url=lesson_homework_link(submission.lesson_id, submission.lesson_block_id),
         created_by=admin.id,
         idempotency_key=f"scratch-review:{submission.id}:{submission.review_revision}:{submission.user_id}",
         recipients=[{"user_id": submission.user_id, "admin_user_id": None}],
@@ -1192,7 +1193,7 @@ def return_submission(submission_id: int, payload: ReturnPayload, request: Reque
         body="教师已退回你的 Scratch 作品，请查看反馈后重新提交。",
         target_type="scratch_submission", target_id=submission.id,
         source_type="scratch_submission", source_id=submission.id,
-        link_url=f"/learn/{submission.lesson_id}/homework/{submission.lesson_block_id}",
+        link_url=lesson_homework_link(submission.lesson_id, submission.lesson_block_id),
         created_by=admin.id,
         idempotency_key=f"scratch-return:{submission.id}:{submission.review_revision}:{submission.user_id}",
         recipients=[{"user_id": submission.user_id, "admin_user_id": None}],

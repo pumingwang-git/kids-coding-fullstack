@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..attempt_source import SOURCE_LESSON_HOMEWORK, attempt_count_for
 from ..course_access import OPEN_POLICIES, enrollment_predicates
+from ..notification_links import course_link
 from ..models import (
     Course,
     CourseCategory,
@@ -676,7 +677,7 @@ def publish_course(course_id: int, request: Request,
     create_notification(
         db, kind="homework_published", title="课程已发布", body=f"《{course.title}》现已开放学习。",
         target_type="course", target_id=course.id, source_type="course", source_id=course.id,
-        link_url=f"/courses/{course.id}", created_by=admin.id,
+        link_url=course_link(course.id), created_by=admin.id,
         idempotency_key=f"course-published:{course.id}:{course.publish_generation}",
         recipients=[{"user_id": user_id, "admin_user_id": None} for user_id in recipients],
     )

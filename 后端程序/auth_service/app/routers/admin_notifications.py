@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..class_groups import active_students_for_class
 from ..models import Notification, NotificationReceipt
 from ..notification_domain import notification_kind_label
+from ..notification_links import announcement_link
 from ..notification_service import create_notification, revoke_notification
 from ..permissions import (
     ACADEMIC_ADMIN_ROLE,
@@ -32,12 +33,8 @@ class AnnouncementPayload(BaseModel):
 
     @field_validator("link_url")
     @classmethod
-    def _internal_link_only(cls, value: str | None) -> str | None:
-        if value is None or value == "":
-            return None
-        if not value.startswith("/") or value.startswith("//"):
-            raise ValueError("通知跳转地址必须是站内路径。")
-        return value
+    def _supported_link_only(cls, value: str | None) -> str | None:
+        return announcement_link(value)
 
 
 def _item(notification: Notification, receipt: NotificationReceipt | None, *, sent: bool = False) -> dict:
@@ -180,7 +177,7 @@ def announce(class_id: int, payload: AnnouncementPayload, request: Request,
     notification = create_notification(
         db, kind="class_announcement", title=payload.title.strip(), body=payload.body.strip(),
         target_type="class", target_id=class_id, source_type="class", source_id=class_id,
-        link_url=payload.link_url, created_by=admin.id,
+        link_url=announcement_link(payload.link_url), created_by=admin.id,
         idempotency_key=idempotency_key or "",
         recipients=[{"user_id": student.id, "admin_user_id": None} for student in students],
         request_input={"class_id": class_id, **payload.model_dump()},
