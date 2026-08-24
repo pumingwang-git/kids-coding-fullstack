@@ -235,8 +235,8 @@ class HelpRequest(Base):
     student_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    assigned_admin_user_id: Mapped[int] = mapped_column(
-        ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=False, index=True
+    assigned_admin_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
     context_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -244,13 +244,15 @@ class HelpRequest(Base):
     request_key_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open", index=True)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assignment_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (
-        CheckConstraint("status IN ('open', 'closed')", name="ck_help_requests_status"),
+        CheckConstraint("status IN ('open', 'answered', 'closed')", name="ck_help_requests_status"),
         CheckConstraint(
-            "(status = 'open' AND closed_at IS NULL) OR (status = 'closed' AND closed_at IS NOT NULL)",
+            "(status IN ('open', 'answered') AND closed_at IS NULL) OR (status = 'closed' AND closed_at IS NOT NULL)",
             name="ck_help_requests_status_matches_closed_at",
         ),
         UniqueConstraint("student_id", "request_key_hash", name="uq_help_requests_student_key"),

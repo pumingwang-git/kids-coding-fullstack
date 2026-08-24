@@ -516,6 +516,12 @@ def _seal_if_expired(db: Session, request: Request, attempt: PaperAttempt, paper
     if attempt.status != "ongoing" or not deadline or utcnow() <= deadline:
         return False
     _seal(db, attempt, paper, "auto_timeout")
+    source, _ = resolve_for_attempt(db, attempt)
+    from ..notification_reminders import maybe_publish_result_notification
+    maybe_publish_result_notification(
+        db, attempt=attempt, paper_title=paper.title,
+        source_type=source.source_type, show_score=source.show_score,
+    )
     _audit(db, request, "exam_auto_seal", "success", attempt.user_id,
            resource_type="paper_attempt", resource_id=attempt.id,
            summary={"submit_kind": "auto_timeout"})
@@ -1351,6 +1357,11 @@ def submit_attempt(attempt_id: int, request: Request, user: User = Depends(curre
 
     # warn_unanswered 只是前端的二次确认，服务端不因未作答拒绝交卷。
     _seal(db, attempt, paper, "manual")
+    from ..notification_reminders import maybe_publish_result_notification
+    maybe_publish_result_notification(
+        db, attempt=attempt, paper_title=paper.title,
+        source_type=_source.source_type, show_score=_source.show_score,
+    )
     _audit(db, request, "exam_submit", "success", user.id,
            resource_type="paper_attempt", resource_id=attempt.id,
            summary={"paper_id": paper.id, "total_score": attempt.total_score,

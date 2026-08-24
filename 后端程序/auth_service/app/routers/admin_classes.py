@@ -19,7 +19,9 @@ from ..class_enrollment import (
     revoke_for_membership,
     sync_class_window,
 )
-from ..models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, Enrollment, User
+from ..models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, Enrollment, User, HelpRequest
+from ..notification_links import help_request_link
+from ..notification_service import create_notification
 from .admin_enrollments import ENROLLMENT_STATUS_LABELS
 from ..permissions import (
     ACADEMIC_ADMIN_ROLE,
@@ -573,6 +575,31 @@ def _unassign_class_teacher(
         raise HTTPException(409, "带班关系已经结束。")
     ended_at = utcnow()
     row.ended_at = ended_at
+    successor = db.scalar(
+        select(ClassTeacher).where(
+            ClassTeacher.class_id == row.class_id,
+            ClassTeacher.ended_at.is_(None),
+            ClassTeacher.id != row.id,
+        ).order_by(ClassTeacher.role_in_class != "teacher", ClassTeacher.assigned_at, ClassTeacher.id)
+    )
+    requests = db.scalars(select(HelpRequest).where(
+        HelpRequest.class_id == row.class_id,
+        HelpRequest.assigned_admin_user_id == row.admin_user_id,
+        HelpRequest.status.in_(["open", "answered"]),
+    )).all()
+    for ticket in requests:
+        ticket.assigned_admin_user_id = successor.admin_user_id if successor else None
+        ticket.assignment_revision += 1
+        create_notification(
+            db, kind="help_request_assigned", title="工单已重新分配",
+            body="你的联系请求已转交新的承办教师。" if successor else "你的联系请求已进入未分派队列。",
+            target_type="help_request", target_id=ticket.id,
+            source_type="help_request", source_id=ticket.id,
+            link_url=help_request_link(ticket.id),
+            idempotency_key=f"help-request-assigned:{ticket.id}:{ticket.assignment_revision}",
+            recipients=([{"user_id": None, "admin_user_id": successor.admin_user_id}]
+                        if successor else [{"user_id": ticket.student_id, "admin_user_id": None}]),
+        )
     _audit_success(
         db,
         request,

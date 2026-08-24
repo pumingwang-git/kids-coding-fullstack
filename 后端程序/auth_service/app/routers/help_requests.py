@@ -17,6 +17,7 @@ from ..models import (
 from ..notification_service import create_notification, request_hash
 from ..permissions import ACADEMIC_ADMIN_ROLE, SUPER_ROLE, visible_class_ids
 from ..security import utcnow
+from ..text_sanitize import plain_text
 from .admin_auth import current_admin, db_session
 from .auth_secure import current_user, limit, require_csrf
 
@@ -87,7 +88,8 @@ def _serialize(db: Session, row: HelpRequest) -> dict:
         "id": row.id, "class_id": row.class_id, "student_id": row.student_id,
         "assigned_admin_user_id": row.assigned_admin_user_id, "body": row.body,
         "context_type": row.context_type, "context_id": row.context_id,
-        "status": row.status, "created_at": row.created_at, "closed_at": row.closed_at,
+        "status": row.status, "answered_at": row.answered_at, "assignment_revision": row.assignment_revision,
+        "created_at": row.created_at, "closed_at": row.closed_at,
         "messages": [{"id": item.id, "body": item.body, "created_at": item.created_at,
                       "sender_type": "student" if item.sender_user_id else "admin"}
                      for item in messages],
@@ -141,7 +143,7 @@ def create_help_request(payload: HelpRequestPayload, request: Request,
         raise HTTPException(409, "当前班级暂无承办教师。")
     row = HelpRequest(class_id=payload.class_id, student_id=user.id,
                       assigned_admin_user_id=assignees[0].admin_user_id,
-                      body=payload.body.strip(), context_type=payload.context_type,
+                      body=plain_text(payload.body), context_type=payload.context_type,
                       context_id=payload.context_id, request_key_hash=key_hash,
                       request_hash=input_hash)
     db.add(row)
@@ -218,10 +220,13 @@ def reply(request_id: int, payload: HelpMessagePayload, request: Request,
             raise HTTPException(409, "Idempotency-Key 已用于不同请求。")
         return {"id": existing.id, "created_at": existing.created_at}
     message = HelpMessage(help_request_id=row.id, sender_admin_user_id=admin.id,
-                          body=payload.body.strip(), request_key_hash=key_hash)
+                          body=plain_text(payload.body), request_key_hash=key_hash)
     message.request_hash = input_hash
     db.add(message)
     db.flush()
+    if row.status == "open":
+        row.status = "answered"
+        row.answered_at = utcnow()
     create_notification(db, kind="teacher_reply", title="教师回复了你的联系",
                         body="你的教师联系收到了新回复。", target_type="help_request", target_id=row.id,
                         source_type="help_request", source_id=row.id, link_url=help_request_link(row.id),

@@ -110,8 +110,8 @@ def backfill_published_course_receipts(db, *, now=None, dry_run: bool = False) -
     return added
 
 
-def send_exam_result_notification(db, *, attempt: PaperAttempt, paper_title: str,
-                                  source_type: str, show_score: str) -> bool:
+def maybe_publish_result_notification(db, *, attempt: PaperAttempt, paper_title: str,
+                                      source_type: str, show_score: str) -> bool:
     """Create the personal result notification for an already sealed attempt.
 
     This deliberately accepts only the facts produced by the exam workflow.
@@ -122,16 +122,23 @@ def send_exam_result_notification(db, *, attempt: PaperAttempt, paper_title: str
     if (source_type != "exam_link" or show_score != "immediate"
             or attempt.status != "submitted" or attempt.submitted_at is None):
         return False
+    lesson_block = db.get(CourseLessonBlock, attempt.source_id) if source_type == "lesson_homework" else None
+    kind = "homework_graded" if lesson_block is not None else "exam_result_published"
+    link = (lesson_homework_link(lesson_block.lesson_id, lesson_block.id)
+            if lesson_block is not None else exam_attempt_link(db.get(ExamLink, attempt.source_id).access_token))
     create_notification(
-        db, kind="exam_result_published", title="考试成绩已发布",
+        db, kind=kind, title="作业成绩已发布" if lesson_block is not None else "考试成绩已发布",
         body=f"《{paper_title}》已完成判分，成绩为 {attempt.total_score} 分。",
         target_type="paper_attempt", target_id=attempt.id,
-        source_type="exam_link", source_id=attempt.source_id,
-        link_url=exam_attempt_link(db.get(ExamLink, attempt.source_id).access_token),
+        source_type=source_type, source_id=attempt.source_id,
+        link_url=link,
         idempotency_key=f"exam-result:{attempt.id}",
         recipients=[{"user_id": attempt.user_id, "admin_user_id": None}],
     )
     return True
+
+
+send_exam_result_notification = maybe_publish_result_notification
 
 
 def send_after_close_exam_result_notifications(db, *, now=None,

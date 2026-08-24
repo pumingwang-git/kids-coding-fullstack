@@ -16,7 +16,9 @@ from ..permissions import (
     SUPER_ROLE,
     TEACHER_ROLE,
     visible_class_ids,
+    can_read_students,
 )
+from ..text_sanitize import plain_text
 from ..security import utcnow
 from . import admin_classes
 from .admin_auth import audit, client_ip, current_admin, db_session, require_csrf
@@ -167,7 +169,7 @@ def announce(class_id: int, payload: AnnouncementPayload, request: Request,
              idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
              admin=Depends(current_admin), db: Session = Depends(db_session)):
     require_csrf(request)
-    if admin.role not in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE, TEACHER_ROLE, ASSISTANT_ROLE}:
+    if not can_read_students(admin):
         raise HTTPException(403, "没有发布班级公告的权限。")
     admin_classes._require_class_reader(request, db, class_id)
     limit(request, "class-announcement", f"{admin.id}:{class_id}", 5, 60)
@@ -175,7 +177,7 @@ def announce(class_id: int, payload: AnnouncementPayload, request: Request,
     if not students:
         raise HTTPException(409, "当前班级没有在读学员，无法发送公告。")
     notification = create_notification(
-        db, kind="class_announcement", title=payload.title.strip(), body=payload.body.strip(),
+        db, kind="class_announcement", title=plain_text(payload.title), body=plain_text(payload.body),
         target_type="class", target_id=class_id, source_type="class", source_id=class_id,
         link_url=announcement_link(payload.link_url), created_by=admin.id,
         idempotency_key=idempotency_key or "",
