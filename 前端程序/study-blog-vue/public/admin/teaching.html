@@ -28,7 +28,10 @@
           <section class="teaching-overview" aria-labelledby="overviewTitle">
             <div class="teaching-section-head">
               <div><h2 id="overviewTitle">班级概览</h2><p id="overviewHint"></p></div>
-              <button class="btn teaching-icon-button" id="refreshBtn" type="button" title="刷新当前班级数据" aria-label="刷新当前班级数据">刷新</button>
+              <div class="teaching-section-actions">
+                <button class="btn" id="exportBtn" type="button" title="导出当前班级学情 CSV" aria-label="导出当前班级学情 CSV" hidden>导出 CSV</button>
+                <button class="btn teaching-icon-button" id="refreshBtn" type="button" title="刷新当前班级数据" aria-label="刷新当前班级数据">刷新</button>
+              </div>
             </div>
             <div class="teaching-overview-grid" id="overviewMetrics"></div>
           </section>

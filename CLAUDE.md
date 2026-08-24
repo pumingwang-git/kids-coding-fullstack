@@ -10,11 +10,11 @@
 cd 后端程序/auth_service && ./.venv/Scripts/python.exe -m pytest tests/xxx.py -q
 ```
 
-必须用这个 venv，系统 python 没装 pytest。全量必须独占运行，开跑前确认没有其他会话正在跑 pytest。实测共收集 **853 条**，独占基线（2026-08-19，HEAD `0b37b9c`）为 **1 failed / 851 passed / 1 skipped / 29 分 36 秒**，改动小时只跑相关文件。
+必须用这个 venv，系统 python 没装 pytest。全量必须独占运行，开跑前确认没有其他会话正在跑 pytest。实测共收集 **999 条**，独占基线（2026-08-24）为 **1 failed / 997 passed / 1 skipped / 35 分 53 秒**，改动小时只跑相关文件。
 
 此前两次并发期间的全量把 `test_class_migration.py` 报成失败 14 条，被误记为「既有欠账」并派生出一个不存在的修复任务。非独占跑出来的失败清单没有诊断价值。排查线索：`ScriptDirectory.from_config()` 会 import `alembic/versions/` 下每个迁移文件，多进程同时跑会撞 Windows **pycache** 文件锁，命中的正好是走 `command.*` 的那批用例。
 
-**已知失败（与你无关，不要试图修）**：`test_video_play.py::test_transcode_failure_marks_failed`——Celery 把异常记进 trace 而没有重新抛出，属版本行为漂移。
+**已知失败（本轮不要顺手改）**：`test_student_learning.py::test_unpublished_course_lesson_denied`——当前测试期望 `403`、实现返回 `404`；按范围闸规范，可能是测试期望过时而非代码有错，需专项裁决后再处理。
 
 ---
 

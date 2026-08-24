@@ -41,3 +41,14 @@ def test_teaching_page_empty_and_error_states_are_unambiguous():
     assert 'renderClassOptions("班级加载失败")' in script
     assert 'select.value = state.classes.length ? String(state.classId) : "";' in script
     assert '${error.message || "加载失败"} 请刷新页面后重试。' not in script
+
+
+def test_teaching_export_button_uses_server_capability_and_download_helper():
+    script = (ADMIN / "teaching.js").read_text(encoding="utf-8")
+    page = (ADMIN / "teaching.html").read_text(encoding="utf-8")
+    assert 'id="exportBtn"' in page
+    assert "adminDownload" in script
+    assert "payload?.capabilities?.export_class_insight === true" in script
+    assert "adminDownload(`${base}/export`" in script
+    for role in ("super_admin", "academic_admin", "teacher", "assistant", "editor", "reviewer"):
+        assert role not in script

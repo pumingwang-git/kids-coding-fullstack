@@ -221,9 +221,10 @@ def test_new_teaching_endpoints_enforce_capability_and_class_scope(tmp_path: Pat
         assert foreign.json() == missing.json() == {"detail": "班级不存在。"}
 
     # A teacher with no class has an empty list endpoint, not a fabricated 404.
-    assert teacher.get("/api/admin/teaching/review-queue", headers=teacher_headers).json() == {
-        "items": [], "total": 0,
-    }
+    empty_queue = teacher.get("/api/admin/teaching/review-queue", headers=teacher_headers)
+    assert empty_queue.json()["items"] == []
+    assert empty_queue.json()["total"] == 0
+    assert empty_queue.json()["metric_version"]
 
 
 def test_teaching_students_paginates_keeps_never_active_and_rejoining_member(tmp_path: Path):

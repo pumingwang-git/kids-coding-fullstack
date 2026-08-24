@@ -1,4 +1,4 @@
-import { adminRequest } from "./admin-api.js";
+import { adminDownload, adminRequest } from "./admin-api.js";
 import { initLayout } from "./admin-layout.js";
 
 initLayout();
@@ -35,6 +35,10 @@ function selectedClass() {
   return state.classes.find((item) => Number(item.id) === Number(state.classId));
 }
 
+function setExportVisibility(visible) {
+  $("exportBtn").hidden = !visible;
+}
+
 function renderClassOptions(emptyLabel = "暂无班级") {
   const select = $("classSelect");
   select.innerHTML = state.classes.length
@@ -52,6 +56,7 @@ function insightMetrics(payload) {
 function renderOverview(payload) {
   const metrics = insightMetrics(payload);
   const current = selectedClass();
+  setExportVisibility(payload?.capabilities?.export_class_insight === true);
   $("overviewHint").textContent = current?.course_title || current?.course?.title || "";
   $("overviewMetrics").innerHTML = metrics.map(([key, value]) => `<div class="teaching-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(key.replace(/_/g, " "))}</span></div>`).join("");
   if (!metrics.length) setPanelState($("overviewMetrics"), "暂未返回可展示的概览数据。");
@@ -132,6 +137,7 @@ async function loadStudents() {
 
 async function loadWorkbench() {
   $("workbench").setAttribute("aria-busy", "true");
+  setExportVisibility(false);
   const base = `/teaching/classes/${state.classId}`;
   const results = await Promise.allSettled([
     adminRequest(`${base}/overview`), loadStudents(), adminRequest(`${base}/homework`), adminRequest(`${base}/exams`), adminRequest("/teaching/review-queue"), adminRequest(`${base}/weak-items`),
@@ -145,12 +151,24 @@ async function loadWorkbench() {
       if (index === 1 || index === 5) {
         errorHosts[index].innerHTML = `<tr><td colspan="${index === 1 ? 4 : 3}"><p class="teaching-inline-state">${escapeHtml(message)}</p></td></tr>`;
       } else setPanelState(errorHosts[index], message);
+      if (index === 0) setExportVisibility(false);
     }
   });
   const failed = results.some((result) => result.status === "rejected");
   if (failed) $("classesState").textContent = "部分数据暂不可用，可稍后刷新重试。";
   else $("classesState").textContent = "";
   $("workbench").removeAttribute("aria-busy");
+}
+
+async function exportCurrentClass() {
+  if (!state.classId || $("exportBtn").hidden) return;
+  const base = `/teaching/classes/${state.classId}`;
+  try {
+    await adminDownload(`${base}/export`, `class-${state.classId}-insight.csv`);
+    $("classesState").textContent = "学情导出已开始。";
+  } catch (error) {
+    $("classesState").textContent = error.message || "导出失败，请稍后重试。";
+  }
 }
 
 async function loadClasses() {
@@ -180,6 +198,7 @@ $("classSelect").addEventListener("change", async (event) => {
   await loadWorkbench();
 });
 $("refreshBtn").addEventListener("click", loadWorkbench);
+$("exportBtn").addEventListener("click", exportCurrentClass);
 $("studentFilter").addEventListener("submit", async (event) => {
   event.preventDefault();
   state.inactiveDays = $("inactiveDays").value;

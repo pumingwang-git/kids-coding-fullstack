@@ -60,6 +60,17 @@ ROLE_SCOPES = {
     ACADEMIC_ADMIN_ROLE: GLOBAL_SCOPE,
 }
 
+# 学情 CSV 是带走学员姓名与成绩的数据出口，能力边界比普通班级读取更窄。
+# assistant 保留在功能能力集合中，是为了让其针对具体班级走范围闸（404），
+# 而不是把「本班只是助教」错误地暴露成角色级功能闸（403）。
+CLASS_INSIGHT_EXPORT_ROLES = frozenset({
+    SUPER_ROLE,
+    ACADEMIC_ADMIN_ROLE,
+    TEACHER_ROLE,
+    ASSISTANT_ROLE,
+})
+CLASS_INSIGHT_EXPORT_CAPABILITY = "export_class_insight"
+
 SCOPE_LABELS = {
     GLOBAL_SCOPE: "全局",
     CLASS_SCOPE: "限本班",
@@ -146,6 +157,45 @@ def visible_student_ids(admin, db) -> set[int] | None:
 def can_read_students(admin) -> bool:
     """判断角色是否具备学员数据读取能力；范围收窄由 ``visible_student_ids`` 负责。"""
     return ROLE_SCOPES.get(admin.role, NO_SCOPE) != NO_SCOPE
+
+
+def can_export_class_insight(admin) -> bool:
+    """Return whether the admin role reaches the class-insight export gate.
+
+    This is intentionally distinct from the per-class scope check.  An
+    assistant has the role-level route capability so a request for a class is
+    rejected as an indistinguishable scope ``404``; content-only roles fail
+    the feature gate with ``403`` regardless of the requested class.
+    """
+    return admin.role in CLASS_INSIGHT_EXPORT_ROLES
+
+
+def exportable_class_ids(admin, db) -> set[int] | None:
+    """Return classes this admin may export, using the export-specific scope.
+
+    ``None`` means globally visible.  Class-scoped staff may export only
+    active ``teacher`` assignments; an assistant relationship therefore
+    intentionally produces an empty export scope for that class.
+    """
+    if admin.role in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE}:
+        return None
+    if admin.role not in {TEACHER_ROLE, ASSISTANT_ROLE}:
+        return set()
+    if db is None:
+        raise TypeError("导出班级范围查询必须提供数据库会话。")
+    return {
+        row.class_id
+        for row in active_class_teacher_assignments(db, admin.id)
+        if row.role_in_class == TEACHER_ROLE
+    }
+
+
+def can_export_class_insight_for_class(admin, db, class_id: int) -> bool:
+    """Return the capability bit for a class overview response."""
+    if not can_export_class_insight(admin):
+        return False
+    class_ids = exportable_class_ids(admin, db)
+    return class_ids is None or class_id in class_ids
 
 
 def can_manage_enrollments(admin) -> bool:

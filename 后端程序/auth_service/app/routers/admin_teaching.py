@@ -14,8 +14,24 @@ from ..exam_roster import exam_participation
 from ..homework_roster import build_homework_roster
 from ..learning_activity import activity_rows
 from ..lesson_homework_kinds import KINDS
-from ..models import ClassGroup, CourseLesson, CourseLessonBlock, ExamAssignment, ExamLink, User
-from ..permissions import log_scope_denial, visible_student_ids
+from ..metric_versions import METRIC_VERSION
+from ..models import (
+    AdminUser,
+    ClassGroup,
+    CourseLesson,
+    CourseLessonBlock,
+    ExamAssignment,
+    ExamLink,
+    User,
+)
+from ..permissions import (
+    CLASS_INSIGHT_EXPORT_CAPABILITY,
+    can_export_class_insight,
+    can_export_class_insight_for_class,
+    exportable_class_ids,
+    log_scope_denial,
+    visible_student_ids,
+)
 from ..review_adapters import ScratchReviewAdapter
 from ..review_queue import pending_review_count, pending_reviews
 from ..security import utcnow
@@ -35,6 +51,27 @@ def _readable_class_or_404(class_id: int, request: Request, db: Session) -> Clas
     if class_group is None:
         raise HTTPException(404, "班级不存在。")
     return class_group
+
+
+def _exportable_class_or_404(
+    class_id: int, request: Request, db: Session
+) -> tuple[AdminUser, ClassGroup, set[int] | None]:
+    """Apply the export feature gate, then the stricter class scope gate."""
+    admin = current_admin(request, db)
+    if not can_export_class_insight(admin):
+        raise HTTPException(403, "没有导出学情 CSV 的权限。")
+
+    class_ids = exportable_class_ids(admin, db)
+    if class_ids is not None and class_id not in class_ids:
+        # An assistant (and a teacher assigned only as assistant) reaches this
+        # resource-specific 404 rather than revealing the class through 403.
+        log_scope_denial(admin, "class_group", class_id)
+        raise HTTPException(404, "班级不存在。")
+
+    class_group = db.get(ClassGroup, class_id)
+    if class_group is None:
+        raise HTTPException(404, "班级不存在。")
+    return admin, class_group, class_ids
 
 
 def _visible_student_or_404(student_id: int, request: Request, db: Session):
@@ -113,10 +150,19 @@ def list_teaching_classes(
 def class_overview(
     class_id: int, request: Request, db: Session = Depends(db_session)
 ):
-    _readable_class_or_404(class_id, request, db)
+    admin, _ = admin_classes._require_class_reader(request, db, class_id)
+    class_group = db.get(ClassGroup, class_id)
+    if class_group is None:
+        raise HTTPException(404, "班级不存在。")
     return {
         "class_id": class_id,
         "insight": build_class_insight(db, {class_id})[class_id],
+        "metric_version": METRIC_VERSION,
+        "capabilities": {
+            CLASS_INSIGHT_EXPORT_CAPABILITY: can_export_class_insight_for_class(
+                admin, db, class_id
+            ),
+        },
     }
 
 
@@ -172,7 +218,11 @@ def class_students(
         rows.sort(key=lambda row: row["student"]["username"], reverse=descending)
     total = len(rows)
     start = (page - 1) * page_size
-    return {"items": rows[start:start + page_size], "total": total}
+    return {
+        "items": rows[start:start + page_size],
+        "total": total,
+        "metric_version": METRIC_VERSION,
+    }
 
 
 @router.get("/classes/{class_id}/export")
@@ -183,7 +233,7 @@ def export_class_insight(
     db: Session = Depends(db_session),
 ):
     """Export one row per currently enrolled learner as a UTF-8 CSV."""
-    class_group = _readable_class_or_404(class_id, request, db)
+    admin, class_group, class_ids = _exportable_class_or_404(class_id, request, db)
     student_rows = _filtered_class_students(db, class_id, inactive_days_gte)
     students = [student for student, _ in student_rows]
     activity_by_student = {student.id: activity for student, activity in student_rows}
@@ -201,7 +251,6 @@ def export_class_insight(
 
     exam_by_student = {student_id: {"total": 0, "participated": 0, "attempts": 0}
                        for student_id in student_ids}
-    _, class_ids = admin_classes._require_class_reader(request, db)
     for item in _class_exam_items(db, class_id, class_ids):
         for row in item["roster"]:
             student_id = row["student"]["id"]
@@ -218,7 +267,7 @@ def export_class_insight(
     writer.writerow([
         "学员ID", "用户名", "最近活动", "从未学习", "未学习天数",
         "作业项数_items", "已提交作业项数_items",
-        "考试项数_items", "已参与考试项数_items", "考试提交_attempts",
+        "考试项数_items", "已参与考试项数_items", "考试提交_attempts", "metric_version",
     ])
     for student in students:
         activity = activity_by_student[student.id]
@@ -235,9 +284,9 @@ def export_class_insight(
             exams["total"],
             exams["participated"],
             exams["attempts"],
+            METRIC_VERSION,
         ])
 
-    admin = current_admin(request, db)
     audit(db, request.app.state.settings, "export_download", "success", client_ip(request), admin.id,
           resource_type="class_insight_export", resource_id=class_id,
           summary={"schema_version": 1, "export_type": "class_insight", "row_count": len(students)})
@@ -252,14 +301,20 @@ def export_class_insight(
 @router.get("/classes/{class_id}/homework")
 def class_homework(class_id: int, request: Request, db: Session = Depends(db_session)):
     class_group = _readable_class_or_404(class_id, request, db)
-    return {"items": _class_homework_items(db, class_group)}
+    return {
+        "items": _class_homework_items(db, class_group),
+        "metric_version": METRIC_VERSION,
+    }
 
 
 @router.get("/classes/{class_id}/exams")
 def class_exams(class_id: int, request: Request, db: Session = Depends(db_session)):
     _readable_class_or_404(class_id, request, db)
     _, class_ids = admin_classes._require_class_reader(request, db)
-    return {"items": _class_exam_items(db, class_id, class_ids)}
+    return {
+        "items": _class_exam_items(db, class_id, class_ids),
+        "metric_version": METRIC_VERSION,
+    }
 
 
 @router.get("/review-queue")
@@ -291,6 +346,7 @@ def review_queue(
             for index, row in enumerate(rows)
         ],
         "total": pending_review_count(db, student_ids),
+        "metric_version": METRIC_VERSION,
     }
 
 
@@ -302,7 +358,7 @@ def class_weak_items(class_id: int, request: Request, db: Session = Depends(db_s
         rate = row.pop("score_rate")
         rate_key = "practice_correct_rate" if row["source"] == "lesson_practice" else "paper_score_rate"
         items.append({**row, rate_key: rate})
-    return {"items": items}
+    return {"items": items, "metric_version": METRIC_VERSION}
 
 
 @router.get("/students/{student_id}/profile")
