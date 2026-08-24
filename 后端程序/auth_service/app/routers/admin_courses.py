@@ -11,26 +11,29 @@
 """
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..course_access import OPEN_POLICIES
 from ..attempt_source import SOURCE_LESSON_HOMEWORK, attempt_count_for
+from ..course_access import OPEN_POLICIES, enrollment_predicates
 from ..models import (
     Course,
     CourseCategory,
-    CourseTag,
-    CourseTagLink,
-    CourseType,
     CourseLesson,
     CourseLessonBlock,
     CourseSection,
+    CourseTag,
+    CourseTagLink,
+    CourseType,
+    Enrollment,
+    LearningArea,
     LessonBlockMaterial,
     LessonMarkdownBlock,
     LessonPaperBlock,
@@ -38,13 +41,13 @@ from ..models import (
     LessonScratchBlock,
     LessonVideoBlock,
     MaterialAsset,
-    LearningArea,
     Paper,
     Problem,
     ScratchChallenge,
     Video,
     VideoVariant,
 )
+from ..notification_service import create_notification, request_hash
 from ..permissions import is_editor
 from .admin_auth import audit, client_ip, current_admin, db_session, require_csrf
 
@@ -628,7 +631,9 @@ def _publish_checks(db: Session, course: Course) -> list[dict]:
 
 
 @router.post("/courses/{course_id}/publish")
-def publish_course(course_id: int, request: Request, db: Session = Depends(db_session)):
+def publish_course(course_id: int, request: Request,
+                   idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+                   db: Session = Depends(db_session)):
     require_csrf(request)
     admin = current_admin(request, db)
     if not is_editor(admin):
@@ -636,6 +641,18 @@ def publish_course(course_id: int, request: Request, db: Session = Depends(db_se
     course = db.get(Course, course_id)
     if course is None:
         raise HTTPException(404, "课包不存在。")
+    # Existing admin clients predate E6.  They retain the former one-click
+    # publish behavior; upgraded clients provide the header for retry safety.
+    idempotency_key = idempotency_key or f"legacy-course-publish:{course_id}:{uuid4()}"
+    key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    input_hash = request_hash({"course_id": course_id})
+    if course.status == "published":
+        if course.last_publish_idempotency_key_hash == key_hash:
+            if course.last_publish_request_hash != input_hash:
+                raise HTTPException(409, "Idempotency-Key 已用于不同请求。")
+            return {"id": course.id, "status": course.status, "idempotent": True,
+                    "publish_generation": course.publish_generation, "hints": []}
+        raise HTTPException(409, "课包已经发布，请勿重复发布。")
     problems = _publish_checks(db, course)
     blocking = [p for p in problems if p["code"] not in NON_BLOCKING_HINTS]
     if blocking:
@@ -645,6 +662,22 @@ def publish_course(course_id: int, request: Request, db: Session = Depends(db_se
         # 提示项（problem_type_stale / problem_score_zero）也一并输出，供前端展示。
         return JSONResponse(status_code=422, content={"detail": "课包暂不能发布。", "problems": problems})
     course.status = "published"
+    course.publish_generation += 1
+    course.last_publish_idempotency_key_hash = key_hash
+    course.last_publish_request_hash = input_hash
+    recipients = list(db.scalars(select(Enrollment.student_id).where(
+        Enrollment.course_id == course.id,
+        *enrollment_predicates(datetime.now(UTC)),
+    ).distinct()))
+    # Persist the broadcast even with an empty current roster.  The cron task
+    # can then attach a receipt when a future Enrollment.opened_at becomes valid.
+    create_notification(
+        db, kind="homework_published", title="课程已发布", body=f"《{course.title}》现已开放学习。",
+        target_type="course", target_id=course.id, source_type="course", source_id=course.id,
+        link_url=f"/courses/{course.id}", created_by=admin.id,
+        idempotency_key=f"course-published:{course.id}:{course.publish_generation}",
+        recipients=[{"user_id": user_id, "admin_user_id": None} for user_id in recipients],
+    )
     audit(db, request.app.state.settings, "course_publish", "success",
           client_ip(request), admin.id, resource_type="course", resource_id=course_id)
     db.commit()
@@ -652,6 +685,7 @@ def publish_course(course_id: int, request: Request, db: Session = Depends(db_se
     return {
         "id": course.id,
         "status": "published",
+        "publish_generation": course.publish_generation,
         "hints": [p for p in problems if p["code"] in NON_BLOCKING_HINTS],
     }
 

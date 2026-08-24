@@ -57,3 +57,20 @@ def active_class_teacher_assignments(db: Session, admin_user_id: int) -> list[Cl
             .order_by(ClassTeacher.class_id, ClassTeacher.id)
         ).all()
     )
+
+
+def active_teacher_assignments_for_class(db: Session, class_id: int) -> list[ClassTeacher]:
+    """Return current teachers before assistants, then stable assignment order."""
+
+    return list(
+        db.scalars(
+            select(ClassTeacher)
+            .where(ClassTeacher.class_id == class_id, ClassTeacher.ended_at.is_(None))
+            .order_by(
+                # SQL boolean ordering is portable enough for our supported DBs.
+                ClassTeacher.role_in_class != "teacher",
+                ClassTeacher.assigned_at,
+                ClassTeacher.id,
+            )
+        ).all()
+    )

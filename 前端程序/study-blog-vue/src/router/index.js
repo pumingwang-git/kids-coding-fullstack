@@ -68,6 +68,12 @@ const router = createRouter({
       component: () => import("../views/SettingsView.vue"),
       meta: { requiresAuth: true, shell: "learning" },
     },
+    {
+      path: "/notifications",
+      name: "notifications",
+      component: () => import("../views/NotificationsView.vue"),
+      meta: { requiresAuth: true, shell: "learning" },
+    },
     { path: "/verify-email", name: "verify-email", component: VerifyEmail },
     {
       path: "/areas/:areaKey",

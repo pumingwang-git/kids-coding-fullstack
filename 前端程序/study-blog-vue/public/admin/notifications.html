@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>通知中心 · 学习平台后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="main">
+      <header class="topbar" id="topbar"></header>
+      <main class="content notification-page">
+        <div class="page-head">
+          <div><h1>通知中心</h1><p>集中处理教学协作中的待办、公告与已发送记录。</p></div>
+        </div>
+        <section class="card" aria-labelledby="notificationsTitle">
+          <h2 id="notificationsTitle" class="sr-only">通知列表</h2>
+          <div class="notification-toolbar">
+            <div class="notification-tabs" role="tablist" aria-label="通知范围">
+              <button id="inboxTab" type="button" role="tab" aria-selected="true" aria-controls="notificationsList">收件箱</button>
+              <button id="sentTab" type="button" role="tab" aria-selected="false" aria-controls="notificationsList">已发送</button>
+            </div>
+            <div class="notification-actions"><button id="readAllBtn" class="btn" type="button">全部标为已读</button></div>
+          </div>
+          <form class="notification-filters" id="filterForm">
+            <label for="readFilter" id="readFilterLabel">显示范围</label>
+            <select id="readFilter" name="tab"><option value="all">全部</option><option value="unread">仅未读</option></select>
+            <label for="kindFilter" id="kindLabel" hidden>通知类型</label>
+            <select id="kindFilter" name="kind" hidden><option value="">全部类型</option></select>
+            <button class="btn" type="submit">筛选</button>
+          </form>
+          <div id="notificationsList" class="notification-list" aria-live="polite" aria-busy="true"></div>
+          <div id="notificationsFooter" class="notification-footer" aria-label="通知分页"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <div class="modal-mask notification-confirm" id="revokeMask" hidden inert>
+    <section class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="revokeTitle" aria-describedby="revokeDescription">
+      <header class="modal-head"><h2 id="revokeTitle">撤回通知</h2><button class="icon-btn" id="revokeClose" type="button" aria-label="关闭撤回确认">×</button></header>
+      <div class="modal-body"><p id="revokeDescription">撤回后，收件人将看到该通知已撤回。此操作不会删除历史记录。</p><div id="revokeError" class="list-error" hidden></div></div>
+      <footer class="modal-foot"><button class="btn" id="revokeCancel" type="button">取消</button><span class="spacer"></span><button class="btn danger" id="revokeConfirm" type="button">确认撤回</button></footer>
+    </section>
+  </div>
+  <script type="module" src="notifications.js"></script>
+</body>
+</html>

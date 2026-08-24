@@ -27,7 +27,6 @@ Kimi 的管理端（21c 明确不许绕过权限写库），也没法用公开�
 from __future__ import annotations
 
 import json
-import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
@@ -48,6 +47,7 @@ from ..models import (
     User,
     Video,
 )
+from ..notification_service import create_notification
 from ..permissions import (
     ACADEMIC_ADMIN_ROLE,
     ASSISTANT_ROLE,
@@ -1084,6 +1084,7 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
     submission.review_comment = payload.comment or None
     submission.reviewed_by = admin.id
     submission.reviewed_at = utcnow()
+    submission.review_revision += 1
 
     completed = False
     if submission.passed:
@@ -1100,6 +1101,16 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
           resource_id=submission.id,
           summary={"verdict": payload.verdict, "completed": completed,
                    "manual_score": submission.manual_score})
+    create_notification(
+        db, kind="homework_graded", title="作品批改完成",
+        body="你的 Scratch 作品已完成批改，请查看结果。",
+        target_type="scratch_submission", target_id=submission.id,
+        source_type="scratch_submission", source_id=submission.id,
+        link_url=f"/learn/{submission.lesson_id}/homework/{submission.lesson_block_id}",
+        created_by=admin.id,
+        idempotency_key=f"scratch-review:{submission.id}:{submission.review_revision}:{submission.user_id}",
+        recipients=[{"user_id": submission.user_id, "admin_user_id": None}],
+    )
     db.commit()
     return {"submission": _submission_row(db, submission, detail=True),
             "completed": completed}
@@ -1139,9 +1150,20 @@ def return_submission(submission_id: int, payload: ReturnPayload, request: Reque
     submission.review_comment = payload.comment
     submission.reviewed_by = admin.id
     submission.reviewed_at = utcnow()
+    submission.review_revision += 1
 
     audit(db, request.app.state.settings, "scratch_submission_return", "success",
           client_ip(request), admin.id, resource_type="scratch_submission",
           resource_id=submission.id, summary={"manual_score": submission.manual_score})
+    create_notification(
+        db, kind="homework_returned", title="作品需要修改后重新提交",
+        body="教师已退回你的 Scratch 作品，请查看反馈后重新提交。",
+        target_type="scratch_submission", target_id=submission.id,
+        source_type="scratch_submission", source_id=submission.id,
+        link_url=f"/learn/{submission.lesson_id}/homework/{submission.lesson_block_id}",
+        created_by=admin.id,
+        idempotency_key=f"scratch-return:{submission.id}:{submission.review_revision}:{submission.user_id}",
+        recipients=[{"user_id": submission.user_id, "admin_user_id": None}],
+    )
     db.commit()
     return {"submission": _submission_row(db, submission, detail=True)}

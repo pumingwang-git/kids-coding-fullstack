@@ -224,6 +224,66 @@ class NotificationReceipt(Base):
     )
 
 
+class HelpRequest(Base):
+    """Asynchronous student-to-teacher teaching support ticket."""
+
+    __tablename__ = "help_requests"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("class_groups.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    assigned_admin_user_id: Mapped[int] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    context_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    context_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    request_key_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open", index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'closed')", name="ck_help_requests_status"),
+        CheckConstraint(
+            "(status = 'open' AND closed_at IS NULL) OR (status = 'closed' AND closed_at IS NOT NULL)",
+            name="ck_help_requests_status_matches_closed_at",
+        ),
+        UniqueConstraint("student_id", "request_key_hash", name="uq_help_requests_student_key"),
+    )
+
+
+class HelpMessage(Base):
+    __tablename__ = "help_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    help_request_id: Mapped[int] = mapped_column(
+        ForeignKey("help_requests.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sender_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    sender_admin_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    request_key_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    request_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(sender_user_id IS NOT NULL AND sender_admin_user_id IS NULL) OR "
+            "(sender_user_id IS NULL AND sender_admin_user_id IS NOT NULL)",
+            name="ck_help_messages_one_sender",
+        ),
+        UniqueConstraint("help_request_id", "sender_admin_user_id", "request_key_hash", name="uq_help_messages_admin_key"),
+    )
+
+
 class AdminSession(Base):
     """管理员会话：短 access + 轮换 refresh，与学生会话同模式。"""
     __tablename__ = "admin_sessions"
@@ -1027,6 +1087,9 @@ class Course(Base):
     price_cents: Mapped[int] = mapped_column(Integer, default=0)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    publish_generation: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    last_publish_idempotency_key_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_publish_request_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -1831,6 +1894,7 @@ class ScratchSubmission(Base):
     rubric_scores_json: Mapped[str] = mapped_column(Text, default="{}")  # 逐项打分与逐项评语
     manual_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 后端汇总总分
     manual_score_max: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 冻结时的满分
+    review_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

@@ -1,0 +1,185 @@
+"""Cron entry point for idempotent in-app homework due reminders.
+
+Run every hour from the system scheduler.  This deliberately has no Celery
+dependency: notification delivery is an ordinary database transaction.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import timedelta
+
+from sqlalchemy import select
+
+from .config import get_settings
+from .course_access import enrollment_predicates
+from .database import build_database
+from .models import (
+    Course,
+    CourseLesson,
+    CourseLessonBlock,
+    Enrollment,
+    ExamLink,
+    LessonBlockCompletion,
+    LessonPaperBlock,
+    Notification,
+    NotificationReceipt,
+    Paper,
+    PaperAttempt,
+)
+from .notification_service import create_notification, ensure_notification_recipients
+from .security import as_utc, utcnow
+from .student_tasks import DUE_SOON_HOURS
+
+
+def send_due_reminders(db, *, now=None, dry_run: bool = False) -> int:
+    now = now or utcnow()
+    sent = 0
+    rows = db.execute(
+        select(LessonPaperBlock, CourseLessonBlock, CourseLesson, Enrollment.student_id)
+        .join(CourseLessonBlock, CourseLessonBlock.id == LessonPaperBlock.block_id)
+        .join(CourseLesson, CourseLesson.id == CourseLessonBlock.lesson_id)
+        .join(Enrollment, Enrollment.course_id == CourseLesson.course_id)
+        .where(LessonPaperBlock.mode == "homework", LessonPaperBlock.due_at.is_not(None),
+               *enrollment_predicates(now))
+    ).all()
+    for detail, block, lesson, student_id in rows:
+        due = as_utc(detail.due_at)
+        if due is None or due <= now or due > now + timedelta(hours=DUE_SOON_HOURS):
+            continue
+        completed = db.scalar(select(LessonBlockCompletion.id).where(
+            LessonBlockCompletion.user_id == student_id,
+            LessonBlockCompletion.block_id == block.id,
+        ))
+        if completed:
+            continue
+        sent += 1
+        if dry_run:
+            continue
+        due_key = due.isoformat()
+        create_notification(
+            db, kind="homework_due_soon", title="作业即将截止",
+            body=f"《{block.title}》将在 {due_key} 截止，请及时完成。",
+            target_type="lesson_homework", target_id=block.id,
+            source_type="lesson_homework", source_id=block.id,
+            link_url=f"/learn/{lesson.id}/homework/{block.id}",
+            idempotency_key=f"homework-due:{block.id}:{student_id}:{due_key}:72h",
+            recipients=[{"user_id": student_id, "admin_user_id": None}],
+        )
+    if not dry_run:
+        db.commit()
+    return sent
+
+
+def backfill_published_course_receipts(db, *, now=None, dry_run: bool = False) -> int:
+    """Attach a publish receipt when a previously future enrollment becomes active."""
+
+    now = now or utcnow()
+    courses = db.scalars(select(Course).where(Course.status == "published")).all()
+    added = 0
+    for course in courses:
+        notification = db.scalar(select(Notification).where(
+            Notification.idempotency_key == f"course-published:{course.id}:{course.publish_generation}",
+            Notification.revoked_at.is_(None),
+        ))
+        if notification is None:
+            continue
+        recipients = list(db.scalars(select(Enrollment.student_id).where(
+            Enrollment.course_id == course.id,
+            *enrollment_predicates(now),
+        ).distinct()))
+        if dry_run:
+            for student_id in recipients:
+                exists = db.scalar(select(NotificationReceipt.id).where(
+                    NotificationReceipt.notification_id == notification.id,
+                    NotificationReceipt.user_id == student_id,
+                ))
+                added += int(exists is None)
+            continue
+        added += ensure_notification_recipients(
+            db, notification,
+            [{"user_id": student_id, "admin_user_id": None} for student_id in recipients],
+        )
+    if not dry_run:
+        db.commit()
+    return added
+
+
+def send_exam_result_notification(db, *, attempt: PaperAttempt, paper_title: str,
+                                  source_type: str, show_score: str) -> bool:
+    """Create the personal result notification for an already sealed attempt.
+
+    This deliberately accepts only the facts produced by the exam workflow.
+    In particular, a caller cannot supply a score or recipient independent of
+    the sealed attempt.
+    """
+
+    if (source_type != "exam_link" or show_score != "immediate"
+            or attempt.status != "submitted" or attempt.submitted_at is None):
+        return False
+    create_notification(
+        db, kind="exam_result_published", title="考试成绩已发布",
+        body=f"《{paper_title}》已完成判分，成绩为 {attempt.total_score} 分。",
+        target_type="paper_attempt", target_id=attempt.id,
+        source_type="exam_link", source_id=attempt.source_id,
+        link_url=f"/exam/attempts/{attempt.id}/result",
+        idempotency_key=f"exam-result:{attempt.id}",
+        recipients=[{"user_id": attempt.user_id, "admin_user_id": None}],
+    )
+    return True
+
+
+def send_after_close_exam_result_notifications(db, *, now=None,
+                                                dry_run: bool = False) -> int:
+    """Notify sealed exam attempts once an ``after_close`` score becomes public."""
+
+    now = now or utcnow()
+    rows = db.execute(
+        select(PaperAttempt, ExamLink, Paper.title)
+        .join(ExamLink, ExamLink.id == PaperAttempt.source_id)
+        .join(Paper, Paper.id == PaperAttempt.paper_id)
+        .where(
+            PaperAttempt.source_type == "exam_link",
+            PaperAttempt.status == "submitted",
+            ExamLink.show_score == "after_close",
+            ExamLink.close_at.is_not(None),
+            ExamLink.close_at <= now,
+        )
+    ).all()
+    sent = 0
+    for attempt, link, paper_title in rows:
+        sent += 1
+        if dry_run:
+            continue
+        create_notification(
+            db, kind="exam_result_published", title="考试成绩已发布",
+            body=f"《{paper_title}》已完成判分，成绩为 {attempt.total_score} 分。",
+            target_type="paper_attempt", target_id=attempt.id,
+            source_type="exam_link", source_id=link.id,
+            link_url=f"/exam/attempts/{attempt.id}/result",
+            idempotency_key=f"exam-result:{attempt.id}",
+            recipients=[{"user_id": attempt.user_id, "admin_user_id": None}],
+        )
+    if not dry_run:
+        db.commit()
+    return sent
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="发送即将截止的作业站内提醒。")
+    parser.add_argument("--dry-run", action="store_true", help="只统计，不写入通知")
+    args = parser.parse_args()
+    settings = get_settings()
+    engine, factory = build_database(settings.database_url)
+    db = factory()
+    try:
+        count = send_due_reminders(db, dry_run=args.dry_run)
+        count += backfill_published_course_receipts(db, dry_run=args.dry_run)
+        count += send_after_close_exam_result_notifications(db, dry_run=args.dry_run)
+    finally:
+        db.close()
+        engine.dispose()
+    print(f"{'将发送' if args.dry_run else '已发送'} {count} 条通知。")
+
+
+if __name__ == "__main__":
+    main()

@@ -21,6 +21,18 @@ NOTIFICATION_KINDS = frozenset(
     }
 )
 
+NOTIFICATION_KIND_LABELS = {
+    "homework_published": "作业已发布",
+    "homework_due_soon": "作业即将截止",
+    "homework_graded": "作业已批改",
+    "exam_result_published": "考试成绩已发布",
+    "homework_returned": "作业已退回",
+    "class_announcement": "班级公告",
+    "help_request_created": "新的学生联系",
+    "help_request_assigned": "工单已分配",
+    "teacher_reply": "教师已回复",
+}
+
 
 def validate_source_pair(source_type: str | None, source_id: int | None) -> None:
     """Reject a half-populated polymorphic source identity at the domain edge."""
@@ -32,6 +44,12 @@ def validate_source_pair(source_type: str | None, source_id: int | None) -> None
 def validate_notification_kind(kind: str) -> None:
     if kind not in NOTIFICATION_KINDS:
         raise ValueError(f"unsupported notification kind: {kind}")
+
+
+def notification_kind_label(kind: str) -> str:
+    """Return the server-owned display label for a notification kind."""
+
+    return NOTIFICATION_KIND_LABELS.get(kind, kind)
 
 
 def validate_recipient(*, user_id: int | None, admin_user_id: int | None) -> None:

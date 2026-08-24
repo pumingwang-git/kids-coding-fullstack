@@ -313,7 +313,11 @@ $("courseRows").addEventListener("click", async (event) => {
 
 async function publishCourse(id) {
   try {
-    await adminRequest(`/courses/${id}/publish`, { method: "POST", body: "{}" });
+    await adminRequest(`/courses/${id}/publish`, {
+      method: "POST",
+      body: "{}",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
     toast("已发布");
     list.reload();
   } catch (error) {

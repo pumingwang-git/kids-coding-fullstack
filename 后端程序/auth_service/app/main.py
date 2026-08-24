@@ -35,6 +35,12 @@ from .routers.admin_material_imports import (
 from .routers.admin_materials import router as admin_materials_router
 from .routers.admin_materials import sweep_material_uploads
 from .routers.admin_media import router as admin_media_router
+from .routers.admin_notifications import (
+    router as admin_notifications_router,
+)
+from .routers.admin_notifications import (
+    teaching_router as admin_notifications_teaching_router,
+)
 from .routers.admin_papers import router as admin_papers_router
 from .routers.admin_questions import router as admin_questions_router
 from .routers.admin_results import router as admin_results_router
@@ -42,12 +48,13 @@ from .routers.admin_scratch import router as admin_scratch_router
 from .routers.admin_students import router as admin_students_router
 from .routers.admin_teaching import router as admin_teaching_router
 from .routers.admin_videos import router as admin_videos_router
-from .routers.typing import _cleanup_audio_cache
 from .routers.auth_secure import router
 from .routers.courses import router as student_courses_router
 from .routers.exam import judge_submission, sweep_stale_judgings
 from .routers.exam import router as exam_router
 from .routers.focus import router as focus_router
+from .routers.help_requests import admin_router as admin_help_requests_router
+from .routers.help_requests import student_router as student_help_requests_router
 from .routers.learning_catalog import admin_router as admin_learning_catalog_router
 from .routers.learning_catalog import router as learning_catalog_router
 from .routers.lesson_practice import router as lesson_practice_router
@@ -56,8 +63,10 @@ from .routers.math_games import router as math_games_router
 from .routers.scratch import router as scratch_router
 from .routers.scratch_works import router as scratch_works_router
 from .routers.student_mistakes import router as student_mistakes_router
+from .routers.student_notifications import router as student_notifications_router
 from .routers.student_profile import router as student_profile_router
 from .routers.student_tasks import router as student_tasks_router
+from .routers.typing import _cleanup_audio_cache
 from .routers.typing import router as typing_router
 from .routers.video_play import play_router as video_play_stream_router
 from .routers.video_play import router as video_play_router
@@ -179,6 +188,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_classes_router)
     app.include_router(admin_students_router)
     app.include_router(admin_teaching_router)
+    app.include_router(admin_notifications_router)
+    app.include_router(admin_notifications_teaching_router)
+    app.include_router(admin_help_requests_router)
     app.include_router(admin_enrollments_router)
     app.include_router(admin_courses_router)
     app.include_router(admin_learning_catalog_router)
@@ -202,6 +214,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(focus_router)
     app.include_router(student_mistakes_router)
     app.include_router(student_tasks_router)
+    app.include_router(student_notifications_router)
+    app.include_router(student_help_requests_router)
     app.include_router(student_profile_router)
     app.include_router(typing_router)
     app.include_router(math_games_router)
