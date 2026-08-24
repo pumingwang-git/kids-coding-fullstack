@@ -16,7 +16,11 @@ depends_on = None
 
 def upgrade() -> None:
     with op.batch_alter_table("problems") as batch:
-        batch.add_column(sa.Column("rejected_by", sa.Integer(), sa.ForeignKey("admin_users.id"), nullable=True))
+        batch.add_column(sa.Column(
+            "rejected_by", sa.Integer(),
+            sa.ForeignKey("admin_users.id", name="fk_problems_rejected_by_admin_users"),
+            nullable=True,
+        ))
         batch.add_column(sa.Column("rejected_at", sa.DateTime(timezone=True), nullable=True))
         batch.add_column(sa.Column("rejection_reason", sa.Text(), nullable=True))
 

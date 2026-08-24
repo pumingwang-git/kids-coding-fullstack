@@ -16,6 +16,7 @@ from ..learning_activity import activity_rows
 from ..lesson_homework_kinds import KINDS
 from ..models import ClassGroup, CourseLesson, CourseLessonBlock, ExamAssignment, ExamLink, User
 from ..permissions import log_scope_denial, visible_student_ids
+from ..review_adapters import ScratchReviewAdapter
 from ..review_queue import pending_review_count, pending_reviews
 from ..security import utcnow
 from ..weak_items import build_weak_items
@@ -266,6 +267,8 @@ def review_queue(
     admin, _ = admin_classes._require_class_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     rows = pending_reviews(db, student_ids, page, page_size)
+    adapter = ScratchReviewAdapter()
+    targets = adapter.pending(db, student_ids, page, page_size)
     return {
         "items": [
             {
@@ -276,8 +279,11 @@ def review_queue(
                 "challenge_id": row.challenge_id,
                 "submitted_at": row.submitted_at,
                 "review_endpoint": f"scratch-review.html?submission_id={row.id}",
+                # Compatibility fields remain above; new clients consume the
+                # source-neutral DTO and never infer one identity from another.
+                "review_target": targets[index],
             }
-            for row in rows
+            for index, row in enumerate(rows)
         ],
         "total": pending_review_count(db, student_ids),
     }

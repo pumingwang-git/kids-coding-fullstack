@@ -726,9 +726,10 @@ def start_lesson_code_run(lesson_id: int, block_id: int, payload: RunPayload,
     require_csrf(request)
     user, lesson, block, detail, problem = _load(db, request, lesson_id, block_id)
     # 判题是最贵的资源，限流必须严（与 exam-judge 同一尺子）
-    limit(request, "lesson-judge", str(user.id), 20, 60)
     if problem.type != "programming":
         raise HTTPException(400, "该题不是编程题。")
+    _ensure_supported_programming_shape(db, problem)
+    limit(request, "lesson-judge", str(user.id), 20, 60)
     if not payload.code.strip():
         raise HTTPException(400, "请先写点代码再运行。")
     language = payload.language if payload.language in {"cpp", "python"} else (
@@ -764,9 +765,10 @@ def submit_lesson_code(lesson_id: int, block_id: int, payload: SubmitPayload,
     require_csrf(request)
     user, lesson, block, detail, problem = _load(db, request, lesson_id, block_id)
     # 计分提交比试跑贵（跑全部测试点），限流单独一把尺子，不与 20/min 的调试共用。
-    limit(request, "lesson-submit", str(user.id), 10, 60)
     if problem.type != "programming":
         raise HTTPException(400, "该题不是编程题，请用作答接口提交。")
+    _ensure_supported_programming_shape(db, problem)
+    limit(request, "lesson-submit", str(user.id), 10, 60)
     if not payload.code.strip():
         raise HTTPException(400, "请先写点代码再提交。")
 
@@ -984,6 +986,13 @@ def _cases_payload(cases, expectations: list[str]) -> list[dict]:
             item["input"] = item["expected"] = item["actual"] = None
         out.append(item)
     return out
+
+
+def _ensure_supported_programming_shape(db: Session, problem: Problem) -> None:
+    """Reject project questions until their dedicated submission workflow exists."""
+    detail = db.get(ProgrammingDetail, problem.id)
+    if detail is not None and detail.shape == "project":
+        raise HTTPException(409, "作品题提交暂未开放。")
 
 
 def _record_submission(db: Session, run: LessonCodeRun, block_detail: LessonProblemBlock,

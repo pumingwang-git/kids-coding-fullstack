@@ -57,10 +57,11 @@ def upgrade() -> None:
     op.create_index("ix_video_variants_video_id", "video_variants", ["video_id"])
     op.create_index("ix_video_variants_status", "video_variants", ["status"])
 
-    op.create_foreign_key(
-        "fk_videos_primary_variant_id", "videos", "video_variants",
-        ["primary_variant_id"], ["id"],
-    )
+    with op.batch_alter_table("videos") as batch:
+        batch.create_foreign_key(
+            "fk_videos_primary_variant_id", "video_variants",
+            ["primary_variant_id"], ["id"],
+        )
 
     op.create_table(
         "video_uploads",
@@ -84,6 +85,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("video_uploads")
-    op.drop_constraint("fk_videos_primary_variant_id", "videos", type_="foreignkey")
+    with op.batch_alter_table("videos") as batch:
+        batch.drop_constraint("fk_videos_primary_variant_id", type_="foreignkey")
     op.drop_table("video_variants")
     op.drop_table("videos")

@@ -60,6 +60,60 @@ def reset(sclient, lid, bid):
     return sclient.post(f"/api/lessons/{lid}/blocks/{bid}/reset", headers=scsrf(sclient))
 
 
+# ---------- Python 作品题暂未接入普通判题链 ----------
+
+
+def mark_project_shape(app, problem_id_no):
+    db = app.state.session_factory()
+    try:
+        problem = db.query(Problem).filter_by(problem_id_no=problem_id_no).one()
+        db.get(ProgrammingDetail, problem.id).shape = "project"
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_project_shape_run_is_rejected_without_creating_run(tmp_path: Path):
+    app = build_app(tmp_path)
+    no = seed_programming_problem(app)["problem_id_no"]
+    built = build_coding_lesson(app, problem_id_no=no)
+    mark_project_shape(app, no)
+    sclient = student_login(app)
+
+    response = start_run(sclient, built["lesson_id"], built["block_ids"][-1],
+                         code="print('project')")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "作品题提交暂未开放。"
+
+    db = app.state.session_factory()
+    try:
+        assert db.query(LessonCodeRun).count() == 0
+        assert db.query(LessonBlockCompletion).count() == 0
+    finally:
+        db.close()
+
+
+def test_project_shape_submit_is_rejected_without_consuming_attempt(tmp_path: Path):
+    app = build_app(tmp_path)
+    no = seed_programming_problem(app)["problem_id_no"]
+    built = build_coding_lesson(app, problem_id_no=no)
+    mark_project_shape(app, no)
+    sclient = student_login(app)
+    lid, bid = built["lesson_id"], built["block_ids"][-1]
+
+    response = submit(sclient, lid, bid, code="print('project')")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "作品题提交暂未开放。"
+    assert get_problem(sclient, lid, bid).json()["tries"] == 0
+
+    db = app.state.session_factory()
+    try:
+        assert db.query(LessonCodeRun).count() == 0
+        assert db.query(LessonBlockCompletion).count() == 0
+    finally:
+        db.close()
+
+
 # ---------- 保密红线 ----------
 
 

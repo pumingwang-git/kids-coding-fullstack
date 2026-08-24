@@ -54,8 +54,8 @@ def list_notifications(
     stmt = select(Notification, NotificationReceipt).join(
         NotificationReceipt, NotificationReceipt.notification_id == Notification.id
     ).where(NotificationReceipt.user_id == user.id)
-    stmt = stmt.where(Notification.revoked_at.is_(None))
     if tab == "unread":
+        stmt = stmt.where(Notification.revoked_at.is_(None))
         stmt = stmt.where(NotificationReceipt.read_at.is_(None))
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.execute(stmt.order_by(Notification.created_at.desc(), Notification.id.desc())

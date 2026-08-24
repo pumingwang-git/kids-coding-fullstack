@@ -865,7 +865,7 @@ def test_manual_review_closes_needs_review_loop(tmp_path: Path):
 
     review = built["client"].post(
         f"/api/admin/scratch/submissions/{submitted['submission_id']}/review",
-        headers=built["headers"], json={"verdict": "passed", "comment": "思路对了，通过。"},
+        headers={**built["headers"], "Idempotency-Key": "scratch-review-loop"}, json={"verdict": "passed", "comment": "思路对了，通过。"},
     )
     assert review.status_code == 200, review.text
     assert review.json()["completed"] is True
@@ -894,7 +894,7 @@ def test_manual_review_failed_does_not_revoke_progress(tmp_path: Path):
 
     review = built["client"].post(
         f"/api/admin/scratch/submissions/{submitted['submission_id']}/review",
-        headers=built["headers"], json={"verdict": "failed", "comment": "重做一次。"},
+        headers={**built["headers"], "Idempotency-Key": "scratch-review-failed"}, json={"verdict": "failed", "comment": "重做一次。"},
     )
     assert review.status_code == 200
     assert review.json()["submission"]["status"] == "failed"
@@ -1525,17 +1525,20 @@ def test_review_rubric_full_coverage_and_points(tmp_path: Path):
 
     # 有量规却缺 rubric → 400
     assert built["client"].post(
-        f"/api/admin/scratch/submissions/{sid}/review", headers=built["headers"],
+        f"/api/admin/scratch/submissions/{sid}/review",
+        headers={**built["headers"], "Idempotency-Key": "scratch-rubric-missing"},
         json={"verdict": "passed", "comment": ""}).status_code == 400
     # 只交一项准则 → 400
     assert built["client"].post(
-        f"/api/admin/scratch/submissions/{sid}/review", headers=built["headers"],
+        f"/api/admin/scratch/submissions/{sid}/review",
+        headers={**built["headers"], "Idempotency-Key": "scratch-rubric-incomplete"},
         json={"verdict": "passed", "comment": "",
               "rubric": [{"criterion_id": "c_logic", "level": 3, "note": ""}]}).status_code == 400
     # 客户端塞 points 也被丢弃：c_logic=3→40、c_structure=2→30、c_creative=1→15 = 85
     forged = [dict(item, points=999) for item in RUBRIC_FULL]
     review = built["client"].post(
-        f"/api/admin/scratch/submissions/{sid}/review", headers=built["headers"],
+        f"/api/admin/scratch/submissions/{sid}/review",
+        headers={**built["headers"], "Idempotency-Key": "scratch-rubric-full"},
         json={"verdict": "passed", "comment": "不错", "rubric": forged})
     assert review.status_code == 200, review.text
     sub = review.json()["submission"]
@@ -1564,7 +1567,8 @@ def test_review_without_rubric_rejects_rubric(tmp_path: Path):
     save_project(sclient, project_id, sb3_bytes())
     sid = submit(sclient, block_id).json()["submission_id"]
     resp = built["client"].post(
-        f"/api/admin/scratch/submissions/{sid}/review", headers=built["headers"],
+        f"/api/admin/scratch/submissions/{sid}/review",
+        headers={**built["headers"], "Idempotency-Key": "scratch-rubric-none"},
         json={"verdict": "passed", "comment": "",
               "rubric": [{"criterion_id": "c_x", "level": 1, "note": ""}]})
     assert resp.status_code == 400
@@ -1599,7 +1603,8 @@ def test_return_keeps_completion_and_resubmit(tmp_path: Path):
     sid = submitted["submission_id"]
 
     ret = built["client"].post(
-        f"/api/admin/scratch/submissions/{sid}/return", headers=built["headers"],
+        f"/api/admin/scratch/submissions/{sid}/return",
+        headers={**built["headers"], "Idempotency-Key": "scratch-return-resubmit"},
         json={"comment": "改一下初始位置再交一次。"})
     assert ret.status_code == 200, ret.text
     assert ret.json()["submission"]["status"] == "returned"
@@ -1657,7 +1662,8 @@ def test_rubric_snapshot_freezes_version(tmp_path: Path):
         {"criterion_id": "c_creative", "level": 1, "note": ""},   # 15
     ]
     review = built["client"].post(
-        f"/api/admin/scratch/submissions/{sid}/review", headers=built["headers"],
+        f"/api/admin/scratch/submissions/{sid}/review",
+        headers={**built["headers"], "Idempotency-Key": "scratch-rubric-snapshot"},
         json={"verdict": "failed", "comment": "再改改", "rubric": items})
     assert review.status_code == 200, review.text
     assert review.json()["submission"]["review"]["manual_score"] == 55

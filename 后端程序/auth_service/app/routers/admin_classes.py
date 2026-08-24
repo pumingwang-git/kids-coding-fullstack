@@ -20,7 +20,7 @@ from ..class_enrollment import (
     sync_class_window,
 )
 from ..models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, Enrollment, User, HelpRequest
-from ..notification_links import help_request_link
+from ..notification_links import admin_help_request_link
 from ..notification_service import create_notification
 from .admin_enrollments import ENROLLMENT_STATUS_LABELS
 from ..permissions import (

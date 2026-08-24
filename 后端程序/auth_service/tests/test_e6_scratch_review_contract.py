@@ -2,7 +2,9 @@
 
 from sqlalchemy import select
 
-from app.models import LessonBlockCompletion, Notification, ScratchSubmission
+import app.routers.admin_scratch as admin_scratch
+from app.models import AuditEvent, LessonBlockCompletion, Notification, ScratchSubmission
+from test_admin_courses import reviewer_login
 from test_scratch import (
     build_scratch_lesson,
     save_project,
@@ -73,3 +75,47 @@ def test_return_idempotency_key_replays_and_cross_action_conflicts(tmp_path):
         assert db.get(ScratchSubmission, submission_id).review_revision == 1
     finally:
         db.close()
+
+
+def test_missing_review_key_returns_422_without_side_effects(tmp_path):
+    app, built, submission_id, _ = _submitted(tmp_path)
+    response = built["client"].post(
+        f"/api/admin/scratch/submissions/{submission_id}/review",
+        headers=built["headers"], json={"verdict": "passed", "comment": "通过"},
+    )
+    assert response.status_code == 422
+    db = app.state.session_factory()
+    try:
+        row = db.get(ScratchSubmission, submission_id)
+        assert row.review_revision == 0
+        assert db.scalars(select(Notification).where(
+            Notification.source_id == submission_id,
+            Notification.source_type == "scratch_submission",
+        )).all() == []
+        assert db.scalars(select(AuditEvent).where(
+            AuditEvent.resource_id == submission_id,
+            AuditEvent.resource_type == "scratch_submission",
+        )).all() == []
+    finally:
+        db.close()
+
+
+def test_out_of_scope_submission_still_returns_404_before_missing_key(tmp_path, monkeypatch):
+    app, built, submission_id, _ = _submitted(tmp_path)
+    monkeypatch.setattr(admin_scratch, "visible_student_ids", lambda _admin, _db: set())
+    response = built["client"].post(
+        f"/api/admin/scratch/submissions/{submission_id}/review",
+        headers=built["headers"], json={"verdict": "passed", "comment": "通过"},
+    )
+    assert response.status_code == 404
+
+
+def test_unauthorized_role_still_returns_403_before_missing_key(tmp_path):
+    app, _built, submission_id, _ = _submitted(tmp_path)
+    reviewer, headers = reviewer_login(app)
+    headers = {**headers, "X-CSRF-Token": reviewer.cookies.get("admin_csrf_token")}
+    response = reviewer.post(
+        f"/api/admin/scratch/submissions/{submission_id}/review",
+        headers=headers, json={"verdict": "passed", "comment": "通过"},
+    )
+    assert response.status_code == 403

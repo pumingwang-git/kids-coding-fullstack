@@ -85,8 +85,8 @@ def list_notifications(request: Request, box: str = Query("inbox", pattern="^(in
     if box == "inbox":
         stmt = select(Notification, NotificationReceipt).join(NotificationReceipt).where(
             NotificationReceipt.admin_user_id == admin.id)
-        stmt = stmt.where(Notification.revoked_at.is_(None))
         if tab == "unread":
+            stmt = stmt.where(Notification.revoked_at.is_(None))
             stmt = stmt.where(NotificationReceipt.read_at.is_(None))
         total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         rows = db.execute(stmt.order_by(Notification.created_at.desc(), Notification.id.desc())

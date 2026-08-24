@@ -53,16 +53,24 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     )
     op.create_index("ix_slider_captcha_expires_at", "slider_captcha_challenges", ["expires_at"])
-    op.add_column(
-        "audit_events",
-        sa.Column("admin_user_id", sa.Integer(), sa.ForeignKey("admin_users.id"), nullable=True),
-    )
+    # SQLite cannot add a column with a foreign-key constraint in place;
+    # batch mode rebuilds the table while preserving existing audit rows.
+    with op.batch_alter_table("audit_events") as batch:
+        batch.add_column(
+            sa.Column(
+                "admin_user_id",
+                sa.Integer(),
+                sa.ForeignKey("admin_users.id", name="fk_audit_events_admin_user_id_admin_users"),
+                nullable=True,
+            )
+        )
     op.create_index("ix_audit_events_admin_user_id", "audit_events", ["admin_user_id"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_audit_events_admin_user_id", table_name="audit_events")
-    op.drop_column("audit_events", "admin_user_id")
+    with op.batch_alter_table("audit_events") as batch:
+        batch.drop_column("admin_user_id")
     op.drop_table("slider_captcha_challenges")
     op.drop_table("admin_sessions")
     op.drop_index("ix_admin_users_status", table_name="admin_users")
