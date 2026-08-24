@@ -653,6 +653,8 @@ def publish_course(course_id: int, request: Request,
             return {"id": course.id, "status": course.status, "idempotent": True,
                     "publish_generation": course.publish_generation, "hints": []}
         raise HTTPException(409, "课包已经发布，请勿重复发布。")
+    if course.status not in {"draft", "off_shelf"}:
+        raise HTTPException(409, "课包当前状态不可发布。")
     problems = _publish_checks(db, course)
     blocking = [p for p in problems if p["code"] not in NON_BLOCKING_HINTS]
     if blocking:

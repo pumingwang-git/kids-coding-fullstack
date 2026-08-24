@@ -26,9 +26,11 @@ Kimi 的管理端（21c 明确不许绕过权限写库），也没法用公开�
 """
 from __future__ import annotations
 
+import hashlib
 import json
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
@@ -47,7 +49,7 @@ from ..models import (
     User,
     Video,
 )
-from ..notification_service import create_notification
+from ..notification_service import create_notification, request_hash
 from ..permissions import (
     ACADEMIC_ADMIN_ROLE,
     ASSISTANT_ROLE,
@@ -857,6 +859,27 @@ def _review_payload(submission: ScratchSubmission) -> dict | None:
     }
 
 
+def _review_idempotency(
+    submission: ScratchSubmission, *, action: str, payload: BaseModel,
+    idempotency_key: str | None,
+) -> bool:
+    """Validate a review retry and return whether it is an accepted duplicate."""
+    key = idempotency_key or f"legacy-scratch-{action}:{submission.id}:{uuid4()}"
+    key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    input_hash = request_hash({
+        "action": action,
+        "submission_id": submission.id,
+        "payload": payload.model_dump(),
+    })
+    if submission.last_review_idempotency_key_hash == key_hash:
+        if submission.last_review_request_hash != input_hash:
+            raise HTTPException(409, "Idempotency-Key 已用于不同请求。")
+        return True
+    submission.last_review_idempotency_key_hash = key_hash
+    submission.last_review_request_hash = input_hash
+    return False
+
+
 def _submission_row(db: Session, submission: ScratchSubmission, *, detail: bool) -> dict:
     try:
         evaluation = json.loads(submission.evaluation_json or "{}")
@@ -1051,6 +1074,7 @@ def download_submission_project_json(submission_id: int, request: Request,
 
 @router.post("/submissions/{submission_id}/review")
 def review_submission(submission_id: int, payload: ReviewPayload, request: Request,
+                      idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
                       db: Session = Depends(db_session)):
     """人工点评：给挂起（或误判）的提交一个终态。
 
@@ -1069,6 +1093,10 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     submission = _load_visible_submission(db, admin, submission_id, student_ids)
+    if _review_idempotency(submission, action="review", payload=payload,
+                           idempotency_key=idempotency_key):
+        return {"submission": _submission_row(db, submission, detail=True),
+                "completed": submission.status == "passed", "idempotent": True}
     challenge = db.get(ScratchChallenge, submission.challenge_id)
 
     rubric_result = _apply_rubric(challenge, payload.rubric) if challenge else None
@@ -1092,9 +1120,8 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
         block = db.get(CourseLessonBlock, submission.lesson_block_id)
         if student is not None and block is not None:
             before = completed_block_ids(db, student, submission.lesson_id)
-            db.commit()  # 先落点评，再写完成：_record_completion 内部自带 commit
             _record_completion(db, student, block, submission.lesson_id,
-                               COMPLETION_SOURCE, before)
+                               COMPLETION_SOURCE, before, commit=False)
             completed = True
     audit(db, request.app.state.settings, "scratch_submission_review", "success",
           client_ip(request), admin.id, resource_type="scratch_submission",
@@ -1118,6 +1145,7 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
 
 @router.post("/submissions/{submission_id}/return")
 def return_submission(submission_id: int, payload: ReturnPayload, request: Request,
+                      idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
                       db: Session = Depends(db_session)):
     """退回重做：明确告诉学生"改完再交一次"，**不是终态**。
 
@@ -1135,6 +1163,10 @@ def return_submission(submission_id: int, payload: ReturnPayload, request: Reque
     admin = _require_submission_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     submission = _load_visible_submission(db, admin, submission_id, student_ids)
+    if _review_idempotency(submission, action="return", payload=payload,
+                           idempotency_key=idempotency_key):
+        return {"submission": _submission_row(db, submission, detail=True),
+                "idempotent": True}
     challenge = db.get(ScratchChallenge, submission.challenge_id)
 
     rubric_result = _apply_rubric(challenge, payload.rubric) if challenge else None

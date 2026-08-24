@@ -1895,6 +1895,10 @@ class ScratchSubmission(Base):
     manual_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 后端汇总总分
     manual_score_max: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 冻结时的满分
     review_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    last_review_idempotency_key_hash: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    last_review_request_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

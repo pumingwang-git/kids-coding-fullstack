@@ -113,8 +113,13 @@ def list_notifications(request: Request, box: str = Query("inbox", pattern="^(in
 
 @router.get("/unread-count")
 def unread_count(request: Request, admin=Depends(current_admin), db: Session = Depends(db_session)):
-    count = db.scalar(select(func.count()).select_from(NotificationReceipt).where(
-        NotificationReceipt.admin_user_id == admin.id, NotificationReceipt.read_at.is_(None))) or 0
+    count = db.scalar(select(func.count()).select_from(NotificationReceipt).join(
+        Notification, NotificationReceipt.notification_id == Notification.id
+    ).where(
+        NotificationReceipt.admin_user_id == admin.id,
+        NotificationReceipt.read_at.is_(None),
+        Notification.revoked_at.is_(None),
+    )) or 0
     return {"count": count}
 
 

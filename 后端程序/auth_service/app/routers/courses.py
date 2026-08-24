@@ -888,18 +888,22 @@ def _gated_block(db: Session, request: Request, lesson_id: int, block_id: int):
 
 
 def _record_completion(db: Session, user, block, lesson_id: int, source: str,
-                       before_ids: set[int]) -> None:
+                       before_ids: set[int], *, commit: bool = True) -> None:
     """写一条完成记录（幂等）。已完成就什么都不做。"""
     if block.id in before_ids:
         return
-    db.add(LessonBlockCompletion(
+    completion = LessonBlockCompletion(
         user_id=user.id, block_id=block.id, lesson_id=lesson_id, source=source,
-    ))
+    )
     try:
-        db.commit()
+        with db.begin_nested():
+            db.add(completion)
+            db.flush()
     except IntegrityError:
         # 并发双击：唯一约束挡下，当作已完成处理（幂等，§5.3）
-        db.rollback()
+        pass
+    if commit:
+        db.commit()
 
 
 def _newly_unlocked(db: Session, user, lesson, ordered, before_ids: set[int],

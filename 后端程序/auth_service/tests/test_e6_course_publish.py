@@ -57,3 +57,16 @@ def test_off_shelf_course_can_create_next_publish_generation(tmp_path: Path):
     )
     assert republished.status_code == 200, republished.text
     assert republished.json()["publish_generation"] == 2
+
+
+def test_legacy_publish_without_key_still_works_once(tmp_path: Path):
+    client, headers, course_id = _ready_course(tmp_path)
+
+    first = client.post(f"/api/admin/courses/{course_id}/publish", headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["publish_generation"] == 1
+
+    # Legacy callers get a generated key, so a second request cannot be
+    # mistaken for a retry and is rejected by the published-state guard.
+    second = client.post(f"/api/admin/courses/{course_id}/publish", headers=headers)
+    assert second.status_code == 409, second.text

@@ -50,6 +50,7 @@ function changeTab(value) {
 }
 
 async function openNotice(item) {
+  if (item.revoked_at) return;
   if (!item.read_at) {
     try {
       await markNotificationRead(item.id);
