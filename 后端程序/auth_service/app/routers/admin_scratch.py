@@ -36,6 +36,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..course_access import completed_block_ids
+from ..audit_summary import diff_summary
 from ..notification_links import lesson_homework_link
 from ..models import (
     AdminUser,
@@ -1099,6 +1100,8 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
         return {"submission": _submission_row(db, submission, detail=True),
                 "completed": submission.status == "passed", "idempotent": True}
     challenge = db.get(ScratchChallenge, submission.challenge_id)
+    before = {"manual_score": submission.manual_score, "review_status": submission.status,
+              "review_revision": submission.review_revision}
 
     rubric_result = _apply_rubric(challenge, payload.rubric) if challenge else None
     if rubric_result is not None:
@@ -1127,8 +1130,9 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
     audit(db, request.app.state.settings, "scratch_submission_review", "success",
           client_ip(request), admin.id, resource_type="scratch_submission",
           resource_id=submission.id,
-          summary={"verdict": payload.verdict, "completed": completed,
-                   "manual_score": submission.manual_score})
+          user_id=submission.user_id,
+          summary=diff_summary(before, {"manual_score": submission.manual_score,
+              "review_status": submission.status, "review_revision": submission.review_revision}, tuple(before)) | {"completed": completed})
     create_notification(
         db, kind="homework_graded", title="作品批改完成",
         body="你的 Scratch 作品已完成批改，请查看结果。",
@@ -1171,6 +1175,8 @@ def return_submission(submission_id: int, payload: ReturnPayload, request: Reque
         return {"submission": _submission_row(db, submission, detail=True),
                 "idempotent": True}
     challenge = db.get(ScratchChallenge, submission.challenge_id)
+    before = {"manual_score": submission.manual_score, "review_status": submission.status,
+              "review_revision": submission.review_revision}
 
     rubric_result = _apply_rubric(challenge, payload.rubric) if challenge else None
     if rubric_result is not None:
@@ -1189,7 +1195,9 @@ def return_submission(submission_id: int, payload: ReturnPayload, request: Reque
 
     audit(db, request.app.state.settings, "scratch_submission_return", "success",
           client_ip(request), admin.id, resource_type="scratch_submission",
-          resource_id=submission.id, summary={"manual_score": submission.manual_score})
+          resource_id=submission.id, user_id=submission.user_id,
+          summary=diff_summary(before, {"manual_score": submission.manual_score,
+              "review_status": submission.status, "review_revision": submission.review_revision}, tuple(before)))
     create_notification(
         db, kind="homework_returned", title="作品需要修改后重新提交",
         body="教师已退回你的 Scratch 作品，请查看反馈后重新提交。",

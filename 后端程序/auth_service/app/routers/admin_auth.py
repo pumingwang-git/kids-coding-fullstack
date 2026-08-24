@@ -82,6 +82,7 @@ def audit(
     *,
     resource_type: str | None = None,
     resource_id: int | None = None,
+    user_id: int | None = None,
     summary: dict | None = None,
 ):
     db.add(
@@ -89,6 +90,7 @@ def audit(
             event_type=f"admin_{event}",
             outcome=outcome,
             admin_user_id=admin_user_id,
+            user_id=user_id,
             ip_hmac=hash_ip(settings, ip),
             resource_type=resource_type,
             resource_id=resource_id,

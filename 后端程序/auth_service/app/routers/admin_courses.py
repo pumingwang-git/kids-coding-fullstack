@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..attempt_source import SOURCE_LESSON_HOMEWORK, attempt_count_for
+from ..audit_summary import diff_summary
 from ..course_access import OPEN_POLICIES, enrollment_predicates
 from ..notification_links import course_link
 from ..models import (
@@ -436,6 +437,10 @@ def update_course(course_id: int, payload: CoursePayload, request: Request, db: 
     if payload.difficulty not in DIFFICULTIES:
         raise HTTPException(400, "难度取值不合法。")
     _validate_course_catalog(db, payload)
+    before = {field: getattr(course, field) for field in (
+        "title", "subtitle", "description", "cover_url", "category_id", "area_key",
+        "course_kind", "difficulty", "price_cents", "sort_order",
+    )}
     # 编辑不改变发布状态：发布/下架走专门接口。
     course.title = payload.title
     course.subtitle = payload.subtitle
@@ -449,7 +454,8 @@ def update_course(course_id: int, payload: CoursePayload, request: Request, db: 
     course.sort_order = payload.sort_order
     _replace_course_tags(db, course, payload.tag_ids)
     audit(db, request.app.state.settings, "course_update", "success",
-          client_ip(request), admin.id, resource_type="course", resource_id=course_id)
+          client_ip(request), admin.id, resource_type="course", resource_id=course_id,
+          summary=diff_summary(before, {field: getattr(course, field) for field in before}, tuple(before)))
     db.commit()
     return _serialize_course(db, course)
 

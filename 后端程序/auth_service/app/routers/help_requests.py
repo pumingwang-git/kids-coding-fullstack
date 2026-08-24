@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
+from ..audit_summary import diff_summary
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -18,7 +19,7 @@ from ..notification_service import create_notification, request_hash
 from ..permissions import ACADEMIC_ADMIN_ROLE, SUPER_ROLE, visible_class_ids
 from ..security import utcnow
 from ..text_sanitize import plain_text
-from .admin_auth import current_admin, db_session
+from .admin_auth import audit, client_ip, current_admin, db_session
 from .auth_secure import current_user, limit, require_csrf
 
 student_router = APIRouter(prefix="/api/student/help-requests", tags=["help-requests"])
@@ -153,6 +154,11 @@ def create_help_request(payload: HelpRequestPayload, request: Request,
                         source_type="help_request", source_id=row.id, link_url=admin_help_request_link(row.id),
                         idempotency_key=f"help-request-created:{row.id}:{row.assigned_admin_user_id}",
                         recipients=[{"user_id": None, "admin_user_id": row.assigned_admin_user_id}])
+    audit(db, request.app.state.settings, "help_request_create", "success", client_ip(request),
+          resource_type="help_request", resource_id=row.id, user_id=user.id,
+          summary={"schema_version": 1, "changed": {"help_request_id": {"old": None, "new": row.id},
+                   "class_id": {"old": None, "new": row.class_id},
+                   "assigned_admin_user_id": {"old": None, "new": row.assigned_admin_user_id}}})
     db.commit()
     return _serialize(db, row)
 
@@ -174,7 +180,11 @@ def student_close(request_id: int, request: Request, user: User = Depends(curren
     require_csrf(request)
     row = _student_row_or_404(db, user.id, request_id)
     if row.status == "open":
+        old_status = row.status
         row.status, row.closed_at = "closed", utcnow()
+        audit(db, request.app.state.settings, "help_request_close", "success", client_ip(request),
+              resource_type="help_request", resource_id=row.id, user_id=user.id,
+              summary=diff_summary({"status": old_status}, {"status": row.status}, ("status",)))
         db.commit()
     return _serialize(db, row)
 
@@ -225,6 +235,7 @@ def reply(request_id: int, payload: HelpMessagePayload, request: Request,
     db.add(message)
     db.flush()
     if row.status == "open":
+        old_status = row.status
         row.status = "answered"
         row.answered_at = utcnow()
     create_notification(db, kind="teacher_reply", title="教师回复了你的联系",
@@ -232,6 +243,9 @@ def reply(request_id: int, payload: HelpMessagePayload, request: Request,
                         source_type="help_request", source_id=row.id, link_url=student_help_request_link(row.id),
                         idempotency_key=f"teacher-reply:{message.id}:{row.student_id}",
                         recipients=[{"user_id": row.student_id, "admin_user_id": None}])
+    audit(db, request.app.state.settings, "help_request_reply", "success", client_ip(request), admin.id,
+          resource_type="help_request", resource_id=row.id, user_id=row.student_id,
+          summary=diff_summary({"status": old_status}, {"status": row.status}, ("status",)))
     db.commit()
     return {"id": message.id, "created_at": message.created_at}
 
@@ -241,6 +255,10 @@ def admin_close(request_id: int, request: Request, admin=Depends(current_admin),
     require_csrf(request)
     row = _admin_row_or_404(db, admin, request_id)
     if row.status == "open":
+        old_status = row.status
         row.status, row.closed_at = "closed", utcnow()
+        audit(db, request.app.state.settings, "help_request_close", "success", client_ip(request), admin.id,
+              resource_type="help_request", resource_id=row.id, user_id=row.student_id,
+              summary=diff_summary({"status": old_status}, {"status": row.status}, ("status",)))
         db.commit()
     return _serialize(db, row)

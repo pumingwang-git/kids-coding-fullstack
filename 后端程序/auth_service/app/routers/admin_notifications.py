@@ -6,6 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from ..class_groups import active_students_for_class
+from ..audit_summary import diff_summary
 from ..models import Notification, NotificationReceipt, ClassGroup, CourseLesson, CourseLessonBlock
 from ..notification_domain import notification_kind_label
 from ..notification_links import announcement_link, parse_announcement_target
@@ -162,7 +163,12 @@ def revoke(notification_id: int, request: Request, admin=Depends(current_admin),
     revoke_notification(db, notification, admin.id)
     audit(db, request.app.state.settings, "notification_revoke", "success", client_ip(request), admin.id,
           resource_type="notification", resource_id=notification.id,
-          summary={"kind": notification.kind})
+          summary={"schema_version": 1, "changed": {
+              "notification_id": {"old": None, "new": notification.id},
+              "kind": {"old": None, "new": notification.kind},
+              "title": {"old": None, "new": notification.title},
+              "receipt_count": {"old": None, "new": db.scalar(select(func.count()).select_from(NotificationReceipt).where(NotificationReceipt.notification_id == notification.id)) or 0},
+          }})
     db.commit()
     return {"ok": True, "revoked_at": notification.revoked_at}
 
@@ -202,6 +208,10 @@ def announce(class_id: int, payload: AnnouncementPayload, request: Request,
     )
     audit(db, request.app.state.settings, "class_announcement_create", "success", client_ip(request), admin.id,
           resource_type="notification", resource_id=notification.id,
-          summary={"class_id": class_id, "recipient_count": len(students)})
+          summary={"schema_version": 1, "changed": {
+              "class_id": {"old": None, "new": class_id},
+              "title": {"old": None, "new": notification.title},
+              "recipient_count": {"old": None, "new": len(students)},
+          }})
     db.commit()
     return _item(notification, None, sent=True)

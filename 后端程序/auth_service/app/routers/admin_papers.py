@@ -559,11 +559,15 @@ def transfer_paper_owner(paper_id: int, payload: TransferPaperOwnerPayload, requ
 
 
 @router.get("/papers/{paper_id}/audit")
-def paper_audit(paper_id: int, request: Request, db: Session = Depends(db_session)):
+def paper_audit(paper_id: int, request: Request, page: int = Query(1, ge=1),
+                page_size: int = Query(20, ge=1), db: Session = Depends(db_session)):
     admin = current_admin(request, db)
     if not _is_reviewer(admin): _forbid("仅审核员或超级管理员可查看审计记录。")
-    events = db.scalars(select(AuditEvent).where(AuditEvent.resource_type == "paper", AuditEvent.resource_id == paper_id).order_by(AuditEvent.id.desc())).all()
-    return {"items": [{"event": item.event_type, "outcome": item.outcome, "at": item.created_at, "by": _person_payload(db, item.admin_user_id), "summary": json.loads(item.summary_json) if item.summary_json else {}} for item in events]}
+    page_size = min(max(1, page_size), 100)
+    stmt = select(AuditEvent).where(AuditEvent.resource_type == "paper", AuditEvent.resource_id == paper_id)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    events = db.scalars(stmt.order_by(AuditEvent.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    return {"total": total, "page": page, "page_size": page_size, "items": [{"event": item.event_type, "outcome": item.outcome, "at": item.created_at, "by": _person_payload(db, item.admin_user_id), "admin_user_id": item.admin_user_id, "user_id": item.user_id, "summary": json.loads(item.summary_json) if item.summary_json else {}} for item in events]}
 
 
 # ==================== 整卷预览（试卷参考视图）====================

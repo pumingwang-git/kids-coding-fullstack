@@ -28,6 +28,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..attempt_source import SOURCE_LESSON_HOMEWORK, attempt_count_for
+from ..audit_summary import diff_summary
 from ..course_access import UNLOCK_RULES  # 解锁规则枚举只有一份，不在本文件另立
 from ..models import (
     AdminUser,
@@ -41,6 +42,7 @@ from ..models import (
     LessonScratchBlock,
     LessonVideoBlock,
     MaterialAsset,
+    Notification,
     Paper,
     PaperAttempt,
     PaperQuestion,
@@ -51,6 +53,7 @@ from ..models import (
     VideoVariant,
 )
 from ..permissions import is_editor, visible_student_ids
+from ..security import utcnow
 from .admin_auth import audit, client_ip, current_admin, db_session, require_csrf
 
 router = APIRouter(prefix="/api/admin", tags=["admin-course-content"])
@@ -517,8 +520,10 @@ def update_block(block_id: int, payload: BlockPayload, request: Request, db: Ses
     block.title = payload.title
     block.required = payload.required
     block.unlock_rule = payload.unlock_rule
+    previous_due_at = None
     if block.block_type == "homework":
         old_detail = db.get(LessonPaperBlock, block.id)
+        previous_due_at = _deadline_utc(old_detail.due_at) if old_detail else None
         new_paper = payload.detail.paper if payload.detail and payload.detail.paper else None
         new_paper_id = new_paper.paper_id if new_paper else None
         if old_detail is not None:
@@ -527,8 +532,7 @@ def update_block(block_id: int, payload: BlockPayload, request: Request, db: Ses
                 audit(db, request.app.state.settings, "course_block_update", "failure",
                       client_ip(request), admin.id, resource_type="course_lesson_block",
                       resource_id=block.id,
-                      summary={"attempt_count": attempt_count, "reason": "paper_changed",
-                               "old_paper_id": old_detail.paper_id, "new_paper_id": new_paper_id})
+                      summary=diff_summary({"paper_id": old_detail.paper_id}, {"paper_id": new_paper_id}, ("paper_id",)) | {"attempt_count": attempt_count, "reason": "paper_changed"})
                 db.commit()
                 raise HTTPException(409, "该作业已有作答记录，不能更换试卷；请新建作业块。")
             new_due_at = new_paper.due_at if new_paper else None
@@ -536,9 +540,7 @@ def update_block(block_id: int, payload: BlockPayload, request: Request, db: Ses
                 audit(db, request.app.state.settings, "course_block_update", "failure",
                       client_ip(request), admin.id, resource_type="course_lesson_block",
                       resource_id=block.id,
-                      summary={"attempt_count": attempt_count, "reason": "deadline_changed",
-                               "old_due_at": _deadline_utc(old_detail.due_at).isoformat() if old_detail.due_at else None,
-                               "new_due_at": _deadline_utc(new_due_at).isoformat() if new_due_at else None})
+                      summary=diff_summary({"due_at": _deadline_utc(old_detail.due_at)}, {"due_at": _deadline_utc(new_due_at)}, ("due_at",)) | {"attempt_count": attempt_count, "reason": "deadline_changed"})
                 db.commit()
                 raise HTTPException(409, "该作业已有作答记录，普通编辑不能修改作业截止时间；请使用“延长截止时间”。")
     if block.block_type == "materials":
@@ -557,6 +559,18 @@ def update_block(block_id: int, payload: BlockPayload, request: Request, db: Ses
         else:  # homework
             db.execute(delete(LessonPaperBlock).where(LessonPaperBlock.block_id == block_id))
         _apply_detail(db, block, payload.detail, admin, request)
+    if block.block_type == "homework":
+        refreshed_detail = db.get(LessonPaperBlock, block.id)
+        current_due_at = _deadline_utc(refreshed_detail.due_at) if refreshed_detail else None
+        if previous_due_at != current_due_at:
+            for notification in db.scalars(select(Notification).where(
+                Notification.kind == "homework_due_soon",
+                Notification.source_type == "lesson_homework",
+                Notification.source_id == block_id,
+                Notification.revoked_at.is_(None),
+            )):
+                notification.revoked_at = utcnow()
+                notification.revoked_by = admin.id
     audit(db, request.app.state.settings, "course_block_update", "success",
           client_ip(request), admin.id, resource_type="course_lesson_block", resource_id=block_id)
     db.commit()
@@ -606,14 +620,27 @@ def extend_homework_deadline(block_id: int, payload: HomeworkDeadlineExtensionPa
     ongoing = db.scalars(ongoing_query).all()
     for attempt in ongoing:
         attempt.deadline_at = new_due_at
+    # Old due-window notifications are historical records, so revoke rather
+    # than delete them.  The reminder job's key includes the new UTC due value.
+    stale_reminders = db.scalars(select(Notification).where(
+        Notification.kind == "homework_due_soon",
+        Notification.source_type == "lesson_homework",
+        Notification.source_id == block_id,
+        Notification.revoked_at.is_(None),
+    )).all()
+    for notification in stale_reminders:
+        notification.revoked_at = utcnow()
+        notification.revoked_by = admin.id
     audit(db, request.app.state.settings, "course_homework_deadline_extend", "success",
           client_ip(request), admin.id, resource_type="course_lesson_block",
           resource_id=block_id,
-          summary={"old_due_at": old_due_at.isoformat(), "new_due_at": new_due_at.isoformat(),
-                   "updated_ongoing_attempts": len(ongoing)})
+          summary=diff_summary({"due_at": old_due_at}, {"due_at": new_due_at}, ("due_at",)) | {
+                   "updated_ongoing_attempts": len(ongoing),
+                   "revoked_due_reminders": len(stale_reminders)})
     db.commit()
     return {"block": _serialize_block(db, block),
-            "updated_ongoing_attempts": len(ongoing)}
+            "updated_ongoing_attempts": len(ongoing),
+            "revoked_due_reminders": len(stale_reminders)}
 
 
 # ---------- 删除 ----------

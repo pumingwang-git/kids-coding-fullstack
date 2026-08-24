@@ -10,6 +10,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import Course, Enrollment, User
+from ..audit_summary import diff_summary
 from ..course_access import enrollment_predicates
 from ..permissions import can_manage_enrollments
 from ..security import as_utc, utcnow
@@ -149,25 +150,17 @@ def _serialize_enrollment(
 
 
 def _grant_summary(payload: EnrollmentPayload, *, opened_at: datetime, expires_at: datetime | None) -> dict:
-    return {
-        "schema_version": 1,
-        "student_user_id": payload.student_id,
-        "course_id": payload.course_id,
-        "source": ENROLLMENT_SOURCE_ADMIN,
-        "opened_at": _utc_iso(opened_at),
-        "expires_at": _utc_iso(expires_at),
-    }
+    return diff_summary({}, {"course_id": payload.course_id, "status": "active",
+        "opened_at": opened_at, "expires_at": expires_at},
+        ("course_id", "status", "opened_at", "expires_at")) | {"student_user_id": payload.student_id}
 
 
 def _status_summary(row: Enrollment, *, old_status: str, new_status: str) -> dict:
-    return {
-        "schema_version": 1,
-        "student_user_id": row.student_id,
-        "course_id": row.course_id,
-        "source": row.source,
-        "old_status": old_status,
-        "new_status": new_status,
-    }
+    return diff_summary({"course_id": row.course_id, "status": old_status},
+        {"course_id": row.course_id, "status": new_status}, ("course_id", "status")) | {
+            "student_user_id": row.student_id, "source": row.source,
+            # Keep the established flat aliases while ``changed`` is the canonical shape.
+            "old_status": old_status, "new_status": new_status}
 
 
 @router.get("")
@@ -265,6 +258,7 @@ def grant_individual_enrollment(
         admin.id,
         resource_type="enrollment",
         resource_id=row.id,
+        user_id=row.student_id,
         summary=grant_summary,
     )
     db.commit()
@@ -320,6 +314,7 @@ def update_enrollment_status(
     audit(
         db, request.app.state.settings, "enrollment_status_change", "success", client_ip(request), admin.id,
         resource_type="enrollment", resource_id=row.id,
+        user_id=row.student_id,
         summary=_status_summary(row, old_status=old_status, new_status=payload.status),
     )
     db.commit()

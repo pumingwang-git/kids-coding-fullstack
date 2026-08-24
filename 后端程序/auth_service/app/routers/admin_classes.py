@@ -588,6 +588,7 @@ def _unassign_class_teacher(
         HelpRequest.status.in_(["open", "answered"]),
     )).all()
     for ticket in requests:
+        previous_assignee = ticket.assigned_admin_user_id
         ticket.assigned_admin_user_id = successor.admin_user_id if successor else None
         ticket.assignment_revision += 1
         create_notification(
@@ -595,10 +596,18 @@ def _unassign_class_teacher(
             body="你的联系请求已转交新的承办教师。" if successor else "你的联系请求已进入未分派队列。",
             target_type="help_request", target_id=ticket.id,
             source_type="help_request", source_id=ticket.id,
-            link_url=help_request_link(ticket.id),
+            link_url=admin_help_request_link(ticket.id),
             idempotency_key=f"help-request-assigned:{ticket.id}:{ticket.assignment_revision}",
             recipients=([{"user_id": None, "admin_user_id": successor.admin_user_id}]
                         if successor else [{"user_id": ticket.student_id, "admin_user_id": None}]),
+        )
+        audit(
+            db, request.app.state.settings, "help_request_reassign", "success", client_ip(request), admin.id,
+            resource_type="help_request", resource_id=ticket.id, user_id=ticket.student_id,
+            summary={"schema_version": 1, "changed": {
+                "assigned_admin_user_id": {"old": previous_assignee, "new": ticket.assigned_admin_user_id},
+                "assignment_revision": {"old": ticket.assignment_revision - 1, "new": ticket.assignment_revision},
+            }},
         )
     _audit_success(
         db,

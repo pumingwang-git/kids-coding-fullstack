@@ -55,6 +55,7 @@ from .routers.exam import router as exam_router
 from .routers.focus import router as focus_router
 from .routers.help_requests import admin_router as admin_help_requests_router
 from .routers.help_requests import student_router as student_help_requests_router
+from .routers.admin_audit import router as admin_audit_router
 from .routers.learning_catalog import admin_router as admin_learning_catalog_router
 from .routers.learning_catalog import router as learning_catalog_router
 from .routers.lesson_practice import router as lesson_practice_router
@@ -191,6 +192,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_notifications_router)
     app.include_router(admin_notifications_teaching_router)
     app.include_router(admin_help_requests_router)
+    app.include_router(admin_audit_router)
     app.include_router(admin_enrollments_router)
     app.include_router(admin_courses_router)
     app.include_router(admin_learning_catalog_router)
