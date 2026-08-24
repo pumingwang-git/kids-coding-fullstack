@@ -20,6 +20,7 @@ from .models import (
     Enrollment,
     ExamLink,
     LessonBlockCompletion,
+    AttemptAnswer,
     LessonPaperBlock,
     Notification,
     NotificationReceipt,
@@ -29,6 +30,7 @@ from .models import (
 from .notification_service import create_notification, ensure_notification_recipients
 from .security import as_utc, utcnow
 from .student_tasks import DUE_SOON_HOURS
+from .notification_links import lesson_homework_link, exam_attempt_link
 
 
 def send_due_reminders(db, *, now=None, dry_run: bool = False) -> int:
@@ -52,17 +54,21 @@ def send_due_reminders(db, *, now=None, dry_run: bool = False) -> int:
         ))
         if completed:
             continue
+        due_key = due.isoformat()
+        idem = f"homework-due:{block.id}:{student_id}:{due_key}:hours{DUE_SOON_HOURS}"
+        exists = db.scalar(select(Notification.id).where(Notification.idempotency_key == idem))
+        if exists:
+            continue
         sent += 1
         if dry_run:
             continue
-        due_key = due.isoformat()
         create_notification(
             db, kind="homework_due_soon", title="作业即将截止",
             body=f"《{block.title}》将在 {due_key} 截止，请及时完成。",
             target_type="lesson_homework", target_id=block.id,
             source_type="lesson_homework", source_id=block.id,
-            link_url=f"/learn/{lesson.id}/homework/{block.id}",
-            idempotency_key=f"homework-due:{block.id}:{student_id}:{due_key}:72h",
+            link_url=lesson_homework_link(lesson.id, block.id),
+            idempotency_key=idem,
             recipients=[{"user_id": student_id, "admin_user_id": None}],
         )
     if not dry_run:
@@ -121,7 +127,7 @@ def send_exam_result_notification(db, *, attempt: PaperAttempt, paper_title: str
         body=f"《{paper_title}》已完成判分，成绩为 {attempt.total_score} 分。",
         target_type="paper_attempt", target_id=attempt.id,
         source_type="exam_link", source_id=attempt.source_id,
-        link_url=f"/exam/attempts/{attempt.id}/result",
+        link_url=exam_attempt_link(db.get(ExamLink, attempt.source_id).access_token),
         idempotency_key=f"exam-result:{attempt.id}",
         recipients=[{"user_id": attempt.user_id, "admin_user_id": None}],
     )
@@ -147,6 +153,20 @@ def send_after_close_exam_result_notifications(db, *, now=None,
     ).all()
     sent = 0
     for attempt, link, paper_title in rows:
+        from .attempt_source import from_exam_link
+        from .routers.exam import _score_visible
+        source = from_exam_link(link)
+        if not _score_visible(source, now):
+            continue
+        pending = db.scalar(select(AttemptAnswer.id).where(
+            AttemptAnswer.attempt_id == attempt.id,
+            AttemptAnswer.judge_status.in_(["pending", "queued", "judging"]),
+        ))
+        if pending is not None:
+            continue
+        idem = f"exam-result:{attempt.id}"
+        if db.scalar(select(Notification.id).where(Notification.idempotency_key == idem)):
+            continue
         sent += 1
         if dry_run:
             continue
@@ -155,8 +175,8 @@ def send_after_close_exam_result_notifications(db, *, now=None,
             body=f"《{paper_title}》已完成判分，成绩为 {attempt.total_score} 分。",
             target_type="paper_attempt", target_id=attempt.id,
             source_type="exam_link", source_id=link.id,
-            link_url=f"/exam/attempts/{attempt.id}/result",
-            idempotency_key=f"exam-result:{attempt.id}",
+            link_url=exam_attempt_link(link.access_token),
+            idempotency_key=idem,
             recipients=[{"user_id": attempt.user_id, "admin_user_id": None}],
         )
     if not dry_run:
