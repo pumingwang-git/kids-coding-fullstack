@@ -4,8 +4,14 @@ import ast
 import json
 from pathlib import Path
 
+from sqlalchemy import select
+
 from app.audit_summary import diff_summary
+from app.audit_summary import EVENT_CATEGORY, RETENTION_DAYS
+from app.models import AuditEvent
 from test_admin_auth import ADMIN_PASSWORD, admin_client, admin_csrf_headers, admin_login
+from test_admin_classes import seed_course
+from test_exam import admin_login as root_login, build_app
 from test_admin_role_change import login_as, seed_admin
 
 APP = Path(__file__).resolve().parents[1] / "app"
@@ -51,6 +57,63 @@ def test_audit_event_has_no_delete_or_update_mutation_in_app():
                     assert not (isinstance(node.args[0], ast.Name) and node.args[0].id == "AuditEvent")
                 if node.func.attr == "update" and node.args:
                     assert not (isinstance(node.args[0], ast.Name) and node.args[0].id == "AuditEvent")
+
+
+def test_every_literal_router_audit_event_has_a_retention_category():
+    events = set()
+    for path in (APP / "routers").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or getattr(node.func, "id", None) != "audit":
+                continue
+            if len(node.args) >= 3 and isinstance(node.args[2], ast.Constant):
+                events.add(node.args[2].value)
+    assert events <= EVENT_CATEGORY.keys()
+    assert set(EVENT_CATEGORY.values()) <= RETENTION_DAYS.keys()
+
+
+def test_reviewer_keeps_existing_resource_audit_access(tmp_path):
+    with admin_client(tmp_path) as client:
+        seed_admin(client, "audit-reviewer", "reviewer")
+        login_as(client, "audit-reviewer")
+        assert client.get("/api/admin/papers/999/audit").status_code == 200
+        assert client.get("/api/admin/problems/999/audit").status_code == 200
+
+
+def test_export_download_is_audited(tmp_path):
+    with admin_client(tmp_path) as client:
+        headers = admin_csrf_headers(client)
+        assert admin_login(client, headers).status_code == 200
+        response = client.get("/api/admin/classes/export")
+        assert response.status_code == 200
+        db = client.app.state.session_factory()
+        try:
+            event = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "admin_export_download"))
+            assert event is not None and event.outcome == "success"
+            assert json.loads(event.summary_json)["export_type"] == "class_relationships"
+        finally:
+            db.close()
+
+
+def test_teaching_export_download_is_audited(tmp_path):
+    app = build_app(tmp_path)
+    client, headers = root_login(app)
+    class_id = client.post("/api/admin/classes", headers=headers, json={
+        "name": "审计导出班", "course_id": seed_course(app),
+    }).json()["id"]
+    response = client.get(f"/api/admin/teaching/classes/{class_id}/export", headers=headers)
+    assert response.status_code == 200
+    db = app.state.session_factory()
+    try:
+        event = db.scalar(select(AuditEvent).where(
+            AuditEvent.event_type == "admin_export_download",
+            AuditEvent.resource_type == "class_insight_export",
+            AuditEvent.resource_id == class_id,
+        ))
+        assert event is not None
+        assert json.loads(event.summary_json)["export_type"] == "class_insight"
+    finally:
+        db.close()
 
 
 def test_global_audit_is_super_only_and_caps_page_size(tmp_path):

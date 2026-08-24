@@ -287,7 +287,7 @@ def export_class_relationships(
     request: Request, db: Session = Depends(db_session)
 ):
     """Export all visible member and teacher relationship history as CSV."""
-    _, class_ids = _require_class_reader(request, db)
+    admin, class_ids = _require_class_reader(request, db)
     class_filter = [] if class_ids is None else [ClassGroup.id.in_(class_ids)]
     members = db.execute(
         select(ClassGroup, ClassMember, User)
@@ -372,6 +372,11 @@ def export_class_relationships(
             ]
         )
 
+    audit(db, request.app.state.settings, "export_download", "success", client_ip(request), admin.id,
+          resource_type="class_relationship_export",
+          summary={"schema_version": 1, "export_type": "class_relationships",
+                   "row_count": len(members) + len(teachers)})
+    db.commit()
     return Response(
         content=("\ufeff" + output.getvalue()).encode("utf-8"),
         media_type="text/csv",

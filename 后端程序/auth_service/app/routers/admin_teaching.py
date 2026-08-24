@@ -21,7 +21,7 @@ from ..review_queue import pending_review_count, pending_reviews
 from ..security import utcnow
 from ..weak_items import build_weak_items
 from . import admin_classes
-from .admin_auth import db_session
+from .admin_auth import audit, client_ip, current_admin, db_session
 
 router = APIRouter(prefix="/api/admin/teaching", tags=["admin-teaching"])
 
@@ -237,6 +237,11 @@ def export_class_insight(
             exams["attempts"],
         ])
 
+    admin = current_admin(request, db)
+    audit(db, request.app.state.settings, "export_download", "success", client_ip(request), admin.id,
+          resource_type="class_insight_export", resource_id=class_id,
+          summary={"schema_version": 1, "export_type": "class_insight", "row_count": len(students)})
+    db.commit()
     return Response(
         content=("\ufeff" + output.getvalue()).encode("utf-8"),
         media_type="text/csv",
