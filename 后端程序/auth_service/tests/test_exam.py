@@ -25,6 +25,7 @@ ADMIN_PASSWORD = "Admin-pass-123!"
 STUDENT_PASSWORD = "A-long-password-123!"
 
 
+
 # ==================== 环境搭建 ====================
 
 
@@ -522,6 +523,42 @@ def test_show_score_after_close_flips_at_the_boundary(tmp_path):
 
     _shift_close(env, close_at - timedelta(hours=2))
     assert "total_score" in env.student.get(f"/api/exam/attempts/{attempt_id}/result").json()["attempt"]
+
+
+def test_immediate_score_creates_personal_result_notification(tmp_path):
+    env = build_exam(tmp_path, only=["choice"])
+    attempt_id = start(env)
+    submitted = env.student.post(f"/api/exam/attempts/{attempt_id}/submit", headers=scsrf(env.student))
+    assert submitted.status_code == 200, submitted.text
+
+    notices = env.student.get("/api/student/notifications").json()["items"]
+    assert len(notices) == 1
+    assert notices[0]["kind"] == "exam_result_published"
+    assert notices[0]["target_id"] == attempt_id
+    assert notices[0]["link_url"] == f"/exam/{env.token}"
+
+
+def test_after_close_score_notification_is_created_by_cron_once(tmp_path):
+    close_at = datetime.now(UTC) + timedelta(hours=1)
+    env = build_exam(tmp_path, only=["choice"], link={
+        "open_at": iso(close_at - timedelta(hours=2)), "close_at": iso(close_at),
+        "duration_minutes": 30, "show_score": "after_close",
+    })
+    attempt_id = start(env)
+    assert env.student.post(f"/api/exam/attempts/{attempt_id}/submit", headers=scsrf(env.student)).status_code == 200
+
+    from app.notification_reminders import send_after_close_exam_result_notifications
+
+    db = env.app.state.session_factory()
+    try:
+        assert send_after_close_exam_result_notifications(db, now=close_at - timedelta(minutes=1)) == 0
+        assert send_after_close_exam_result_notifications(db, now=close_at + timedelta(minutes=1)) == 1
+        assert send_after_close_exam_result_notifications(db, now=close_at + timedelta(minutes=2)) == 0
+    finally:
+        db.close()
+
+    notices = env.student.get("/api/student/notifications").json()["items"]
+    assert [row["target_id"] for row in notices] == [attempt_id]
 
 
 def _shift_close(env, moment: datetime):

@@ -520,7 +520,7 @@ def _seal_if_expired(db: Session, request: Request, attempt: PaperAttempt, paper
     from ..notification_reminders import maybe_publish_result_notification
     maybe_publish_result_notification(
         db, attempt=attempt, paper_title=paper.title,
-        source_type=source.source_type, show_score=source.show_score,
+        source=source,
     )
     _audit(db, request, "exam_auto_seal", "success", attempt.user_id,
            resource_type="paper_attempt", resource_id=attempt.id,
@@ -1360,7 +1360,7 @@ def submit_attempt(attempt_id: int, request: Request, user: User = Depends(curre
     from ..notification_reminders import maybe_publish_result_notification
     maybe_publish_result_notification(
         db, attempt=attempt, paper_title=paper.title,
-        source_type=_source.source_type, show_score=_source.show_score,
+        source=_source,
     )
     _audit(db, request, "exam_submit", "success", user.id,
            resource_type="paper_attempt", resource_id=attempt.id,
