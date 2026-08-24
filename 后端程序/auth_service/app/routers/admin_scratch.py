@@ -1123,9 +1123,9 @@ def review_submission(submission_id: int, payload: ReviewPayload, request: Reque
         student = db.get(User, submission.user_id)
         block = db.get(CourseLessonBlock, submission.lesson_block_id)
         if student is not None and block is not None:
-            before = completed_block_ids(db, student, submission.lesson_id)
+            completion_before = completed_block_ids(db, student, submission.lesson_id)
             _record_completion(db, student, block, submission.lesson_id,
-                               COMPLETION_SOURCE, before, commit=False)
+                               COMPLETION_SOURCE, completion_before, commit=False)
             completed = True
     audit(db, request.app.state.settings, "scratch_submission_review", "success",
           client_ip(request), admin.id, resource_type="scratch_submission",
