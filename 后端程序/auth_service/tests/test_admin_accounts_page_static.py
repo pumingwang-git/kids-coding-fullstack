@@ -178,14 +178,12 @@ def test_list_and_editor_are_hidden_until_the_gate_passes(accounts_html):
     assert re.search(r'id="roleMask"[^>]*\shidden', accounts_html), "角色变更 Modal 必须默认 hidden"
 
 
-def test_menu_entry_is_marked_super_only_and_rendered_hidden(layout_js):
+def test_menu_entries_use_server_menus_intersection(layout_js):
     body = strip_comments(layout_js)
-    entry = re.search(r"\{[^{}]*accounts\.html[^{}]*\}", body)
-    assert entry, "admin-layout.js 的菜单里缺少 accounts.html"
-    assert "superOnly: true" in entry.group(0), "账号与角色入口必须标记 superOnly"
-    # 渲染时默认带 hidden，确认是超管后才由 loadAdmin 摘掉。
-    assert "data-super-only hidden" in body
-    assert re.search(r"can_manage_admin_roles[^\n]*\n?[^\n]*data-super-only|data-super-only", body)
+    assert "accounts.html" in body and "audit-logs.html" in body
+    assert "data-menu-page" in body and "applyMenuFilter" in body
+    assert "me.menus" in body
+    assert "superOnly" not in body
 
 
 def test_role_change_entry_is_not_exposed_on_the_ungated_dashboard():

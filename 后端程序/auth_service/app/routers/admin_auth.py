@@ -15,11 +15,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from ..audit_summary import ensure_known_event_type
+from ..audit_summary import AUDIT_OUTCOME_LABELS, AUDIT_OUTCOMES, ensure_known_event_type, event_type_options
 from ..models import AdminSession, AdminUser, AuditEvent, SliderCaptchaChallenge
 from ..permissions import (
     KNOWN_ROLE_NAMES,
+    ROLE_CAPABILITIES,
     ROLE_LABELS,
+    ROLE_MENUS,
     ROLE_SCOPE_NOTES,
     ROLE_SCOPES,
     SCOPE_LABELS,
@@ -401,13 +403,49 @@ def current_admin(request: Request, db: Session = Depends(db_session)) -> AdminU
 
 @router.get("/me")
 def me(admin: AdminUser = Depends(current_admin)):
+    role = admin.role
     return {
         "id": admin.id,
         "username": admin.username,
         "display_name": admin.display_name,
-        "role": admin.role,
+        "role": role,
+        "role_label": ROLE_LABELS[role],
+        "scope": ROLE_SCOPES[role],
+        "scope_label": SCOPE_LABELS[ROLE_SCOPES[role]],
+        "capabilities": dict(ROLE_CAPABILITIES[role]),
+        "menus": list(ROLE_MENUS[role]),
         "can_manage_admin_roles": is_super(admin),
         "can_manage_classes": can_manage_classes(admin),
+    }
+
+
+@router.get("/dicts")
+def admin_dicts(admin: AdminUser = Depends(current_admin)):
+    """Return immutable dictionaries consumed by all management pages."""
+    return {
+        "roles": [
+            {
+                "value": role,
+                "label": ROLE_LABELS[role],
+                "scope": ROLE_SCOPES[role],
+                "scope_label": SCOPE_LABELS[ROLE_SCOPES[role]],
+                "scope_note": ROLE_SCOPE_NOTES[role],
+            }
+            for role in KNOWN_ROLE_NAMES
+        ],
+        "menus": [
+            {"role": role, "pages": list(ROLE_MENUS[role])}
+            for role in KNOWN_ROLE_NAMES
+        ],
+        "event_types": event_type_options(),
+        "outcomes": [
+            {
+                "machine_name": outcome,
+                "display_name": AUDIT_OUTCOME_LABELS[outcome],
+                "tone": "danger" if outcome != "success" else "trial",
+            }
+            for outcome in AUDIT_OUTCOMES
+        ],
     }
 
 

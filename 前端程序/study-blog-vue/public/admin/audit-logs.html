@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>审计日志 · 后台</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body class="admin-audit-logs">
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <h1>审计日志</h1>
+          <p>只读查看管理端关键操作记录，按时间倒序排列</p>
+        </div>
+        <div class="head-actions"><button class="btn" id="refreshBtn" type="button">刷新</button></div>
+      </div>
+
+      <form class="card audit-filter" id="filterForm">
+        <div class="form-grid audit-filter-grid">
+          <div class="form-field"><label for="eventType">事件</label><select id="eventType"><option value="">全部事件</option></select></div>
+          <div class="form-field"><label for="outcome">结果</label><select id="outcome"><option value="">全部结果</option></select></div>
+          <div class="form-field"><label for="adminUserId">操作人 ID</label><input id="adminUserId" type="number" min="1" inputmode="numeric" /></div>
+          <div class="form-field"><label for="userId">涉及学员 ID</label><input id="userId" type="number" min="1" inputmode="numeric" /></div>
+          <div class="form-field"><label for="resourceType">资源类型</label><input id="resourceType" type="text" /></div>
+          <div class="form-field"><label for="resourceId">资源 ID</label><input id="resourceId" type="number" min="1" inputmode="numeric" /></div>
+          <div class="form-field"><label for="createdFrom">开始时间</label><input id="createdFrom" type="datetime-local" /></div>
+          <div class="form-field"><label for="createdTo">结束时间</label><input id="createdTo" type="datetime-local" /></div>
+        </div>
+        <div class="audit-filter-actions"><button class="btn primary" type="submit">应用筛选</button><button class="btn" id="clearBtn" type="button">清空</button></div>
+      </form>
+
+      <section class="card audit-list-card" aria-labelledby="auditListTitle">
+        <div class="audit-list-head"><div><h2 id="auditListTitle">日志记录</h2><p class="muted" id="listMeta" aria-live="polite">加载中</p></div></div>
+        <div class="table-wrap audit-table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>事件</th><th>结果</th><th>操作人</th><th>涉及学员</th><th>资源</th><th>摘要</th></tr></thead>
+            <tbody id="auditRows"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="emptyTip" hidden>当前筛选条件下没有记录</div>
+        <div class="list-error" id="errorTip" hidden><span id="errorText">日志加载失败。</span><button class="btn" id="retryBtn" type="button">重新加载</button></div>
+        <nav class="pager audit-pager" aria-label="审计日志分页"><button class="btn" id="prevBtn" type="button">上一页</button><span id="pageMeta">第 1 页</span><button class="btn" id="nextBtn" type="button">下一页</button></nav>
+      </section>
+    </main>
+  </div>
+</div>
+<script type="module" src="audit-logs.js"></script>
+</body>
+</html>

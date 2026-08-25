@@ -9,21 +9,33 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import AuditEvent
+from ..models import AdminUser, AuditEvent, User
 from ..permissions import is_super
 from .admin_auth import audit, client_ip, current_admin, db_session
 
 router = APIRouter(prefix="/api/admin/audit", tags=["admin-audit"])
 
 
-def _payload(row: AuditEvent) -> dict:
+def _payload(row: AuditEvent, db: Session) -> dict:
+    admin_user = db.get(AdminUser, row.admin_user_id) if row.admin_user_id else None
+    user = db.get(User, row.user_id) if row.user_id else None
     return {
         "id": row.id,
         "event": row.event_type,
         "event_type": row.event_type,
         "outcome": row.outcome,
         "admin_user_id": row.admin_user_id,
+        "admin_user": {
+            "id": admin_user.id,
+            "username": admin_user.username,
+            "display_name": admin_user.display_name,
+        } if admin_user else None,
         "user_id": row.user_id,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "display_name": getattr(user, "display_name", None),
+        } if user else None,
         "resource_type": row.resource_type,
         "resource_id": row.resource_id,
         "summary": json.loads(row.summary_json) if row.summary_json else {},
@@ -73,4 +85,4 @@ def list_audit_events(
         stmt = stmt.where(AuditEvent.created_at <= created_to)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(stmt.order_by(AuditEvent.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
-    return {"total": total, "page": page, "page_size": page_size, "items": [_payload(row) for row in rows]}
+    return {"total": total, "page": page, "page_size": page_size, "items": [_payload(row, db) for row in rows]}

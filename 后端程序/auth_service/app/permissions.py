@@ -88,6 +88,38 @@ ROLE_SCOPE_NOTES = {
     ACADEMIC_ADMIN_ROLE: "教务角色，可以看到全部班级与全部学生。",
 }
 
+# 管理端能力与菜单的唯一来源。前端只保留展示信息，权限交集由此处下发。
+ROLE_CAPABILITIES = {
+    role: {
+        "class_read": ROLE_SCOPES[role] != NO_SCOPE,
+        "results_read": ROLE_SCOPES[role] != NO_SCOPE,
+        "scratch_review": role in ({SUPER_ROLE} | REVIEWER_ROLES),
+        "manage_admin_roles": role == SUPER_ROLE,
+        "manage_classes": role in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE},
+        "audit_events_read": role == SUPER_ROLE,
+        "export_class_insight": role in CLASS_INSIGHT_EXPORT_ROLES,
+    }
+    for role in KNOWN_ROLE_NAMES
+}
+
+# 页面标识是菜单协议的一部分；文案、图标和面包屑仍由 admin-layout.js 展示层维护。
+ALL_MENU_PAGES = (
+    "index.html", "questions.html", "papers.html", "exam-links.html",
+    "courses.html", "learning-catalog.html", "nodes.html", "materials.html",
+    "videos.html", "students.html", "enrollments.html", "classes.html",
+    "teaching.html", "reports.html", "homework-results.html",
+    "accounts.html", "audit-logs.html",
+)
+ROLE_MENUS = {
+    SUPER_ROLE: ALL_MENU_PAGES,
+    ACADEMIC_ADMIN_ROLE: tuple(page for page in ALL_MENU_PAGES if page not in {"accounts.html", "audit-logs.html"}),
+    TEACHER_ROLE: ("index.html", "students.html", "classes.html", "teaching.html", "reports.html", "homework-results.html"),
+    ASSISTANT_ROLE: ("index.html", "students.html", "classes.html", "teaching.html", "reports.html", "homework-results.html"),
+    "reviewer": ("index.html", "questions.html", "papers.html", "exam-links.html"),
+    "editor": ("index.html", "questions.html", "papers.html", "exam-links.html", "courses.html", "learning-catalog.html", "nodes.html", "materials.html", "videos.html"),
+    "admin": ("index.html", "questions.html", "papers.html", "exam-links.html", "courses.html", "learning-catalog.html", "nodes.html", "materials.html", "videos.html"),
+}
+
 
 def validate_admin_role(role: str) -> str:
     """校验管理员角色写入值，并返回原值供调用方直接赋值。"""

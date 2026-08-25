@@ -7,14 +7,14 @@
 //   一级 = 业务域（总览/配题/配课/运营）
 //   二级 = 业务对象 + 「管理/统计」后缀（名词，不用动词）
 //   动作类页面（新建/编辑表单）不进菜单，由列表页按钮进入。
-import { adminLogout, adminMe } from "./admin-api.js";
+import { adminLogout, adminMe, adminRequest } from "./admin-api.js";
 
 export const MENU = [
-  { key: "dashboard", label: "总览", icon: "📊", page: "index.html", crumb: "总览 / 管理总览" },
+  { key: "dashboard", label: "总览", icon: "总", page: "index.html", crumb: "总览 / 管理总览" },
   {
     key: "question",
     label: "配题",
-    icon: "📚",
+    icon: "题",
     children: [
       { label: "题库管理", page: "questions.html", crumb: "配题 / 题库管理" },
       { label: "试卷管理", page: "papers.html", crumb: "配题 / 试卷管理" },
@@ -24,7 +24,7 @@ export const MENU = [
   {
     key: "course",
     label: "配课",
-    icon: "🎬",
+    icon: "课",
     children: [
       { label: "课包管理", page: "courses.html", crumb: "配课 / 课包管理" },
       { label: "学习目录", page: "learning-catalog.html", crumb: "配课 / 学习目录" },
@@ -36,7 +36,7 @@ export const MENU = [
   {
     key: "ops",
     label: "运营",
-    icon: "🛠",
+    icon: "营",
     children: [
       { label: "学员管理", page: "students.html", crumb: "运营 / 学员管理" },
       { label: "课程开通", page: "enrollments.html", crumb: "运营 / 课程开通" },
@@ -44,9 +44,8 @@ export const MENU = [
       { label: "教学工作台", page: "teaching.html", crumb: "运营 / 教学工作台" },
       { label: "成绩统计", page: "reports.html", crumb: "运营 / 成绩统计" },
       { label: "课时作业成绩", page: "homework-results.html", crumb: "运营 / 课时作业成绩" },
-      // superOnly：ADR-001 §2.4 规定变更 AdminUser.role 仅限 super_admin，
-      // 非超管连入口都不该看到。隐藏入口只是体验，后端仍然独立 403。
-      { label: "账号与角色", page: "accounts.html", crumb: "运营 / 账号与角色", superOnly: true },
+      { label: "账号与角色", page: "accounts.html", crumb: "运营 / 账号与角色" },
+      { label: "审计日志", page: "audit-logs.html", crumb: "运营 / 审计日志" },
     ],
   },
 ];
@@ -67,22 +66,20 @@ export function initLayout() {
 
 function renderSidebar(sidebar) {
   const page = currentPage();
-  let html = '<div class="brand"><i>◆</i> 学习平台 · 后台</div><nav class="menu">';
+  let html = '<a class="brand" href="index.html"><i>LP</i><span>学习平台<small>运营工作台</small></span></a><nav class="menu">';
   for (const group of MENU) {
     if (group.children) {
       const open = group.children.some((child) => child.page === page) ? " open" : "";
-      html += `<div class="menu-group${open}"><div class="menu-parent">${group.icon} ${group.label} <span class="arrow">▾</span></div><div class="menu-children">`;
+      html += `<div class="menu-group${open}"><div class="menu-parent"><i class="menu-icon">${group.icon}</i>${group.label}<span class="arrow">⌄</span></div><div class="menu-children">`;
       for (const child of group.children) {
-        // 默认渲染成 hidden，避免非超管在 /me 返回前先看到一帧授权入口。
-        const gated = child.superOnly ? " data-super-only hidden" : "";
-        html += `<a class="menu-item${child.page === page ? " active" : ""}"${gated} href="${child.page}">${child.label}</a>`;
+        html += `<a class="menu-item${child.page === page ? " active" : ""}" data-menu-page="${child.page}" hidden href="${child.page}">${child.label}</a>`;
       }
       html += "</div></div>";
     } else {
-      html += `<a class="menu-item single${group.page === page ? " active" : ""}" href="${group.page}">${group.icon} ${group.label}</a>`;
+      html += `<a class="menu-item single${group.page === page ? " active" : ""}" data-menu-page="${group.page}" hidden href="${group.page}"><i class="menu-icon">${group.icon}</i>${group.label}</a>`;
     }
   }
-  html += '</nav><div class="sidebar-foot">学习平台后台 · 配题建设中</div>';
+  html += '</nav><div class="sidebar-foot"><span>教学内容运营</span><small>v1.0</small></div>';
   sidebar.innerHTML = html;
 
   // 一级菜单展开/收起
@@ -93,13 +90,25 @@ function renderSidebar(sidebar) {
   });
 }
 
+function applyMenuFilter(sidebar, menus) {
+  const allowed = new Set(Array.isArray(menus) ? menus : []);
+  sidebar.querySelectorAll("[data-menu-page]").forEach((item) => {
+    item.hidden = !allowed.has(item.dataset.menuPage);
+  });
+  sidebar.querySelectorAll(".menu-group").forEach((group) => {
+    const visible = group.querySelector("[data-menu-page]:not([hidden])");
+    group.hidden = !visible;
+  });
+}
+
 function renderTopbar(topbar) {
   const page = currentPage();
   const active = findActive(page);
   const crumb = active ? active.crumb : "后台管理";
   topbar.innerHTML = `
-    <div class="crumb">后台管理 / <b>${crumb}</b></div>
+    <div class="crumb"><span>学习平台</span><b>${crumb}</b></div>
     <div class="topbar-right">
+      <a class="btn-text topbar-notifications" href="notifications.html" aria-label="通知">通知<span id="adminNotificationCount" class="topbar-notification-count" hidden></span></a>
       <span class="muted" id="adminName">加载中…</span>
       <button class="btn-text" id="logoutBtn" type="button">退出登录</button>
     </div>`;
@@ -128,11 +137,18 @@ async function loadAdmin(topbar, sidebar) {
     const me = await adminMe();
     const name = topbar.querySelector("#adminName");
     if (name) name.textContent = `${me.display_name}（${me.role}）`;
-    if (me.can_manage_admin_roles && sidebar) {
-      sidebar.querySelectorAll("[data-super-only]").forEach((item) => {
-        item.hidden = false;
-      });
+    try {
+      const unread = await adminRequest("/notifications/unread-count");
+      const badge = topbar.querySelector("#adminNotificationCount");
+      const count = Number(unread?.count || 0);
+      if (badge && count > 0) {
+        badge.textContent = count > 99 ? "99+" : String(count);
+        badge.hidden = false;
+      }
+    } catch {
+      // The link remains usable when the optional unread count is unavailable.
     }
+    if (sidebar) applyMenuFilter(sidebar, me.menus);
   } catch {
     // 未登录 → 回登录页，登录后回到当前页
     location.href = `login.html?next=${encodeURIComponent(location.pathname)}`;
