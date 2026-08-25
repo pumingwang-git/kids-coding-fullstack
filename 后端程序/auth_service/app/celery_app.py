@@ -19,7 +19,7 @@ def make_celery() -> Celery:
     settings = get_settings()
     app = Celery(
         "auth_service",
-        include=["app.tasks.transcode"],
+        include=["app.tasks.transcode", "app.tasks.exports"],
     )
     app.conf.update(
         task_serializer="json",
@@ -29,7 +29,7 @@ def make_celery() -> Celery:
         enable_utc=True,
         task_track_started=True,
         # 队列：转码单独一个，便于按优先级/机器隔离
-        task_routes={"app.tasks.transcode.*": {"queue": "transcode"}},
+        task_routes={"app.tasks.transcode.*": {"queue": "transcode"}, "app.tasks.exports.*": {"queue": "exports"}},
     )
     if settings.redis_url:
         app.conf.broker_url = settings.redis_url

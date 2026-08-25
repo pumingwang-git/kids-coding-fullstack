@@ -23,6 +23,7 @@ from ..models import (
     ExamAssignment,
     ExamLink,
     User,
+    ExportJob,
 )
 from ..permissions import (
     CLASS_INSIGHT_EXPORT_CAPABILITY,
@@ -40,6 +41,8 @@ from . import admin_classes
 from .admin_auth import audit, client_ip, current_admin, db_session
 
 router = APIRouter(prefix="/api/admin/teaching", tags=["admin-teaching"])
+
+EXPORT_ROW_LIMIT = 5000
 
 
 
@@ -225,15 +228,10 @@ def class_students(
     }
 
 
-@router.get("/classes/{class_id}/export")
-def export_class_insight(
-    class_id: int,
-    request: Request,
-    inactive_days_gte: int | None = Query(default=None, ge=0),
-    db: Session = Depends(db_session),
-):
-    """Export one row per currently enrolled learner as a UTF-8 CSV."""
-    admin, class_group, class_ids = _exportable_class_or_404(class_id, request, db)
+def build_class_insight_csv(db: Session, admin, class_id: int, inactive_days_gte: int | None = None, class_ids=None) -> tuple[bytes, int]:
+    class_group = db.get(ClassGroup, class_id)
+    if class_ids is None:
+        class_ids = exportable_class_ids(admin, db)
     student_rows = _filtered_class_students(db, class_id, inactive_days_gte)
     students = [student for student, _ in student_rows]
     activity_by_student = {student.id: activity for student, activity in student_rows}
@@ -287,15 +285,33 @@ def export_class_insight(
             METRIC_VERSION,
         ])
 
+    return ("\ufeff" + output.getvalue()).encode("utf-8"), len(students)
+
+
+@router.get("/classes/{class_id}/export")
+def export_class_insight(
+    class_id: int, request: Request,
+    inactive_days_gte: int | None = Query(default=None, ge=0),
+    db: Session = Depends(db_session),
+):
+    """Export one row per currently enrolled learner; large exports become jobs."""
+    admin, class_group, class_ids = _exportable_class_or_404(class_id, request, db)
+    # Count before materializing CSV: <=5000 remains the synchronous sentinel.
+    row_count = len(_filtered_class_students(db, class_id, inactive_days_gte))
+    if row_count > EXPORT_ROW_LIMIT:
+        job = ExportJob(requested_by=admin.id, export_type="class_insight",
+                        params={"class_id": class_id, "inactive_days_gte": inactive_days_gte})
+        db.add(job); db.commit(); db.refresh(job)
+        from ..tasks.exports import run_export_job
+        run_export_job.delay(job.id)
+        return Response(status_code=409, content=(f'{{"job_id":"{job.id}"}}').encode(), media_type="application/json")
+    content, row_count = build_class_insight_csv(db, admin, class_id, inactive_days_gte, class_ids)
     audit(db, request.app.state.settings, "export_download", "success", client_ip(request), admin.id,
           resource_type="class_insight_export", resource_id=class_id,
-          summary={"schema_version": 1, "export_type": "class_insight", "row_count": len(students)})
+          summary={"schema_version": 1, "export_type": "class_insight", "row_count": row_count})
     db.commit()
-    return Response(
-        content=("\ufeff" + output.getvalue()).encode("utf-8"),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="class-{class_id}-insight.csv"'},
-    )
+    return Response(content=content, media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="class-{class_id}-insight.csv"'})
 
 
 @router.get("/classes/{class_id}/homework")

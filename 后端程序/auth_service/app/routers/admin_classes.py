@@ -19,7 +19,7 @@ from ..class_enrollment import (
     revoke_for_membership,
     sync_class_window,
 )
-from ..models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, Enrollment, User, HelpRequest
+from ..models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, Enrollment, User, HelpRequest, ExportJob
 from ..notification_links import admin_help_request_link
 from ..notification_service import create_notification
 from .admin_enrollments import ENROLLMENT_STATUS_LABELS
@@ -35,6 +35,7 @@ from ..security import as_utc, utcnow
 from .admin_auth import audit, client_ip, current_admin, db_session, require_csrf
 
 router = APIRouter(prefix="/api/admin/classes", tags=["admin-classes"])
+EXPORT_ROW_LIMIT = 5000
 MANAGER_ROLES = frozenset({ACADEMIC_ADMIN_ROLE, SUPER_ROLE})
 READER_ROLES = MANAGER_ROLES | frozenset({TEACHER_ROLE, ASSISTANT_ROLE})
 CLASS_STATUS_LABELS = {
@@ -282,12 +283,8 @@ def list_classes(request: Request, db: Session = Depends(db_session)):
     }
 
 
-@router.get("/export")
-def export_class_relationships(
-    request: Request, db: Session = Depends(db_session)
-):
-    """Export all visible member and teacher relationship history as CSV."""
-    admin, class_ids = _require_class_reader(request, db)
+def build_class_relationship_csv(db: Session, admin, class_ids=None) -> tuple[bytes, int]:
+    """Build relationship CSV using the supplied, already rechecked scope."""
     class_filter = [] if class_ids is None else [ClassGroup.id.in_(class_ids)]
     members = db.execute(
         select(ClassGroup, ClassMember, User)
@@ -372,16 +369,44 @@ def export_class_relationships(
             ]
         )
 
+    return ("\ufeff" + output.getvalue()).encode("utf-8"), len(members) + len(teachers)
+
+
+@router.get("/export")
+def export_class_relationships(request: Request, db: Session = Depends(db_session)):
+    """Export all visible member and teacher relationship history as CSV."""
+    admin, class_ids = _require_class_reader(request, db)
+    # Keep small exports synchronous; only materialize a job above the sentinel.
+    class_filter = [] if class_ids is None else [ClassGroup.id.in_(class_ids)]
+    member_count = db.scalar(select(func.count(ClassMember.id)).join(ClassGroup, ClassMember.class_id == ClassGroup.id).where(*class_filter)) or 0
+    teacher_count = db.scalar(select(func.count(ClassTeacher.id)).join(ClassGroup, ClassTeacher.class_id == ClassGroup.id).where(*class_filter)) or 0
+    total = member_count + teacher_count
+    if total > EXPORT_ROW_LIMIT:
+        job = ExportJob(requested_by=admin.id, export_type="class_relationships", params={})
+        db.add(job); db.commit(); db.refresh(job)
+        from ..tasks.exports import run_export_job
+        run_export_job.delay(job.id)
+        return Response(status_code=409, content=(f'{{"job_id":"{job.id}"}}').encode(), media_type="application/json")
+    content, row_count = build_class_relationship_csv(db, admin, class_ids)
     audit(db, request.app.state.settings, "export_download", "success", client_ip(request), admin.id,
           resource_type="class_relationship_export",
-          summary={"schema_version": 1, "export_type": "class_relationships",
-                   "row_count": len(members) + len(teachers)})
+          summary={"schema_version": 1, "export_type": "class_relationships", "row_count": row_count})
     db.commit()
-    return Response(
-        content=("\ufeff" + output.getvalue()).encode("utf-8"),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="class-relationships.csv"'},
-    )
+    return Response(content=content, media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="class-relationships.csv"'})
+
+
+@router.get("/export-jobs/{job_id}")
+def get_export_job(job_id: str, request: Request, db: Session = Depends(db_session)):
+    """Poll/download a queued export without widening its authorization scope."""
+    admin = current_admin(request, db)
+    job = db.get(ExportJob, job_id)
+    if job is None or (job.requested_by != admin.id and admin.role not in MANAGER_ROLES):
+        raise HTTPException(404, "导出任务不存在。")
+    if job.status != "completed":
+        return {"job_id": job.id, "status": job.status, "row_count": job.row_count, "error": job.error}
+    return Response(content=job.content.encode("utf-8"), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="export-{job.id}.csv"'})
 
 
 @router.post("", status_code=201)
