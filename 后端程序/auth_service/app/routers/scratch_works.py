@@ -51,7 +51,7 @@ from sqlalchemy.orm import Session
 from ..models import ScratchChallenge, ScratchProject, ScratchProjectRevision, ScratchWork, User
 from ..scratch_sb3 import Sb3Invalid, inspect_sb3, read_sb3, store_sb3
 from ..security import as_utc
-from .auth_secure import current_user, db_session, limit, require_csrf
+from .auth_secure import audit, client_ip, current_user, db_session, limit, require_csrf
 
 router = APIRouter(prefix="/api/scratch", tags=["student-scratch-works"])
 
@@ -334,6 +334,15 @@ def share_project(payload: WorkShare, request: Request, db: Session = Depends(db
         is_public=True,
     )
     db.add(work)
+    db.flush()  # 先拿到 work.id 再写审计，避免为审计多提交一次
+    # 分享 = 对外发布：出不当内容时要追溯谁在何时公开了什么。
+    # 只记 id 与可见范围，**不记作品内容**（《55》§8 裁定归 collab）。
+    audit(db, request.app.state.settings, "work_share", "success",
+          client_ip(request), user.id,
+          resource_type="scratch_work", resource_id=work.id,
+          summary={"schema_version": 1, "work_id": work.id,
+                   "source_challenge_id": work.source_challenge_id,
+                   "is_public": work.is_public})
     db.commit()
     db.refresh(work)
     return {**_work_payload(work, mine=True), "already_shared": False}

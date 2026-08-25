@@ -129,6 +129,23 @@ def _expand_event_name(node: ast.JoinedStr, path: Path) -> set[str]:
     return names
 
 
+def _audit_prefix(tree: ast.Module, path: Path) -> str:
+    """按**实际导入的是哪个 audit** 决定前缀，而不是靠文件名硬编码清单。
+
+    admin_auth.audit 写库时加 `admin_` 前缀，auth_secure.audit 不加。
+    早先这里写死了 ("auth_secure.py", "exam.py")，学生端新增
+    profile_update / work_share 时立刻漏判——硬编码清单会漂，同 N7 教训。
+    """
+    if path.name in ("auth_secure.py", "exam.py"):
+        return ""  # 定义 audit / _audit 的文件本身
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.ImportFrom) and node.module
+                and node.module.endswith("auth_secure")
+                and any(alias.name == "audit" for alias in node.names)):
+            return ""
+    return "admin_"
+
+
 def _literal_audit_event_types() -> set[str]:
     events = set()
     for path in (APP / "routers").glob("*.py"):
@@ -143,7 +160,7 @@ def _literal_audit_event_types() -> set[str]:
             if event_position is None or len(node.args) <= event_position:
                 continue
             event = node.args[event_position]
-            prefix = "" if path.name in ("auth_secure.py", "exam.py") else "admin_"
+            prefix = _audit_prefix(tree, path)
             if isinstance(event, ast.Constant) and isinstance(event.value, str):
                 events.add(f"{prefix}{event.value}")
             elif isinstance(event, ast.JoinedStr):

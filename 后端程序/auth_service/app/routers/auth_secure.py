@@ -80,11 +80,21 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def audit(db, settings, event, outcome, ip, user_id=None):
+def audit(db, settings, event, outcome, ip, user_id=None, *,
+          resource_type=None, resource_id=None, summary=None):
+    """学生端审计写入口（无 admin_ 前缀）。
+
+    resource/summary 为可选：早期只记会话类事件不需要它们，E7 补学生侧
+    profile_update / work_share 时才需要带摘要。刻意扩这里而不是新开一条
+    写入路径——`test_every_audit_event_constructor_is_guarded` 钉死了
+    `AuditEvent(...)` 只有四处。
+    """
     ensure_known_event_type(event, settings.environment)
     db.add(
         AuditEvent(
-            event_type=event, outcome=outcome, user_id=user_id, ip_hmac=hash_ip(settings, ip)
+            event_type=event, outcome=outcome, user_id=user_id, ip_hmac=hash_ip(settings, ip),
+            resource_type=resource_type, resource_id=resource_id,
+            summary_json=json.dumps(summary, ensure_ascii=False, sort_keys=True) if summary else None,
         )
     )
 

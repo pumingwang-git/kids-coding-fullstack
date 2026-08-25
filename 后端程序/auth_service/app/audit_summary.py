@@ -58,6 +58,9 @@ EVENT_CATEGORY: dict[str, str] = {
     **{event: CATEGORY_GRADE for event in _admin_events(
         "course_homework_deadline_extend", "scratch_submission_review", "scratch_submission_return",
     )},
+    # 学生端事件按实际库值登记（无 admin_ 前缀）。
+    "profile_update": CATEGORY_AUTHZ,   # 改名/换头像属身份类变更，5 年
+    "work_share": CATEGORY_COLLAB,      # 作品公开发布，传播范围类，2 年
     **{event: CATEGORY_COLLAB for event in _admin_events(
         "class_announcement_create", "notification_revoke", "help_request_create",
         "help_request_reply", "help_request_close", "help_request_reassign",

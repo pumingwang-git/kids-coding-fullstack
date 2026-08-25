@@ -22,7 +22,8 @@ from ..mistake_book import mistake_summary
 from ..models import AttemptAnswer, LessonProblemAttempt, PaperAttempt, StudentProfile
 from ..routers.admin_media import _decode, _normalize
 from ..security import as_utc
-from .auth_secure import current_user, db_session, limit, require_csrf
+from ..audit_summary import diff_summary
+from .auth_secure import audit, client_ip, current_user, db_session, limit, require_csrf
 
 
 router = APIRouter(prefix="/api/student/profile", tags=["student-profile"])
@@ -106,7 +107,14 @@ def update_profile(payload: ProfileUpdate, request: Request, db: Session = Depen
     user = current_user(request, db)
     limit(request, "student-profile-write", str(user.id), 30, 60)
     profile = _get_or_create_profile(db, user.id)
+    before = {"learning_signature": profile.learning_signature}
     profile.learning_signature = payload.learning_signature.strip()
+    # 改名属身份类变更：历史记录要能对得上人，故记 old/new（《55》§8 裁定归 authz）。
+    audit(db, request.app.state.settings, "profile_update", "success",
+          client_ip(request), user.id,
+          resource_type="student_profile", resource_id=user.id,
+          summary=diff_summary(before, {"learning_signature": profile.learning_signature},
+                               ("learning_signature",)))
     db.commit()
     db.refresh(profile)
     return _profile_payload(profile)
@@ -158,7 +166,12 @@ async def upload_avatar(request: Request, file: UploadFile = File(...),
             raise HTTPException(500, "头像写入失败。") from exc
 
     profile = _get_or_create_profile(db, user.id)
+    before = {"avatar_url": profile.avatar_url}
     profile.avatar_url = f"/avatars/{relative}"
+    # 只记路径，**不记头像二进制**（《55》§8）。
+    audit(db, settings, "profile_update", "success", client_ip(request), user.id,
+          resource_type="student_profile", resource_id=user.id,
+          summary=diff_summary(before, {"avatar_url": profile.avatar_url}, ("avatar_url",)))
     try:
         db.commit()
     except Exception:
