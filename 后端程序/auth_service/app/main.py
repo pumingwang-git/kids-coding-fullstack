@@ -22,6 +22,7 @@ from .rate_limit import InMemoryRateLimiter, RedisRateLimiter
 from .routers.admin_auth import router as admin_router
 from .routers.admin_classes import router as admin_classes_router
 from .routers.admin_course_content import router as admin_course_content_router
+from .routers.admin_dashboard import router as admin_dashboard_router
 from .routers.admin_courses import router as admin_courses_router
 from .routers.admin_dryrun import router as admin_dryrun_router
 from .routers.admin_dryrun import run_dry_run
@@ -197,6 +198,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_courses_router)
     app.include_router(admin_learning_catalog_router)
     app.include_router(admin_course_content_router)
+    app.include_router(admin_dashboard_router)
     app.include_router(admin_dryrun_router)
     app.include_router(admin_media_router)
     app.include_router(admin_materials_router)

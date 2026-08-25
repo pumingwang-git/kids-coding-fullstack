@@ -31,25 +31,20 @@ async function loadDashboard() {
   refresh?.classList.add("is-loading");
   $("dashboardError").hidden = true;
   try {
-    const [courses, courseDrafts, publishedCourses, questionStatuses, paperStatuses, students, links] = await Promise.all([
-      adminRequest("/courses?page=1&page_size=1"), adminRequest("/courses?status=draft&page=1&page_size=1"),
-      adminRequest("/courses?status=published&page=1&page_size=1"),
-      adminRequest("/problem-status-counts"), adminRequest("/paper-status-counts"),
-      adminRequest("/students?page=1&page_size=1"), adminRequest("/exam-link-counts"),
-    ]);
-    const q = questionStatuses?.counts || {};
-    const p = paperStatuses?.counts || {};
-    const activeLinks = Number(links?.counts?.active || 0);
-    setText("statCourses", number(courses?.total));
-    setText("statCoursesMeta", `${number(publishedCourses?.total)} 个已上线`);
+    const overview = await adminRequest("/dashboard/overview");
+    const q = overview?.questions || overview?.question_counts || {};
+    const p = overview?.papers || overview?.paper_counts || {};
+    const activeLinks = Number(overview?.exam_links?.active ?? overview?.active_links ?? 0);
+    setText("statCourses", number(overview?.courses?.total ?? overview?.course_total));
+    setText("statCoursesMeta", `${number(overview?.courses?.published ?? overview?.published_courses)} 个已上线`);
     setText("statQuestions", number(q.pending));
     setText("statQuestionsMeta", `${number(q.approved)} 道已发布`);
     setText("statPapers", number(p.published));
     setText("statPapersMeta", `${number(p.draft)} 份草稿待处理`);
-    setText("statStudents", number(students?.total));
+    setText("statStudents", number(overview?.students?.total ?? overview?.student_total));
     setText("statLinks", number(activeLinks));
-    setText("statLinksMeta", `${number(links?.counts?.all)} 条链接总计`);
-    renderQueue({ questionPending: Number(q.pending || 0), courseDraft: Number(courseDrafts?.total || 0), paperDraft: Number(p.draft || 0), activeLinks });
+    setText("statLinksMeta", `${number(overview?.exam_links?.all)} 条链接总计`);
+    renderQueue({ questionPending: Number(q.pending || 0), courseDraft: Number(overview?.courses?.draft ?? overview?.draft_courses ?? 0), paperDraft: Number(p.draft || 0), activeLinks });
   } catch (error) {
     $("dashboardError").textContent = error?.message || "数据加载失败，请稍后重试。";
     $("dashboardError").hidden = false;
