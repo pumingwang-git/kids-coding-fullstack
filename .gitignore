@@ -94,6 +94,11 @@ Desktop.ini
 
 # Playwright 复核截图：每次跑页面核对都会重新生成一批，属于产物不是素材。
 /output/
+# Frontend browser-review output and one-off screenshots are local evidence,
+# not application assets.
+/前端程序/study-blog-vue/output/
+/前端程序/study-blog-vue/*-notifications-*.png
+
 # Playwright CLI 自己的抓取缓存（console-*.log 会被 *.log 收掉，
 # 但 page-*.yml 不会，所以任意子项目下的整个目录都挡掉）。
 **/.playwright-cli/
@@ -126,6 +131,10 @@ Desktop.ini
 
 # Codex stores local task hooks and session metadata here.
 /.codex/
+
+# Project-local agent skills and their generated lockfile.
+/.agents/
+/skills-lock.json
 
 # Local UI-tool caches and development-server output, wherever they are generated.
 **/.impeccable/
@@ -178,3 +187,13 @@ dashboard-demo/styles.css
 # ---------------------------------------------------------------------
 /前端程序/focus-studio/
 /前端程序/typing-studio-qwerty/
+
+# ---------------------------------------------------------------------
+# 领域术语表与 ADR：domain-modeling 技能约定把 CONTEXT.md 放在仓库根、把
+# 架构决策记录放在 docs/adr/。它们和 /开发文档/ 是同一类东西 —— 设计期
+# 产物，部署时用不到 —— 所以口径保持一致：留在本地磁盘，不进版本库。
+# 之所以在这里单列而不是挪进 /开发文档/：技能下次运行仍会写回这两个位置，
+# 挡在原地比来回搬更省事。
+# ---------------------------------------------------------------------
+/CONTEXT.md
+/docs/
