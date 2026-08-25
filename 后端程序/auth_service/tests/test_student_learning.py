@@ -97,17 +97,33 @@ def test_non_trial_lesson_locked(tmp_path: Path):
 
 
 def test_unpublished_course_lesson_denied(tmp_path: Path):
-    """未发布课包的课时一律 403（draft/off_shelf 不放行）。"""
+    """未发布课包的课时走**范围闸**：404 且与「不存在」逐字相同；发布后同一课时即可播。
+
+    《39》§3 判据——把 lesson_id 换成已发布课包的课时，结论会变，故为范围闸而非功能闸。
+    实现见 `video_play.py:65`（`course_visible` 不过就抛 404「课时不存在。」）。
+    本用例此前期望 403，属**测试期望过时**，非实现有误；E7 轮末专项裁决（2026-08-25）后改为 404。
+    """
     app = build_app(tmp_path)
     client, headers = admin_login(app)
     cat = create_category(client, headers).json()
     course = create_course(client, headers, cat["id"]).json()
     section = add_section(client, headers, course["id"]).json()
+    video = seed_ready_video(app)
     lesson = client.post(f"/api/admin/sections/{section['id']}/lessons", headers=headers,
-                         json={"title": "课时 1", "content_md": "# 你好", "is_trial": True}).json()
+                         json={"title": "课时 1", "content_md": "# 你好", "is_trial": True,
+                               "video_id": video["video_id"]}).json()
     sclient = student_login(app)
-    resp = sclient.post(f"/api/lessons/{lesson['id']}/play", headers=scsrf(sclient))
-    assert resp.status_code == 403
+    denied = sclient.post(f"/api/lessons/{lesson['id']}/play", headers=scsrf(sclient))
+    missing = sclient.post("/api/lessons/999999/play", headers=scsrf(sclient))
+    assert denied.status_code == missing.status_code == 404
+    assert denied.json() == missing.json(), "范围拒绝必须与「不存在」逐字相同，不得泄露课包存在"
+
+    # 哨兵（别拦过头）：闸门必须真的认发布状态。少了这半截，上面的 404
+    # 会被「未绑视频」等其他 404 路径恒满足，等于没测。
+    assert client.post(f"/api/admin/courses/{course['id']}/publish",
+                       headers=headers).status_code == 200
+    assert sclient.post(f"/api/lessons/{lesson['id']}/play",
+                        headers=scsrf(sclient)).status_code == 200
 
 
 def test_lesson_without_video_404(tmp_path: Path):
