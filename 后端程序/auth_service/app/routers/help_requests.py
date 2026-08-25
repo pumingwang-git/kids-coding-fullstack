@@ -2,19 +2,28 @@ from __future__ import annotations
 
 import hashlib
 
-from ..audit_summary import diff_summary
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..audit_summary import diff_summary
 from ..class_groups import active_teacher_assignments_for_class
-from ..course_access import lesson_access, Access
-from ..notification_links import admin_help_request_link, student_help_request_link
+from ..course_access import Access, lesson_access
 from ..models import (
-    ClassGroup, ClassMember, Course, CourseLesson, CourseLessonBlock, HelpMessage, HelpRequest,
-    LessonProblemAttempt, LessonProblemBlock, Problem, User,
+    ClassGroup,
+    ClassMember,
+    Course,
+    CourseLesson,
+    CourseLessonBlock,
+    HelpMessage,
+    HelpRequest,
+    LessonProblemAttempt,
+    LessonProblemBlock,
+    Problem,
+    User,
 )
+from ..notification_links import admin_help_request_link, student_help_request_link
 from ..notification_service import create_notification, request_hash
 from ..permissions import ACADEMIC_ADMIN_ROLE, SUPER_ROLE, visible_class_ids
 from ..security import utcnow
@@ -62,12 +71,12 @@ def _context_is_accessible(db: Session, user: User, class_id: int,
         lesson = db.get(CourseLesson, block.lesson_id) if block else None
     elif context_type == "problem":
         problem = db.get(Problem, context_id)
-        if problem is None:
+        if problem is None or problem.problem_id_no is None:
             return False
         lesson = db.scalar(select(CourseLesson).join(CourseLessonBlock,
             CourseLessonBlock.lesson_id == CourseLesson.id)
             .join(LessonProblemBlock, LessonProblemBlock.block_id == CourseLessonBlock.id)
-            .where(LessonProblemBlock.problem_id_no == str(problem.id),
+            .where(LessonProblemBlock.problem_id_no == problem.problem_id_no,
                    CourseLesson.course_id == class_course_id))
     else:
         attempt = db.get(LessonProblemAttempt, context_id)
@@ -123,8 +132,13 @@ def create_help_request(payload: HelpRequestPayload, request: Request,
     require_csrf(request)
     if not idempotency_key:
         raise HTTPException(422, "缺少 Idempotency-Key。")
-    if not _context_is_accessible(db, user, payload.class_id, payload.context_type, payload.context_id):
+    if ((payload.context_type == "general" and payload.context_id is not None)
+            or (payload.context_type != "general"
+                and (payload.context_type not in {"course", "lesson", "block", "problem", "attempt"}
+                     or payload.context_id is None))):
         raise HTTPException(422, "联系上下文无效或当前不可访问。")
+    if not _context_is_accessible(db, user, payload.class_id, payload.context_type, payload.context_id):
+        raise HTTPException(404, "联系上下文不存在。")
     membership = db.scalar(select(ClassMember).where(ClassMember.class_id == payload.class_id,
                            ClassMember.student_id == user.id, ClassMember.status == "active",
                            ClassMember.left_at.is_(None)))

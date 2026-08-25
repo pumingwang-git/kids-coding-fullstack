@@ -2,8 +2,18 @@ from fastapi.testclient import TestClient
 from test_exam import ADMIN_PASSWORD, build_app, scsrf, student_login
 
 from app.models import (
-    AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, CourseLesson,
-    CourseSection, Enrollment, User,
+    AdminUser,
+    ClassGroup,
+    ClassMember,
+    ClassTeacher,
+    Course,
+    CourseLesson,
+    CourseLessonBlock,
+    CourseSection,
+    Enrollment,
+    LessonProblemBlock,
+    Problem,
+    User,
 )
 from app.security import password_hash, utcnow
 
@@ -43,7 +53,7 @@ def test_help_request_is_visible_to_assignee_not_other_class_teacher(tmp_path):
         db.close()
 
     assert student.post("/api/student/help-requests", headers={**scsrf(student), "Idempotency-Key": "help-context"},
-                        json={"class_id": class_id, "body": "上下文", "context_type": "course", "context_id": 1}).status_code == 422
+                        json={"class_id": class_id, "body": "上下文", "context_type": "course", "context_id": 1}).status_code == 404
     created = student.post("/api/student/help-requests", headers={**scsrf(student), "Idempotency-Key": "help-1"},
                            json={"class_id": class_id, "body": "需要帮助", "context_type": "general"})
     assert created.status_code == 201, created.text
@@ -143,9 +153,99 @@ def test_help_request_accepts_accessible_course_and_lesson_context(tmp_path):
     assert lesson_ticket.status_code == 201, lesson_ticket.text
 
 
-def test_teacher_loses_sent_announcement_access_after_assignment_ends(tmp_path):
+def test_help_request_problem_context_uses_primary_key_and_hides_inaccessible_context(tmp_path):
     app = build_app(tmp_path)
     student = student_login(app, "learner")
+    db = app.state.session_factory()
+    try:
+        learner = db.query(User).filter_by(username="learner").one()
+        teacher = db.query(AdminUser).filter_by(username="root").one()
+        course = Course(title="题目上下文课", status="published")
+        foreign_course = Course(title="其他题目上下文课", status="published")
+        db.add_all([course, foreign_course])
+        db.flush()
+        section = CourseSection(course_id=course.id, title="第一章", sort_order=0)
+        foreign_section = CourseSection(course_id=foreign_course.id, title="第一章", sort_order=0)
+        db.add_all([section, foreign_section])
+        db.flush()
+        lesson = CourseLesson(course_id=course.id, section_id=section.id, title="第一课",
+                              open_policy="whole", is_trial=True)
+        foreign_lesson = CourseLesson(course_id=foreign_course.id,
+                                      section_id=foreign_section.id, title="第一课",
+                                      open_policy="whole", is_trial=True)
+        db.add_all([lesson, foreign_lesson])
+        db.flush()
+        problem = Problem(type="choice", title="可访问题", status="approved",
+                          problem_id_no="HELP-PROBLEM-ACCESS")
+        foreign_problem = Problem(type="choice", title="跨课包题", status="approved",
+                                  problem_id_no="HELP-PROBLEM-FOREIGN")
+        no_number_problem = Problem(type="choice", title="无业务编号题", status="draft",
+                                    problem_id_no=None)
+        db.add_all([problem, foreign_problem, no_number_problem])
+        db.flush()
+        block = CourseLessonBlock(lesson_id=lesson.id, block_type="practice", title="练习", sort_order=0)
+        foreign_block = CourseLessonBlock(lesson_id=foreign_lesson.id, block_type="practice",
+                                          title="练习", sort_order=0)
+        db.add_all([block, foreign_block])
+        db.flush()
+        db.add_all([
+            LessonProblemBlock(block_id=block.id, problem_id_no=problem.problem_id_no,
+                               problem_type=problem.type),
+            LessonProblemBlock(block_id=foreign_block.id,
+                               problem_id_no=foreign_problem.problem_id_no,
+                               problem_type=foreign_problem.type),
+        ])
+        group = ClassGroup(name="题目上下文班", course_id=course.id, status="active")
+        db.add(group)
+        db.flush()
+        db.add_all([
+            ClassMember(class_id=group.id, student_id=learner.id, status="active"),
+            ClassTeacher(class_id=group.id, admin_user_id=teacher.id, role_in_class="teacher"),
+            Enrollment(student_id=learner.id, course_id=course.id, class_id=group.id,
+                       source="class", status="active"),
+        ])
+        db.commit()
+        class_id = group.id
+        problem_id = problem.id
+        foreign_problem_id = foreign_problem.id
+        no_number_problem_id = no_number_problem.id
+    finally:
+        db.close()
+
+    created = student.post(
+        "/api/student/help-requests",
+        headers={**scsrf(student), "Idempotency-Key": "problem-context-access"},
+        json={"class_id": class_id, "body": "这题不会做", "context_type": "problem",
+              "context_id": problem_id},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["context_id"] == problem_id
+
+    foreign = student.post(
+        "/api/student/help-requests",
+        headers={**scsrf(student), "Idempotency-Key": "problem-context-foreign"},
+        json={"class_id": class_id, "body": "越界题目", "context_type": "problem",
+              "context_id": foreign_problem_id},
+    )
+    missing = student.post(
+        "/api/student/help-requests",
+        headers={**scsrf(student), "Idempotency-Key": "problem-context-missing"},
+        json={"class_id": class_id, "body": "不存在题目", "context_type": "problem",
+              "context_id": 999999},
+    )
+    no_number = student.post(
+        "/api/student/help-requests",
+        headers={**scsrf(student), "Idempotency-Key": "problem-context-no-number"},
+        json={"class_id": class_id, "body": "无编号题目", "context_type": "problem",
+              "context_id": no_number_problem_id},
+    )
+    assert foreign.status_code == missing.status_code == no_number.status_code == 404
+    assert foreign.json() == missing.json() == no_number.json() == {"detail": "联系上下文不存在。"}
+
+
+def test_teacher_loses_sent_announcement_access_after_assignment_ends(tmp_path):
+    app = build_app(tmp_path)
+    student_login(app, "learner")
     db = app.state.session_factory()
     try:
         teacher = AdminUser(username="scoped-teacher", password_hash=password_hash.hash(ADMIN_PASSWORD),
