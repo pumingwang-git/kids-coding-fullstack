@@ -17,6 +17,8 @@ CATEGORY_GRADE = "grade"
 CATEGORY_SESSION = "session"
 CATEGORY_CONTENT = "content"
 CATEGORY_COLLAB = "collab"
+AUDIT_OUTCOMES = ("success", "failure")
+AUDIT_OUTCOME_LABELS = {"success": "成功", "failure": "失败"}
 
 
 def _admin_events(*events: str) -> set[str]:
@@ -84,7 +86,21 @@ EVENT_CATEGORY.update({
     )},
     "exam_auto_seal": CATEGORY_GRADE, "exam_judge_failed": CATEGORY_GRADE,
     "exam_start": CATEGORY_GRADE, "exam_submit": CATEGORY_GRADE, "exam_entry_denied": CATEGORY_GRADE,
+    # 由保留期清理 cron 写入的运行审计，按授权类长期保留。
+    "audit_retention_purge": CATEGORY_AUTHZ,
 })
+
+
+def event_type_options() -> list[dict[str, str]]:
+    """Return the event dictionary for management UIs from the canonical map."""
+    options = []
+    for machine_name in sorted(EVENT_CATEGORY):
+        display_name = machine_name.removeprefix("admin_").replace("_", " ")
+        options.append({
+            "machine_name": machine_name,
+            "display_name": display_name,
+        })
+    return options
 
 RETENTION_DAYS = {
     CATEGORY_AUTHZ: 5 * 365,

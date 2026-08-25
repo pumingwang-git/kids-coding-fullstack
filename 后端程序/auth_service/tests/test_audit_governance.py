@@ -21,6 +21,7 @@ HISTORICAL_EVENT_TYPES = {
     "admin_problem_clone", "admin_problem_offline",
     "exam_judge_failed",
 }
+NON_ROUTER_EVENT_TYPES = {"audit_retention_purge"}
 
 
 def test_diff_summary_is_allowlisted_versioned_and_redacted():
@@ -79,7 +80,10 @@ def test_every_audit_event_constructor_is_guarded():
                           if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef))
                           and candidate.lineno <= node.lineno <= getattr(candidate, "end_lineno", node.lineno)), None)
             constructors.append((path, node, owner))
-    assert len(constructors) == 3
+    # 四条写入路径：admin_auth.audit / auth_secure.audit / exam._audit /
+    # purge_audit_events。钉死数量是绊线——新增第五条必须在这里显式承认，
+    # 不许改成 >= 把提醒关掉（N7 同类教训）。
+    assert len(constructors) == 4
     assert all(owner and any(isinstance(call, ast.Name) and call.id == "ensure_known_event_type"
                              for call in ast.walk(owner))
                for _, _, owner in constructors)
@@ -151,7 +155,7 @@ def test_every_literal_router_audit_event_has_a_retention_category():
     events = _literal_audit_event_types()
     assert events <= EVENT_CATEGORY.keys()
     assert set(EVENT_CATEGORY.values()) <= RETENTION_DAYS.keys()
-    assert (set(EVENT_CATEGORY) - HISTORICAL_EVENT_TYPES) <= events
+    assert (set(EVENT_CATEGORY) - HISTORICAL_EVENT_TYPES - NON_ROUTER_EVENT_TYPES) <= events
 
 
 def test_exam_events_are_grade_retained():
