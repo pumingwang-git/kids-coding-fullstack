@@ -7,6 +7,7 @@
 一个字都不能下发。scope=samples 时之所以安全，只是因为压根没取隐藏点；
 加了 scope=all 之后，裁剪就成了唯一的防线。
 """
+import time
 from pathlib import Path
 
 from test_exam import build_app, scsrf, student_login
@@ -52,8 +53,32 @@ def submit(sclient, lid, bid, **body):
                         headers=scsrf(sclient), json=payload)
 
 
-def poll(sclient, lid, bid, run_id):
-    return sclient.get(f"/api/lessons/{lid}/blocks/{bid}/runs/{run_id}")
+# 判题走**进程内线程池**（见 app/judge/runner.py 头注），submit 返回 201 时结果
+# 多半还没落库。因此必须轮询到终态：满载全量里线程池被上千条用例抢，单次 GET
+# 会读到 judging，表现为 `assert 'judging' == 'judge_failed'` 这类与判题逻辑
+# 毫无关系的假红（2026-08-26 收口全量实测命中）。
+_TERMINAL_RUN_STATUSES = frozenset({
+    "accepted", "wrong_answer", "compile_error",
+    "runtime_error", "time_limit", "memory_limit", "judge_failed",
+})
+
+
+def poll(sclient, lid, bid, run_id, *, timeout: float = 15.0):
+    """轮询到终态或超时后返回最后一次响应。
+
+    **不要改成定长 sleep**：空载白等，满载又不够。超时也照常返回最后那次响应，
+    让调用方的断言自己报错——错误信息里能看到它停在 judging，比这里抛超时好定位。
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        response = sclient.get(f"/api/lessons/{lid}/blocks/{bid}/runs/{run_id}")
+        if response.status_code != 200:
+            return response
+        if response.json().get("status") in _TERMINAL_RUN_STATUSES:
+            return response
+        if time.monotonic() >= deadline:
+            return response
+        time.sleep(0.05)
 
 
 def reset(sclient, lid, bid):
