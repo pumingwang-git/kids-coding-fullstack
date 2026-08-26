@@ -43,6 +43,9 @@ def purge_audit_events(db, *, now: datetime | None = None, dry_run: bool = False
 
     total = sum(deleted_by_category.values())
     if not dry_run:
+        # D-E9：系统/cron 事件不带 admin_ 前缀。`admin_` 的语义是「哪个管理端账号
+        # 干的」，而这条记录既无 admin_user_id 也无 user_id——没有人做这个动作。
+        # 今后所有定时任务发出的审计事件一律照此办理，不必再逐条讨论。
         event_type = "audit_retention_purge"
         ensure_known_event_type(event_type, environment)
         db.add(AuditEvent(

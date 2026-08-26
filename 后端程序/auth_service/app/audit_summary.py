@@ -90,6 +90,7 @@ EVENT_CATEGORY.update({
     "exam_auto_seal": CATEGORY_GRADE, "exam_judge_failed": CATEGORY_GRADE,
     "exam_start": CATEGORY_GRADE, "exam_submit": CATEGORY_GRADE, "exam_entry_denied": CATEGORY_GRADE,
     # 由保留期清理 cron 写入的运行审计，按授权类长期保留。
+    # 无 admin_ 前缀是 D-E9 的裁决：系统事件没有操作主体，带前缀会误导。
     "audit_retention_purge": CATEGORY_AUTHZ,
 })
 
