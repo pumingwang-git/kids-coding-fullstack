@@ -10,11 +10,13 @@
 cd 后端程序/auth_service && ./.venv/Scripts/python.exe -m pytest tests/xxx.py -q
 ```
 
-必须用这个 venv，系统 python 没装 pytest。全量必须独占运行，开跑前确认没有其他会话正在跑 pytest。实测共收集 **1018 条**，独占基线（2026-08-25，E7 收口）为 **1 failed / 1016 passed / 1 skipped / 38 分 18 秒**，改动小时只跑相关文件。⚠️ 该基线里的那 1 条失败已于同日专项裁决后修好（见下），**下次独占全量应为 0 failed / 1017 passed / 1 skipped**——这个数字是推算，跑完请回来订正。
+必须用这个 venv，系统 python 没装 pytest。全量必须独占运行，开跑前确认没有其他会话正在跑 pytest。实测共收集 **1022 条**，独占基线（2026-08-26，E7 全收口后实测）为 **1 failed / 1020 passed / 1 skipped / 36 分 41 秒**，改动小时只跑相关文件。
 
 此前两次并发期间的全量把 `test_class_migration.py` 报成失败 14 条，被误记为「既有欠账」并派生出一个不存在的修复任务。非独占跑出来的失败清单没有诊断价值。排查线索：`ScriptDirectory.from_config()` 会 import `alembic/versions/` 下每个迁移文件，多进程同时跑会撞 Windows **pycache** 文件锁，命中的正好是走 `command.*` 的那批用例。
 
-**已知失败：无。** 曾长期挂账的 `test_student_learning.py::test_unpublished_course_lesson_denied`（期望 `403`、实得 `404`）已于 2026-08-25 专项裁决收口：按《39》§3 判据，换个 `lesson_id` 结论会变，故未发布课包的课时属**范围闸**，`404` 且与「不存在」逐字相同才是规范行为——**是测试期望过时，不是实现有错**。变异佐证：拆掉 `video_play.py:65` 的 `course_visible` 闸门后，请求恰好落到 `403` 分支，说明旧期望写于该闸门加入之前。用例已改为断言 404 并补「发布后同一课时可播」哨兵。
+**已知失败：1 条竞态假红。** `test_lesson_code_submit.py::test_judge_failure_refunds_the_try` 在满载全量里偶发 `assert 'judging' == 'judge_failed'`。**不是判错了，是判题还没跑完。**判题走进程内 `ThreadPoolExecutor`（见 `app/judge/runner.py` 头注），而该用例的 `poll()` 是**单次 GET、无重试**，等于赌判题线程比这次 GET 快——空载赌赢（单跑 3/3、整文件 20 passed），1022 条抢同一个线程池时赌输。**修法**：给 `poll()` 加有界重试（轮询到终态或超时），别用 sleep 定长等。
+
+**已收口：** 曾长期挂账的 曾长期挂账的 `test_student_learning.py::test_unpublished_course_lesson_denied`（期望 `403`、实得 `404`）已于 2026-08-25 专项裁决收口：按《39》§3 判据，换个 `lesson_id` 结论会变，故未发布课包的课时属**范围闸**，`404` 且与「不存在」逐字相同才是规范行为——**是测试期望过时，不是实现有错**。变异佐证：拆掉 `video_play.py:65` 的 `course_visible` 闸门后，请求恰好落到 `403` 分支，说明旧期望写于该闸门加入之前。用例已改为断言 404 并补「发布后同一课时可播」哨兵。
 
 ---
 
