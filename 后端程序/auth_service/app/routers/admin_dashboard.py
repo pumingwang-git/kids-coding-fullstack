@@ -80,11 +80,4 @@ def dashboard_overview(request: Request, db: Session = Depends(db_session)):
         "exam_links": link_counts,
         "course_access": {"active_enrollments": active_enrollments},
     }
-    # Flat aliases keep the response easy to consume for small integrations.
-    payload.update({
-        "course_total": course_counts["total"], "published_courses": course_counts["published"],
-        "draft_courses": course_counts["draft"], "question_counts": question_counts,
-        "paper_counts": paper_counts, "student_total": student_total,
-        "active_links": link_counts["active"],
-    })
     return payload
