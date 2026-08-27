@@ -38,6 +38,10 @@ cd 后端程序/auth_service && ./.venv/Scripts/python.exe -m pytest tests/xxx.p
 | 40 | 迁移回滚与种子数据规范 |
 | 41 | 管理端账号管理范围裁决 |
 | 42 | E2 班级模块任务分解 |
+| 59 | RBAC 与后台账号生命周期修复记录 |
+| 60 | 动态 RBAC 角色权限策略设计与修复明细 |
+| 61 | scope 与 capability 关系收口设计（含实现提示词） |
+| 62 | 61 的收口修复记录 |
 
 > ⚠️ **编号陷阱**：《E0-权限矩阵与数据范围对账》定稿是 **36**，草稿期曾暂编 32，而 32 已被《增补裁决》占用。**引用按标题判断，不要按编号**——代码里指向《32、…增补裁决》的链接是对的，别"顺手改成 36"。
 
@@ -51,6 +55,7 @@ cd 后端程序/auth_service && ./.venv/Scripts/python.exe -m pytest tests/xxx.p
   ```bash
   grep -rn '"super_admin"\|"editor"\|"reviewer"' 后端程序/auth_service/app/routers/ | grep -v admin_auth.py
   ```
+- **`scope` 不是授权。** 它只回答「能力生效在哪些数据上」；「能不能做这件事」永远且只由 capability 回答。自定义角色可以自由选 `scope`，所以只调了 `visible_*_ids()` 就放行的端点＝**漏了功能闸**——曾因此让一个零权限的 `global` 角色读到全站学员成绩（见《62》）。判据：`CAPABILITY_CATALOG` 里每个 key 都必须被 `permissions.py` 之外的真实闸门读取，`tests/test_scope_capability_guards.py` 盯着这条；只出现在目录里的权限＝装饰品。
 - **双主体不合并**：学员是 `users`，后台账号是 `admin_users`。`class_members` 指向前者，`class_teachers` 指向后者，不得互换。
 - **不加组织维度**：`organization_id` / `tenant_id` / `campus_id` 一律禁止，空列预留也不行（ADR-002）。
 - **关系表保留历史**：退班写 `left_at`、取消带班写 `ended_at`，不 DELETE。
