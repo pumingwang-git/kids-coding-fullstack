@@ -55,10 +55,18 @@ pnpm-debug.log*
 # --basetemp 指向项目根时留下 .pt*/ 时间戳目录。.pytest-*/ 一条覆盖所有横杠变体
 # （-tmp/-temp/-data/-audit/-codex…），不要再逐个后缀加规则；注意 .pt*/ 匹配不到
 # .pytest-* （第三个字符是 y 不是 t），两条都得留着。
+# 下划线变体（.pytest_tmp_xxx/）上面三条都挡不住：.pt*/ 卡在第三个字符，
+# .pytest-*/ 要求紧跟横杠。动态 RBAC 那轮因此在 auth_service 下堆了 21 个
+# 未忽略的目录、约 2.7 GB，所以补一条 .pytest_*/（顺带覆盖 .pytest_cache/）。
 .pytest-*/
+.pytest_*/
 .codex-pytest-*/
 .test-tmp*/
 .pt*/
+
+# 隔离验收时起的一次性运行目录（.runtime-dynamic-rbac/ 这类：临时库、上传件、
+# 日志）。和 pytest 暂存目录同性质，一条通配收掉，不要逐次回来加规则。
+.runtime-*/
 
 # Local configuration, IDE settings, and operating-system files
 .env
