@@ -6,7 +6,7 @@ initLayout();
 
 const $ = (id) => document.getElementById(id);
 const PAGE_SIZE = 20;
-const state = { box: "inbox", tab: "all", kind: "", page: 1, total: 0, items: [], kindOptions: [] };
+const state = { box: "inbox", tab: "all", page: 1, total: 0, items: [] };
 let revokeId = null;
 let releaseRevokeFocus = null;
 
@@ -31,20 +31,6 @@ function setBusy(busy) {
   $("notificationsList").setAttribute("aria-busy", String(busy));
   $("filterForm").querySelectorAll("button, select").forEach((element) => { element.disabled = busy; });
   $("readAllBtn").disabled = busy || state.box !== "inbox" || state.tab !== "all";
-}
-
-function normalizeKindOptions(payload) {
-  const candidates = payload.kind_options || payload.kinds || payload.filters?.kinds || payload.filters?.kind?.options || [];
-  return Array.isArray(candidates) ? candidates.filter((item) => item && item.value != null && item.label) : [];
-}
-
-function renderKindFilter() {
-  const options = state.kindOptions;
-  $("kindLabel").hidden = !options.length;
-  $("kindFilter").hidden = !options.length;
-  $("kindFilter").innerHTML = '<option value="">全部类型</option>' + options.map((option) =>
-    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
-  $("kindFilter").value = state.kind;
 }
 
 function renderTabs() {
@@ -103,12 +89,9 @@ async function loadNotifications() {
   renderLoading();
   try {
     const params = new URLSearchParams({ box: state.box, tab: state.tab, page: String(state.page), page_size: String(PAGE_SIZE) });
-    if (state.kind) params.set("kind", state.kind);
     const payload = await adminRequest(`/notifications?${params}`);
     state.items = payload.items || [];
     state.total = Number(payload.total || 0);
-    state.kindOptions = normalizeKindOptions(payload);
-    renderKindFilter();
     renderList();
   } catch (error) {
     renderError(error);
@@ -187,7 +170,7 @@ async function revoke() {
 
 $("inboxTab").addEventListener("click", () => { state.box = "inbox"; state.tab = "all"; state.page = 1; renderTabs(); loadNotifications(); });
 $("sentTab").addEventListener("click", () => { state.box = "sent"; state.tab = "all"; state.page = 1; renderTabs(); loadNotifications(); });
-$("filterForm").addEventListener("submit", (event) => { event.preventDefault(); state.tab = $("readFilter").value; state.kind = $("kindFilter").value; state.page = 1; loadNotifications(); });
+$("filterForm").addEventListener("submit", (event) => { event.preventDefault(); state.tab = $("readFilter").value; state.page = 1; loadNotifications(); });
 $("readAllBtn").addEventListener("click", markAllRead);
 $("notificationsList").addEventListener("click", (event) => {
   const row = event.target.closest("[data-id]");
@@ -212,5 +195,4 @@ $("revokeMask").addEventListener("click", (event) => { if (event.target === $("r
 document.addEventListener("keydown", (event) => { if (event.key === "Escape" && $("revokeMask").classList.contains("show")) closeRevoke(); });
 
 renderTabs();
-renderKindFilter();
 loadNotifications();
