@@ -3,7 +3,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0070_export_jobs"
-down_revision = "0069_audit_events_created_at_index"
+down_revision = "0069_audit_events_created_idx"
 branch_labels = None
 depends_on = None
 

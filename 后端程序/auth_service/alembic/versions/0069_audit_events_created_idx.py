@@ -1,12 +1,12 @@
 """index audit event time queries
 
-Revision ID: 0069_audit_events_created_at_index
+Revision ID: 0069_audit_events_created_idx
 Revises: 0068_help_request_lifecycle
 """
 
 from alembic import op
 
-revision = "0069_audit_events_created_at_index"
+revision = "0069_audit_events_created_idx"
 down_revision = "0068_help_request_lifecycle"
 branch_labels = None
 depends_on = None

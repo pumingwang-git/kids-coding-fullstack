@@ -22,7 +22,7 @@ def test_0069_created_at_index_upgrades_from_0068(tmp_path, monkeypatch):
         config = Config(str(ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(ROOT / "alembic"))
         command.stamp(config, "0068_help_request_lifecycle")
-        command.upgrade(config, "0069_audit_events_created_at_index")
+        command.upgrade(config, "0069_audit_events_created_idx")
         assert {item["name"] for item in sa.inspect(engine).get_indexes("audit_events")} >= {
             "ix_audit_events_created_at"
         }
