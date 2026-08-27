@@ -62,7 +62,7 @@ async function boot() {
   // 后端当然会 403，但让人拖了再报错是很差的体验。
   try {
     const me = await adminMe();
-    readOnly = me?.role === "reviewer";
+    readOnly = me?.capabilities?.content_edit !== true;
   } catch {
     /* 未登录时 admin-api 已跳登录页 */
   }

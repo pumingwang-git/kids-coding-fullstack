@@ -9,7 +9,7 @@ from ..celery_app import celery_app
 from ..config import get_settings
 from ..database import build_database
 from ..models import AdminUser, ExportJob
-from ..permissions import exportable_class_ids, visible_class_ids
+from ..permissions import exportable_class_ids, has_capability, log_scope_denial, visible_class_ids
 from ..routers.admin_auth import audit
 from ..routers.admin_classes import build_class_relationship_csv
 from ..routers.admin_teaching import build_class_insight_csv
@@ -27,15 +27,28 @@ def run_export_job(job_id: str):
         admin = db.get(AdminUser, job.requested_by)
         if admin is None or getattr(admin, "status", "active") != "active":
             job.status, job.error = "failed", "管理员已不可用"
-            db.commit(); return
+            db.commit()
+            return
+        required_capability = {
+            "class_insight": "export_class_insight",
+            "class_relationships": "export_class_relationships",
+        }.get(job.export_type)
+        if required_capability is None:
+            raise ValueError(f"未知导出类型: {job.export_type}")
+        if not has_capability(admin, required_capability, db):
+            job.status, job.error = "failed", "执行时管理员已无该导出权限"
+            db.commit()
+            return
         # Explicitly recompute both scopes in the worker process.
         visible_ids = visible_class_ids(admin, db)
         export_ids = exportable_class_ids(admin, db)
-        job.status = "running"; db.commit()
+        job.status = "running"
+        db.commit()
         if job.export_type == "class_insight":
             params = job.params or {}
             class_id = int(params["class_id"])
             if export_ids is not None and class_id not in export_ids:
+                log_scope_denial(admin, "class_group", class_id)
                 raise PermissionError("执行时管理员已无该班级导出权限")
             content, count = build_class_insight_csv(db, admin, class_id, params.get("inactive_days_gte"), export_ids)
             resource_type, resource_id = "class_insight_export", class_id
@@ -59,4 +72,5 @@ def run_export_job(job_id: str):
             db.commit()
         raise
     finally:
-        db.close(); engine.dispose()
+        db.close()
+        engine.dispose()

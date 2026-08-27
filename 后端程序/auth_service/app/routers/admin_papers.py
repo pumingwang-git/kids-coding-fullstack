@@ -21,10 +21,10 @@ from ..models import (
     ExamLink, FillAnswer, LessonPaperBlock, Paper, PaperAttempt, PaperQuestion, Problem,
     ProgrammingDetail, ReferenceSolution, TestCase, User,
 )
-from ..permissions import EDITOR_ROLES, REVIEWER_ROLES, SUPER_ROLE
 from ..permissions import is_editor as _is_editor
 from ..permissions import is_reviewer as _is_reviewer
 from ..permissions import is_super as _is_super
+from ..permissions import authorization_snapshot
 from ..schemas import ExamLinkPayload, PaperPayload, TransferPaperOwnerPayload
 from ..scoring import parse_blank_alternatives
 from .admin_auth import audit, client_ip, current_admin, db_session, limit, require_csrf
@@ -45,7 +45,7 @@ def _forbid(message: str = "没有执行该试卷操作的权限。") -> None:
 
 
 def _can_read(paper: Paper, admin: AdminUser) -> bool:
-    if _is_super(admin) or admin.role in REVIEWER_ROLES:
+    if _is_super(admin) or _is_reviewer(admin):
         return True
     return paper.created_by == admin.id or paper.owner_id == admin.id
 
@@ -53,7 +53,7 @@ def _can_read(paper: Paper, admin: AdminUser) -> bool:
 def _can_edit(paper: Paper, admin: AdminUser) -> bool:
     if paper.status not in EDITABLE_STATUSES:
         return False
-    return _is_super(admin) or (admin.role in EDITOR_ROLES and paper.owner_id == admin.id)
+    return _is_super(admin) or (_is_editor(admin) and paper.owner_id == admin.id)
 
 
 def _can_destroy(paper: Paper, admin: AdminUser) -> bool:
@@ -66,7 +66,7 @@ def _can_destroy(paper: Paper, admin: AdminUser) -> bool:
     """
     if paper.status not in {"draft", "archived"}:
         return False
-    return _is_super(admin) or (admin.role in EDITOR_ROLES and paper.owner_id == admin.id)
+    return _is_super(admin) or (_is_editor(admin) and paper.owner_id == admin.id)
 
 
 def _allowed_actions(paper: Paper, admin: AdminUser) -> list[str]:
@@ -188,7 +188,7 @@ def _link_phase(link: ExamLink, now: datetime) -> str:
 
 def _can_manage_links(paper: Paper, admin: AdminUser) -> bool:
     """链接管理权中与卷状态无关的那一半：超管，或本卷负责人（录入员）。"""
-    return _is_super(admin) or (admin.role in EDITOR_ROLES and paper.owner_id == admin.id)
+    return _is_super(admin) or (_is_editor(admin) and paper.owner_id == admin.id)
 
 
 def _link_actions(link: ExamLink, paper: Paper, admin: AdminUser) -> list[str]:
@@ -340,7 +340,7 @@ def _publish_error(paper: Paper, db: Session) -> str | None:
 
 
 def _visible_statement(admin: AdminUser):
-    if _is_super(admin) or admin.role in REVIEWER_ROLES:
+    if _is_super(admin) or _is_reviewer(admin):
         return select(Paper)
     return select(Paper).where((Paper.owner_id == admin.id) | (Paper.created_by == admin.id))
 
@@ -550,7 +550,14 @@ def transfer_paper_owner(paper_id: int, payload: TransferPaperOwnerPayload, requ
     require_csrf(request); admin = current_admin(request, db); paper = _lock_paper(db, paper_id)
     _require_action(paper, admin, "transfer_owner"); _require_revision(request, paper)
     owner = db.get(AdminUser, payload.owner_id)
-    if not owner or owner.status != "active" or owner.role not in EDITOR_ROLES | REVIEWER_ROLES | {SUPER_ROLE}:
+    if (
+        not owner
+        or owner.status != "active"
+        or not (
+            authorization_snapshot(db, owner).allows("content_edit")
+            or authorization_snapshot(db, owner).allows("content_review")
+        )
+    ):
         raise HTTPException(422, "负责人必须是活跃的管理员。")
     paper.owner_id = owner.id; _touch(paper)
     _audit_paper(db, request, "paper_transfer_owner", "success", admin, paper, owner_id=owner.id)

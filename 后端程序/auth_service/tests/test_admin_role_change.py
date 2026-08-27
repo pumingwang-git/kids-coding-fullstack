@@ -48,9 +48,15 @@ def login_root(client):
 
 
 def put_role(client, headers, admin_user_id: int, role: str):
+    db = client.app.state.session_factory()
+    try:
+        target = db.get(AdminUser, admin_user_id)
+        revision = target.role_revision if target else 1
+    finally:
+        db.close()
     return client.put(
         f"/api/admin/admin-users/{admin_user_id}/role",
-        headers=headers,
+        headers={**headers, "If-Match": str(revision)},
         json={"role": role},
     )
 
@@ -166,7 +172,7 @@ def test_invalid_role_is_rejected_and_audited(tmp_path):
         response = put_role(client, headers, target_id, "techer")
 
         assert response.status_code == 422
-        assert "非法管理员角色 'techer'" in response.json()["detail"]
+        assert response.json()["detail"] == "角色不存在、已退役或不可分配。"
         assert current_role(client, target_id) == "editor"
 
         events = role_events(client)
@@ -265,7 +271,7 @@ def test_success_audit_summary_has_no_sensitive_or_org_fields(tmp_path):
 def test_role_options_come_from_permissions_single_source(tmp_path):
     """角色下拉的取值域与展示顺序由 permissions.py 提供，前端不得自备一份。"""
     from app.permissions import (
-        KNOWN_ROLE_NAMES,
+        ASSIGNABLE_ROLE_NAMES,
         ROLE_LABELS,
         ROLE_SCOPE_NOTES,
         ROLE_SCOPES,
@@ -275,9 +281,9 @@ def test_role_options_come_from_permissions_single_source(tmp_path):
     with admin_client(tmp_path) as client:
         login_root(client)
         body = client.get("/api/admin/admin-users").json()
-        assert [role["value"] for role in body["roles"]] == list(KNOWN_ROLE_NAMES)
+        assert [role["value"] for role in body["roles"]] == list(ASSIGNABLE_ROLE_NAMES)
         assert [role["label"] for role in body["roles"]] == [
-            ROLE_LABELS[name] for name in KNOWN_ROLE_NAMES
+            ROLE_LABELS[name] for name in ASSIGNABLE_ROLE_NAMES
         ]
         # 数据范围也走同一份来源，页面不需要（也不许）自己推导。
         for role in body["roles"]:

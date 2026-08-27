@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..models import Course, Enrollment, User
 from ..audit_summary import diff_summary
 from ..course_access import enrollment_predicates
-from ..permissions import can_manage_enrollments
+from ..permissions import has_capability
 from ..security import as_utc, utcnow
 from .admin_auth import audit, client_ip, current_admin, db_session, require_csrf
 
@@ -71,7 +71,7 @@ def _require_enrollment_manager(
     resource_id: int | None = None,
 ):
     admin = current_admin(request, db)
-    if not can_manage_enrollments(admin):
+    if not has_capability(admin, "manage_enrollments"):
         audit(
             db,
             request.app.state.settings,

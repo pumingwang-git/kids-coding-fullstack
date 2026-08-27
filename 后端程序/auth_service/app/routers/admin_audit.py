@@ -1,4 +1,4 @@
-"""全局审计查询。读取接口只给超级管理员，审计表不提供写入口。"""
+"""全局审计查询。读取接口受功能权限控制，审计表不提供写入口。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models import AdminUser, AuditEvent, User
-from ..permissions import is_super
+from ..permissions import has_capability
 from .admin_auth import audit, client_ip, current_admin, db_session
 
 router = APIRouter(prefix="/api/admin/audit", tags=["admin-audit"])
@@ -60,7 +60,7 @@ def list_audit_events(
     db: Session = Depends(db_session),
 ):
     admin = current_admin(request, db)
-    if not is_super(admin):
+    if not has_capability(admin, "audit_events_read"):
         audit(
             db, request.app.state.settings, "audit_events_read", "failure", client_ip(request), admin.id,
             resource_type="audit_event", summary={"schema_version": 1, "reason_code": "forbidden"},

@@ -51,7 +51,7 @@ let descriptionEditor = null;
 async function loadRole() {
   try {
     const me = await adminMe();
-    readOnly = me?.role === "reviewer";
+    readOnly = me?.capabilities?.content_edit !== true;
   } catch {
     /* 未登录时 admin-api 已经跳登录页，这里不必再处理 */
   }

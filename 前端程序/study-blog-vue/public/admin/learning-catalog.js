@@ -409,7 +409,7 @@ for (const [id, kind, label] of [["typeRows", "types", "课程类型"], ["tagRow
 
 (async () => {
   try {
-    readOnly = (await adminMe())?.role === "reviewer";
+    readOnly = (await adminMe())?.capabilities?.content_edit !== true;
     applyReadOnlyState();
     try {
       moduleRegistry = await adminRequest("/learning-catalog/module-registry");

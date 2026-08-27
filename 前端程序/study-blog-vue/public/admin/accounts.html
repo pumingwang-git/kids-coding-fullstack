@@ -7,6 +7,14 @@
   <link rel="stylesheet" href="admin.css" />
 </head>
 <body>
+<!--
+THESIS: 账号生命周期与角色策略分区呈现，拒绝把两种治理动作塞进同一张巨型权限表。
+OWN-WORLD: 沿用管理端纸白表面、蓝色行动、紧凑表格和 4-8px 圆角。
+STORY: 超管先识别账号状态，再创建或调整角色策略，最后把角色分配给账号。
+FIRST VIEWPORT: 页头双行动，下方先账号表，再角色策略与只读权限矩阵。
+FORM: 既有后台的 Operate 扩展，不更换视觉系统；角色编辑使用受保护焦点弹窗。
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
 <div class="app">
   <aside class="sidebar" id="sidebar"></aside>
   <div class="main">
@@ -15,7 +23,11 @@
       <div class="page-head">
         <div>
           <h1>账号与角色</h1>
-          <p>后台账号的角色授权；仅超级管理员可变更，每次变更都记入审计</p>
+          <p>后台账号、角色能力与安全状态；所有授权变更均记入审计</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn" id="createRoleBtn" type="button" hidden>新增角色</button>
+          <button class="btn primary" id="createAccountBtn" type="button" hidden>新增账号</button>
         </div>
       </div>
 
@@ -24,7 +36,7 @@
       </div>
 
       <div class="card" id="listCard" hidden>
-        <div class="table-wrap">
+        <div class="table-wrap account-table-wrap">
           <table>
             <thead>
               <tr>
@@ -33,7 +45,7 @@
                 <th style="width: 150px">角色</th>
                 <th style="width: 90px">状态</th>
                 <th style="width: 170px">创建时间</th>
-                <th style="width: 110px">操作</th>
+                <th style="width: 230px">操作</th>
               </tr>
             </thead>
             <tbody id="accountRows"></tbody>
@@ -45,7 +57,79 @@
           <button class="btn" id="retryBtn" type="button">重新加载</button>
         </div>
       </div>
+
+      <section class="card account-role-card" id="rolePolicyCard" hidden>
+        <div class="account-section-head">
+          <div><h2>角色策略</h2><p class="muted">自定义角色可组合业务权限；账号与角色治理权限仅属于超级管理员。</p></div>
+        </div>
+        <div class="role-policy-list" id="rolePolicyList"></div>
+        <div class="empty" id="rolePolicyEmpty" hidden>暂无可管理角色</div>
+        <div class="list-error" id="rolePolicyError" hidden>
+          <span id="rolePolicyErrorText">角色策略加载失败。</span>
+          <button class="btn" id="rolePolicyRetry" type="button">重新加载</button>
+        </div>
+      </section>
+
+      <section class="card account-permission-card" id="permissionCard" hidden>
+        <div class="account-section-head">
+          <div><h2>角色权限矩阵</h2><p class="muted">功能权限与数据范围均来自服务端；班级范围还会由实际带班关系继续收窄。</p></div>
+        </div>
+        <div class="table-wrap"><table class="permission-matrix" id="permissionMatrix"></table></div>
+      </section>
     </main>
+  </div>
+</div>
+
+<!-- ==================== 角色策略 Modal ==================== -->
+<div class="modal-mask" id="rolePolicyMask" hidden inert>
+  <div class="modal role-policy-modal" role="dialog" aria-modal="true" aria-labelledby="rolePolicyTitle">
+    <header class="modal-head"><h2 id="rolePolicyTitle">新增角色</h2><button class="icon-btn" id="rolePolicyClose" type="button" aria-label="关闭">✕</button></header>
+    <div class="modal-body role-policy-form">
+      <div class="role-policy-fields">
+        <div class="form-field"><label for="rolePolicyKey">角色标识</label><input id="rolePolicyKey" maxlength="32" autocomplete="off" placeholder="例如 course_operator" /><small class="muted">仅小写字母、数字和下划线，创建后不可修改。</small></div>
+        <div class="form-field"><label for="rolePolicyLabel">角色名称</label><input id="rolePolicyLabel" maxlength="100" autocomplete="off" /></div>
+        <div class="form-field"><label for="rolePolicyDescription">说明</label><textarea id="rolePolicyDescription" maxlength="500" rows="3"></textarea></div>
+        <div class="form-field"><label for="rolePolicyScope">学员数据范围</label><select id="rolePolicyScope"></select><small class="muted">这里只决定范围类型；“限本班”的具体班级仍由带班关系决定。</small></div>
+      </div>
+      <fieldset class="role-capability-fieldset">
+        <legend>功能权限</legend>
+        <div class="role-capability-groups" id="roleCapabilityGroups"></div>
+      </fieldset>
+      <small class="field-error" id="rolePolicyFormError" hidden></small>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn danger" id="rolePolicyDelete" type="button" hidden>退役角色</button>
+      <span class="spacer"></span>
+      <button class="btn" id="rolePolicyCancel" type="button">取消</button>
+      <button class="btn primary" id="rolePolicySave" type="button">创建角色</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ==================== 新增账号 Modal ==================== -->
+<div class="modal-mask" id="createMask" hidden inert>
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="createTitle">
+    <header class="modal-head"><h2 id="createTitle">新增后台账号</h2><button class="icon-btn" id="createClose" type="button" aria-label="关闭">✕</button></header>
+    <div class="modal-body form-only">
+      <div class="form-field"><label for="createUsername">用户名</label><input id="createUsername" maxlength="50" autocomplete="off" placeholder="例如 zhang.teacher" /></div>
+      <div class="form-field"><label for="createDisplayName">显示名称</label><input id="createDisplayName" maxlength="100" autocomplete="off" /></div>
+      <div class="form-field"><label for="createRole">角色</label><select id="createRole"></select></div>
+      <div class="form-field"><label>权限范围</label><span class="muted" id="createRoleNote">—</span></div>
+      <small class="field-error" id="createError" hidden></small>
+    </div>
+    <footer class="modal-foot"><span class="muted">系统会生成一次性初始口令，首次登录必须修改。</span><span class="spacer"></span><button class="btn" id="createCancel" type="button">取消</button><button class="btn primary" id="createSave" type="button">创建账号</button></footer>
+  </div>
+</div>
+
+<!-- ==================== 一次性口令 Modal ==================== -->
+<div class="modal-mask" id="passwordMask" hidden inert>
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
+    <header class="modal-head"><h2 id="passwordTitle">一次性初始口令</h2></header>
+    <div class="modal-body form-only">
+      <p>请通过受控渠道交给账号本人。关闭后无法再次查看。</p>
+      <div class="initial-password-row"><code id="initialPassword"></code><button class="btn" id="copyInitialPassword" type="button">复制</button></div>
+    </div>
+    <footer class="modal-foot"><span class="spacer"></span><button class="btn primary" id="passwordDone" type="button">我已妥善保存</button></footer>
   </div>
 </div>
 

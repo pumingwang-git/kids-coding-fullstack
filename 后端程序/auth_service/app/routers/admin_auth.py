@@ -8,31 +8,46 @@
 """
 import hmac
 import json
+import secrets
 import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..audit_summary import AUDIT_OUTCOME_LABELS, AUDIT_OUTCOMES, ensure_known_event_type, event_type_options
-from ..models import AdminSession, AdminUser, AuditEvent, SliderCaptchaChallenge
+from ..audit_summary import (
+    AUDIT_OUTCOME_LABELS,
+    AUDIT_OUTCOMES,
+    ensure_known_event_type,
+    event_type_options,
+)
+from ..models import (
+    AdminRole,
+    AdminRoleCapability,
+    AdminSession,
+    AdminUser,
+    AuditEvent,
+    SliderCaptchaChallenge,
+)
 from ..permissions import (
-    KNOWN_ROLE_NAMES,
-    ROLE_CAPABILITIES,
-    ROLE_LABELS,
-    ROLE_MENUS,
-    ROLE_SCOPE_NOTES,
-    ROLE_SCOPES,
+    CAPABILITY_CATALOG,
     SCOPE_LABELS,
     SUPER_ROLE,
+    assignable_role,
+    authorization_snapshot,
     can_manage_classes,
+    has_capability,
     is_super,
-    validate_admin_role,
+    role_options,
 )
 from ..rate_limit import RateLimiterUnavailable
 from ..schemas import (
+    AdminAccountCreateRequest,
     AdminLoginRequest,
+    AdminPasswordChangeRequest,
+    AdminRolePolicyRequest,
     AdminRoleUpdateRequest,
     AdminStatusUpdateRequest,
     SliderVerifyRequest,
@@ -110,7 +125,9 @@ def _admin_user_payload(admin: AdminUser) -> dict:
         "username": admin.username,
         "display_name": admin.display_name,
         "role": admin.role,
+        "role_revision": admin.role_revision,
         "status": admin.status,
+        "must_change_password": admin.must_change_password,
         "created_at": admin.created_at,
         "updated_at": admin.updated_at,
     }
@@ -221,6 +238,64 @@ def _audit_status_change(
     _audit_admin_user_event(
         db, request, "account_status_change", actor_id, target_id, outcome, summary
     )
+
+
+def _audit_role_policy(
+    db: Session,
+    request: Request,
+    event: str,
+    actor_id: int,
+    role_key: str,
+    outcome: str,
+    summary: dict,
+) -> None:
+    audit(
+        db,
+        request.app.state.settings,
+        event,
+        outcome,
+        client_ip(request),
+        actor_id,
+        resource_type="admin_role",
+        summary={"schema_version": 1, "role_key": role_key, **summary},
+    )
+
+
+def _role_options(
+    db: Session, *, assignable_only: bool = True, include_retired: bool = False,
+) -> list[dict]:
+    return role_options(
+        db, assignable_only=assignable_only, include_retired=include_retired,
+    )
+
+
+def _expected_revision(request: Request, resource_name: str) -> int:
+    raw = (request.headers.get("If-Match") or "").strip().strip('"')
+    if not raw:
+        raise HTTPException(428, f"请携带 If-Match {resource_name}版本号。")
+    try:
+        revision = int(raw)
+    except ValueError as exc:
+        raise HTTPException(400, "If-Match 必须是整数版本号。") from exc
+    if revision < 1:
+        raise HTTPException(400, "If-Match 必须是正整数版本号。")
+    return revision
+
+
+def _validated_role_capabilities(capabilities: list[str]) -> set[str]:
+    requested = set(capabilities)
+    unknown = requested - CAPABILITY_CATALOG.keys()
+    if unknown:
+        raise HTTPException(422, f"未知权限：{'、'.join(sorted(unknown))}。")
+    root_only = requested & {"manage_admin_accounts", "manage_admin_roles"}
+    if root_only:
+        raise HTTPException(422, "账号与角色治理权限仅属于受保护的超级管理员角色。")
+    return requested
+
+
+def _initial_password() -> str:
+    """生成满足复杂度规则的一次性初始口令。"""
+    return f"Aa1!{secrets.token_urlsafe(15)}"
 
 
 def set_cookie(response: Response, key: str, value: str, request: Request, httponly=True, max_age=None):
@@ -398,44 +473,50 @@ def current_admin(request: Request, db: Session = Depends(db_session)) -> AdminU
         or admin.status != "active"
     ):
         raise HTTPException(401, "登录已失效，请重新登录。")
+    if admin.must_change_password and request.url.path not in {
+        "/api/admin/me",
+        "/api/admin/password-change",
+        "/api/admin/logout",
+    }:
+        raise HTTPException(403, "password_change_required")
+    authorization_snapshot(db, admin)
     return admin
 
 
 @router.get("/me")
-def me(admin: AdminUser = Depends(current_admin)):
-    role = admin.role
+def me(request: Request, db: Session = Depends(db_session)):
+    admin = current_admin(request, db)
+    snapshot = authorization_snapshot(db, admin)
     return {
         "id": admin.id,
         "username": admin.username,
         "display_name": admin.display_name,
-        "role": role,
-        "role_label": ROLE_LABELS[role],
-        "scope": ROLE_SCOPES[role],
-        "scope_label": SCOPE_LABELS[ROLE_SCOPES[role]],
-        "capabilities": dict(ROLE_CAPABILITIES[role]),
-        "menus": list(ROLE_MENUS[role]),
-        "can_manage_admin_roles": is_super(admin),
+        "role": snapshot.role_key,
+        "role_label": snapshot.role_label,
+        "scope": snapshot.scope,
+        "scope_label": snapshot.scope_label,
+        "must_change_password": admin.must_change_password,
+        "capabilities": dict(snapshot.capabilities),
+        "menus": list(snapshot.menus),
+        "allowed_pages": list(snapshot.allowed_pages),
+        "can_manage_admin_roles": has_capability(admin, "manage_admin_roles"),
         "can_manage_classes": can_manage_classes(admin),
     }
 
 
 @router.get("/dicts")
-def admin_dicts(admin: AdminUser = Depends(current_admin)):
+def admin_dicts(request: Request, db: Session = Depends(db_session)):
     """Return immutable dictionaries consumed by all management pages."""
+    current_admin(request, db)
     return {
-        "roles": [
-            {
-                "value": role,
-                "label": ROLE_LABELS[role],
-                "scope": ROLE_SCOPES[role],
-                "scope_label": SCOPE_LABELS[ROLE_SCOPES[role]],
-                "scope_note": ROLE_SCOPE_NOTES[role],
-            }
-            for role in KNOWN_ROLE_NAMES
+        "roles": _role_options(db),
+        "capabilities": [
+            {"key": key, **metadata}
+            for key, metadata in CAPABILITY_CATALOG.items()
         ],
         "menus": [
-            {"role": role, "pages": list(ROLE_MENUS[role])}
-            for role in KNOWN_ROLE_NAMES
+            {"role": role["value"], "pages": role.get("menus", [])}
+            for role in _role_options(db, assignable_only=False)
         ],
         "event_types": event_type_options(),
         "outcomes": [
@@ -452,23 +533,320 @@ def admin_dicts(admin: AdminUser = Depends(current_admin)):
 @router.get("/admin-users")
 def list_admin_users(request: Request, db: Session = Depends(db_session)):
     actor = current_admin(request, db)
-    if not is_super(actor):
+    if not has_capability(actor, "manage_admin_accounts"):
         raise HTTPException(403, "仅超级管理员可查看后台账号角色。")
     admins = db.scalars(select(AdminUser).order_by(AdminUser.id)).all()
     return {
         "items": [_admin_user_payload(admin) for admin in admins],
-        "roles": [
-            {
-                "value": role,
-                "label": ROLE_LABELS[role],
-                # 数据范围说明由 permissions.py 单源提供，前端不得自备一份。
-                "scope": ROLE_SCOPES[role],
-                "scope_label": SCOPE_LABELS[ROLE_SCOPES[role]],
-                "scope_note": ROLE_SCOPE_NOTES[role],
-            }
-            for role in KNOWN_ROLE_NAMES
+        "roles": _role_options(db),
+        "role_directory": _role_options(
+            db, assignable_only=False, include_retired=True,
+        ),
+        "capabilities": [
+            {"key": key, **metadata}
+            for key, metadata in CAPABILITY_CATALOG.items()
         ],
     }
+
+
+@router.get("/roles")
+def list_admin_roles(request: Request, db: Session = Depends(db_session)):
+    actor = current_admin(request, db)
+    if not has_capability(actor, "manage_admin_roles"):
+        raise HTTPException(403, "仅超级管理员可管理角色策略。")
+    return {
+        "items": _role_options(db, assignable_only=False),
+        "capabilities": [
+            {
+                "key": key,
+                **metadata,
+                "assignable": key not in {"manage_admin_accounts", "manage_admin_roles"},
+            }
+            for key, metadata in CAPABILITY_CATALOG.items()
+        ],
+        "scopes": [
+            {"value": value, "label": label}
+            for value, label in SCOPE_LABELS.items()
+        ],
+    }
+
+
+@router.post("/roles", status_code=201)
+def create_admin_role(
+    payload: AdminRolePolicyRequest,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    actor = current_admin(request, db)
+    if not has_capability(actor, "manage_admin_roles"):
+        _audit_role_policy(
+            db, request, "role_create", actor.id, payload.key, "failure",
+            {"reason_code": "forbidden"},
+        )
+        db.commit()
+        raise HTTPException(403, "仅超级管理员可新增角色。")
+    capabilities = _validated_role_capabilities(payload.capabilities)
+    if db.get(AdminRole, payload.key) is not None:
+        raise HTTPException(409, "角色标识已存在且不可复用。")
+    sort_order = (db.scalar(select(func.max(AdminRole.sort_order))) or 0) + 10
+    role = AdminRole(
+        key=payload.key,
+        label=payload.label.strip(),
+        description=payload.description.strip(),
+        scope=payload.scope,
+        sort_order=sort_order,
+    )
+    db.add(role)
+    for capability in capabilities:
+        db.add(AdminRoleCapability(role_key=role.key, capability_key=capability))
+    _audit_role_policy(
+        db, request, "role_create", actor.id, role.key, "success",
+        {
+            "new_revision": 1,
+            "new_scope": role.scope,
+            "capabilities": sorted(capabilities),
+        },
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "角色标识已存在且不可复用。") from exc
+    return next(item for item in _role_options(db, assignable_only=False) if item["value"] == role.key)
+
+
+@router.put("/roles/{role_key}")
+def replace_admin_role_policy(
+    role_key: str,
+    payload: AdminRolePolicyRequest,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    actor = current_admin(request, db)
+    if not has_capability(actor, "manage_admin_roles"):
+        _audit_role_policy(
+            db, request, "role_update", actor.id, role_key, "failure",
+            {"reason_code": "forbidden"},
+        )
+        db.commit()
+        raise HTTPException(403, "仅超级管理员可修改角色策略。")
+    if payload.key != role_key:
+        raise HTTPException(422, "角色标识创建后不可修改。")
+    expected_revision = _expected_revision(request, "角色策略")
+    capabilities = _validated_role_capabilities(payload.capabilities)
+    role = db.scalar(select(AdminRole).where(AdminRole.key == role_key).with_for_update())
+    if role is None or role.deleted_at is not None:
+        raise HTTPException(404, "角色不存在。")
+    if role.is_protected:
+        raise HTTPException(409, "受保护的系统角色不能修改。")
+    if role.revision != expected_revision:
+        raise HTTPException(409, {
+            "message": "角色策略已被其他管理员修改，请刷新后重试。",
+            "current_revision": role.revision,
+        })
+    old_capabilities = set(db.scalars(select(AdminRoleCapability.capability_key).where(
+        AdminRoleCapability.role_key == role.key
+    )))
+    old_scope = role.scope
+    role.label = payload.label.strip()
+    role.description = payload.description.strip()
+    role.scope = payload.scope
+    role.revision += 1
+    db.execute(delete(AdminRoleCapability).where(AdminRoleCapability.role_key == role.key))
+    for capability in capabilities:
+        db.add(AdminRoleCapability(role_key=role.key, capability_key=capability))
+    _audit_role_policy(
+        db, request, "role_update", actor.id, role.key, "success",
+        {
+            "old_revision": expected_revision,
+            "new_revision": role.revision,
+            "old_scope": old_scope,
+            "new_scope": role.scope,
+            "added_capabilities": sorted(capabilities - old_capabilities),
+            "removed_capabilities": sorted(old_capabilities - capabilities),
+        },
+    )
+    db.commit()
+    return next(item for item in _role_options(db, assignable_only=False) if item["value"] == role.key)
+
+
+@router.delete("/roles/{role_key}", status_code=204)
+def retire_admin_role(
+    role_key: str,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    actor = current_admin(request, db)
+    if not has_capability(actor, "manage_admin_roles"):
+        _audit_role_policy(
+            db, request, "role_delete", actor.id, role_key, "failure",
+            {"reason_code": "forbidden"},
+        )
+        db.commit()
+        raise HTTPException(403, "仅超级管理员可退役角色。")
+    expected_revision = _expected_revision(request, "角色策略")
+    role = db.scalar(select(AdminRole).where(AdminRole.key == role_key).with_for_update())
+    if role is None or role.deleted_at is not None:
+        raise HTTPException(404, "角色不存在。")
+    if role.is_system or role.is_protected:
+        raise HTTPException(409, "系统角色不能退役。")
+    if role.revision != expected_revision:
+        raise HTTPException(409, {
+            "message": "角色策略已被其他管理员修改，请刷新后重试。",
+            "current_revision": role.revision,
+        })
+    account_count = db.scalar(
+        select(func.count()).select_from(AdminUser).where(AdminUser.role == role.key)
+    )
+    if account_count:
+        raise HTTPException(409, "仍有后台账号使用该角色，请先完成角色改派。")
+    role.deleted_at = utcnow()
+    role.is_assignable = False
+    role.revision += 1
+    _audit_role_policy(
+        db, request, "role_delete", actor.id, role.key, "success",
+        {"old_revision": expected_revision, "new_revision": role.revision},
+    )
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/admin-users", status_code=201)
+def create_admin_user(
+    payload: AdminAccountCreateRequest,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    actor = current_admin(request, db)
+    if not has_capability(actor, "manage_admin_accounts"):
+        audit(
+            db, request.app.state.settings, "account_create", "failure", client_ip(request),
+            actor.id, resource_type="admin_user",
+            summary={"schema_version": 1, "reason_code": "forbidden"},
+        )
+        db.commit()
+        raise HTTPException(403, "仅超级管理员可新增后台账号。")
+    # Lock order shared with role retirement: AdminRole first, then AdminUser.
+    # This prevents a concurrent retirement from passing its reference check
+    # while this transaction is about to assign the same role.
+    role_row = assignable_role(db, payload.role, for_update=True)
+    if role_row is None:
+        raise HTTPException(422, "角色不存在、已退役或不可分配。")
+    role = role_row.key
+
+    username = payload.username.strip().casefold()
+    if db.scalar(select(AdminUser.id).where(AdminUser.username == username)) is not None:
+        raise HTTPException(409, "后台用户名已存在。")
+    initial_password = _initial_password()
+    target = AdminUser(
+        username=username,
+        display_name=payload.display_name.strip(),
+        password_hash=password_hash.hash(initial_password),
+        role=role,
+        status=ACTIVE_STATUS,
+        must_change_password=True,
+    )
+    db.add(target)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "后台用户名已存在。") from exc
+    _audit_admin_user_event(
+        db, request, "account_create", actor.id, target.id, "success",
+        {"schema_version": 1, "new_role": role, "new_status": ACTIVE_STATUS},
+    )
+    db.commit()
+    db.refresh(target)
+    return {**_admin_user_payload(target), "initial_password": initial_password}
+
+
+@router.post("/admin-users/{admin_user_id}/password-reset")
+def reset_admin_user_password(
+    admin_user_id: int,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    actor = current_admin(request, db)
+    if not has_capability(actor, "manage_admin_accounts"):
+        _audit_admin_user_event(
+            db, request, "account_password_reset", actor.id, admin_user_id, "failure",
+            {"schema_version": 1, "reason_code": "forbidden"},
+        )
+        db.commit()
+        raise HTTPException(403, "仅超级管理员可重置后台账号密码。")
+    target = db.scalar(
+        select(AdminUser).where(AdminUser.id == admin_user_id).with_for_update()
+    )
+    if target is None:
+        raise HTTPException(404, "后台账号不存在。")
+    initial_password = _initial_password()
+    target.password_hash = password_hash.hash(initial_password)
+    target.must_change_password = True
+    target.failed_login_count = 0
+    target.locked_until = None
+    now = utcnow()
+    db.execute(
+        update(AdminSession)
+        .where(AdminSession.admin_user_id == target.id, AdminSession.revoked_at.is_(None))
+        .values(revoked_at=now, revocation_reason="password_reset")
+    )
+    _audit_admin_user_event(
+        db, request, "account_password_reset", actor.id, target.id, "success",
+        {"schema_version": 1},
+    )
+    db.commit()
+    return {**_admin_user_payload(target), "initial_password": initial_password}
+
+
+@router.put("/password-change", status_code=204)
+def change_admin_password(
+    payload: AdminPasswordChangeRequest,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_csrf(request)
+    admin = current_admin(request, db)
+    target = db.scalar(select(AdminUser).where(AdminUser.id == admin.id).with_for_update())
+    if target is None or not password_hash.verify(payload.current_password, target.password_hash):
+        audit(
+            db, request.app.state.settings, "account_password_change", "failure",
+            client_ip(request), admin.id, resource_type="admin_user", resource_id=admin.id,
+            summary={"schema_version": 1, "reason_code": "invalid_current_password"},
+        )
+        db.commit()
+        raise HTTPException(400, "当前密码不正确。")
+    if password_hash.verify(payload.new_password, target.password_hash):
+        raise HTTPException(409, "新密码不能与当前密码相同。")
+    claims = verify_admin_access_token(
+        request.app.state.settings, request.cookies.get("admin_access_token") or ""
+    )
+    now = utcnow()
+    db.execute(
+        update(AdminSession)
+        .where(
+            AdminSession.admin_user_id == target.id,
+            AdminSession.id != claims["sid"],
+            AdminSession.revoked_at.is_(None),
+        )
+        .values(revoked_at=now, revocation_reason="password_change")
+    )
+    target.password_hash = password_hash.hash(payload.new_password)
+    target.must_change_password = False
+    target.failed_login_count = 0
+    target.locked_until = None
+    audit(
+        db, request.app.state.settings, "account_password_change", "success",
+        client_ip(request), target.id, resource_type="admin_user", resource_id=target.id,
+        summary={"schema_version": 1},
+    )
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.put("/admin-users/{admin_user_id}/role")
@@ -482,11 +860,9 @@ def update_admin_user_role(
     actor = current_admin(request, db)
     target = db.get(AdminUser, admin_user_id)
 
-    if not is_super(actor):
-        try:
-            attempted_role = validate_admin_role(payload.role)
-        except ValueError:
-            attempted_role = None
+    if not has_capability(actor, "manage_admin_roles"):
+        attempted = assignable_role(db, payload.role)
+        attempted_role = attempted.key if attempted else None
         _audit_role_change(
             db,
             request,
@@ -502,9 +878,10 @@ def update_admin_user_role(
         db.commit()
         raise HTTPException(403, "仅超级管理员可变更后台账号角色。")
 
-    try:
-        new_role = validate_admin_role(payload.role)
-    except ValueError as exc:
+    # Keep the role lock until the account assignment and audit commit.  Role
+    # retirement takes the same lock before checking account references.
+    role_row = assignable_role(db, payload.role, for_update=True)
+    if role_row is None:
         _audit_role_change(
             db,
             request,
@@ -517,7 +894,9 @@ def update_admin_user_role(
             ),
         )
         db.commit()
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(422, "角色不存在、已退役或不可分配。")
+    new_role = role_row.key
+    expected_revision = _expected_revision(request, "账号授权")
 
     target = db.scalar(
         select(AdminUser).where(AdminUser.id == admin_user_id).with_for_update()
@@ -533,6 +912,24 @@ def update_admin_user_role(
         )
         db.commit()
         raise HTTPException(404, "后台账号不存在。")
+    if target.role_revision != expected_revision:
+        _audit_role_change(
+            db,
+            request,
+            actor.id,
+            target.id,
+            "failure",
+            _role_change_summary(
+                old_role=target.role,
+                new_role=new_role,
+                reason_code="revision_conflict",
+            ),
+        )
+        db.commit()
+        raise HTTPException(409, {
+            "message": "账号角色已被其他管理员修改，请刷新后重试。",
+            "current_revision": target.role_revision,
+        })
     if target.role == new_role:
         _audit_role_change(
             db,
@@ -570,6 +967,7 @@ def update_admin_user_role(
 
     old_role = target.role
     target.role = new_role
+    target.role_revision += 1
     _audit_role_change(
         db,
         request,
@@ -598,7 +996,7 @@ def update_admin_user_status(
     new_status = payload.status
     target = db.get(AdminUser, admin_user_id)
 
-    if not is_super(actor):
+    if not has_capability(actor, "manage_admin_accounts"):
         _audit_status_change(
             db,
             request,

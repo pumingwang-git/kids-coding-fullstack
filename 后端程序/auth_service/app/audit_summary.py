@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
-from typing import Any, Sequence
+from typing import Any
 
 _SENSITIVE = ("password", "token", "secret", "ip", "email")
 _MAX_BYTES = 4 * 1024
@@ -17,6 +18,7 @@ CATEGORY_GRADE = "grade"
 CATEGORY_SESSION = "session"
 CATEGORY_CONTENT = "content"
 CATEGORY_COLLAB = "collab"
+SYSTEM_AUDIT_RETENTION_PURGE = "audit_retention_purge"
 AUDIT_OUTCOMES = ("success", "failure")
 AUDIT_OUTCOME_LABELS = {"success": "成功", "failure": "失败"}
 
@@ -52,6 +54,8 @@ EVENT_CATEGORY: dict[str, str] = {
     **{event: CATEGORY_AUTHZ for event in _admin_events(
         "enrollment_grant", "enrollment_status_change", "exam_assign", "exam_unassign",
         "audit_events_read", "role_change", "account_status_change", "class_teacher_assign",
+        "account_create", "account_password_reset", "account_password_change",
+        "role_create", "role_update", "role_delete",
         "class_teacher_unassign", "class_member_enroll", "class_member_withdraw",
         "class_member_transfer", "export_download",
     )},
@@ -91,7 +95,7 @@ EVENT_CATEGORY.update({
     "exam_start": CATEGORY_GRADE, "exam_submit": CATEGORY_GRADE, "exam_entry_denied": CATEGORY_GRADE,
     # 由保留期清理 cron 写入的运行审计，按授权类长期保留。
     # 无 admin_ 前缀是 D-E9 的裁决：系统事件没有操作主体，带前缀会误导。
-    "audit_retention_purge": CATEGORY_AUTHZ,
+    SYSTEM_AUDIT_RETENTION_PURGE: CATEGORY_AUTHZ,
 })
 
 

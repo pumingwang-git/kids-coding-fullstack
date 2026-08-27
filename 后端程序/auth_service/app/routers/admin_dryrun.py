@@ -35,7 +35,7 @@ from ..models import (
     TestCase,
 )
 from ..oj_testdata import JudgeDataUnavailable, read_case_content
-from ..permissions import EDITOR_ROLES, REVIEWER_ROLES, SUPER_ROLE
+from ..permissions import is_editor, is_reviewer, is_super
 from ..schemas import DryRunPayload
 from .admin_auth import audit, client_ip, current_admin, db_session, limit, require_csrf
 
@@ -58,11 +58,11 @@ def _can_dry_run(problem: Problem, admin: AdminUser) -> bool:
     已发布（approved）的题不能跑：想验证就走 revise 开草稿副本。保持"approved 是冻结态"
     这条贯穿题库的规则——已发布的题连内容都不让改，没道理让它去占判题机。
     """
-    if admin.role == SUPER_ROLE:
+    if is_super(admin):
         return problem.status in {"draft", "pending"}
-    if admin.role in EDITOR_ROLES and problem.owner_id == admin.id:
+    if is_editor(admin) and problem.owner_id == admin.id:
         return problem.status in {"draft", "pending"}
-    return admin.role in REVIEWER_ROLES and problem.status == "pending"
+    return is_reviewer(admin) and problem.status == "pending"
 
 
 def _load_problem(db: Session, problem_id: int, admin: AdminUser) -> Problem:

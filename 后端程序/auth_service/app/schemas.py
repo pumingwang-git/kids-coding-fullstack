@@ -117,6 +117,43 @@ class AdminRoleUpdateRequest(BaseModel):
     role: str = Field(min_length=1, max_length=32)
 
 
+class AdminRolePolicyRequest(BaseModel):
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{2,31}$")
+    label: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+    scope: Literal["global", "class", "none"] = "none"
+    capabilities: list[str] = Field(default_factory=list, max_length=64)
+
+
+class AdminAccountCreateRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
+    display_name: str = Field(min_length=1, max_length=100)
+    role: str = Field(min_length=1, max_length=32)
+
+    @field_validator("username", "display_name")
+    @classmethod
+    def admin_text_not_blank(cls, value):
+        if not value.strip():
+            raise ValueError("字段不能为空")
+        return value.strip()
+
+
+class AdminPasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def admin_password_meets_requirements(cls, value):
+        if (
+            not re.search(r"[A-Za-z]", value)
+            or not re.search(r"\d", value)
+            or not re.search(r"[^A-Za-z0-9\s]", value)
+        ):
+            raise ValueError("密码必须包含英文字母、数字和特殊符号")
+        return value
+
+
 class AdminStatusUpdateRequest(BaseModel):
     # 只有启用/停用两态，不做删除（见《41、管理端账号管理范围裁决》§2.1）。
     # 用 Literal 在入参层挡掉非法值：状态取值域是闭集，不像角色那样需要

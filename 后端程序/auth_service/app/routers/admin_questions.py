@@ -37,10 +37,10 @@ from ..models import (
     Video,
 )
 from ..oj_testdata import build_config_yaml, parse_testdata_zip, write_testdata_files
-from ..permissions import EDITOR_ROLES, REVIEWER_ROLES, SUPER_ROLE
 from ..permissions import is_editor as _is_editor
 from ..permissions import is_reviewer as _is_reviewer
 from ..permissions import is_super as _is_super
+from ..permissions import authorization_snapshot
 from ..schemas import (
     BLANK_KEY_RE,
     CreateTagPayload,
@@ -127,11 +127,13 @@ def _can_read(problem: Problem, admin: AdminUser) -> bool:
         return True
     if problem.created_by == admin.id or problem.owner_id == admin.id:
         return True
-    return admin.role in REVIEWER_ROLES and problem.status == "pending"
+    return _is_reviewer(admin) and problem.status == "pending"
 
 
 def _can_edit_draft(problem: Problem, admin: AdminUser) -> bool:
-    return problem.status == "draft" and (_is_super(admin) or (admin.role in EDITOR_ROLES and problem.owner_id == admin.id))
+    return problem.status == "draft" and (
+        _is_super(admin) or (_is_editor(admin) and problem.owner_id == admin.id)
+    )
 
 
 def _open_revision(db: Session, problem: Problem) -> Problem | None:
@@ -466,7 +468,7 @@ def _problem_to_payload(problem: Problem, db: Session, admin: AdminUser) -> dict
 def _visible_statement(admin: AdminUser):
     if _is_super(admin):
         return select(Problem)
-    if admin.role in REVIEWER_ROLES:
+    if _is_reviewer(admin):
         return select(Problem).where((Problem.status == "pending") | (Problem.owner_id == admin.id) | (Problem.created_by == admin.id))
     return select(Problem).where((Problem.owner_id == admin.id) | (Problem.created_by == admin.id))
 
@@ -707,7 +709,14 @@ def transfer_problem_owner(problem_id: int, payload: TransferProblemOwnerPayload
     require_csrf(request); admin = current_admin(request, db); problem = _lock_problem(db, problem_id)
     _require_action(db, problem, admin, "transfer_owner"); _require_revision(request, problem)
     owner = db.get(AdminUser, payload.owner_id)
-    if not owner or owner.status != "active" or owner.role not in EDITOR_ROLES | REVIEWER_ROLES | {SUPER_ROLE}:
+    if (
+        not owner
+        or owner.status != "active"
+        or not (
+            authorization_snapshot(db, owner).allows("content_edit")
+            or authorization_snapshot(db, owner).allows("content_review")
+        )
+    ):
         raise HTTPException(422, "负责人必须是活跃的题库管理员。")
     problem.owner_id = owner.id; _touch(problem); _audit_problem(db, request, "problem_transfer_owner", "success", admin, problem, owner_id=owner.id); db.commit()
     return _problem_to_payload(problem, db, admin)

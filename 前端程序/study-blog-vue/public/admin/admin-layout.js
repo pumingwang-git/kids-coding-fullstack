@@ -60,8 +60,9 @@ export function initLayout() {
   if (sidebar) renderSidebar(sidebar);
   if (topbar) {
     renderTopbar(topbar);
-    loadAdmin(topbar, sidebar);
+    return loadAdmin(topbar, sidebar);
   }
+  return Promise.resolve(null);
 }
 
 function renderSidebar(sidebar) {
@@ -101,6 +102,14 @@ function applyMenuFilter(sidebar, menus) {
   });
 }
 
+export function filterPageLinks(allowedPages) {
+  const allowed = new Set(Array.isArray(allowedPages) ? allowedPages : []);
+  document.querySelectorAll('a[href$=".html"], a[href*=".html?"]').forEach((link) => {
+    const page = (link.getAttribute("href") || "").split("?")[0].split("/").pop();
+    if (page && !allowed.has(page) && page !== "login.html") link.hidden = true;
+  });
+}
+
 function renderTopbar(topbar) {
   const page = currentPage();
   const active = findActive(page);
@@ -135,8 +144,17 @@ function findActive(page) {
 async function loadAdmin(topbar, sidebar) {
   try {
     const me = await adminMe();
+    if (me.must_change_password && currentPage() !== "password-change.html") {
+      location.replace("password-change.html");
+      return me;
+    }
+    const allowedPages = new Set(me.allowed_pages || []);
+    if (!allowedPages.has(currentPage())) {
+      location.replace("index.html?blocked=" + encodeURIComponent(currentPage()));
+      return me;
+    }
     const name = topbar.querySelector("#adminName");
-    if (name) name.textContent = `${me.display_name}（${me.role}）`;
+    if (name) name.textContent = `${me.display_name}（${me.role_label || me.role}）`;
     try {
       const unread = await adminRequest("/notifications/unread-count");
       const badge = topbar.querySelector("#adminNotificationCount");
@@ -149,8 +167,12 @@ async function loadAdmin(topbar, sidebar) {
       // The link remains usable when the optional unread count is unavailable.
     }
     if (sidebar) applyMenuFilter(sidebar, me.menus);
+    filterPageLinks(me.allowed_pages);
+    document.dispatchEvent(new CustomEvent("admin:ready", { detail: me }));
+    return me;
   } catch {
     // 未登录 → 回登录页，登录后回到当前页
     location.href = `login.html?next=${encodeURIComponent(location.pathname)}`;
+    return null;
   }
 }

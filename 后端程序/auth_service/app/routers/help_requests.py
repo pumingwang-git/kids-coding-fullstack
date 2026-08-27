@@ -25,7 +25,7 @@ from ..models import (
 )
 from ..notification_links import admin_help_request_link, student_help_request_link
 from ..notification_service import create_notification, request_hash
-from ..permissions import ACADEMIC_ADMIN_ROLE, SUPER_ROLE, visible_class_ids
+from ..permissions import has_capability, visible_class_ids
 from ..security import utcnow
 from ..text_sanitize import plain_text
 from .admin_auth import audit, client_ip, current_admin, db_session
@@ -117,7 +117,7 @@ def _student_row_or_404(db: Session, user_id: int, request_id: int) -> HelpReque
 def _admin_row_or_404(db: Session, admin, request_id: int) -> HelpRequest:
     row = db.get(HelpRequest, request_id)
     class_ids = visible_class_ids(admin, db)
-    can_govern = admin.role in {ACADEMIC_ADMIN_ROLE, SUPER_ROLE}
+    can_govern = has_capability(admin, "manage_classes")
     if (row is None
             or (class_ids is not None and row.class_id not in class_ids)
             or (not can_govern and row.assigned_admin_user_id != admin.id)):
@@ -210,7 +210,7 @@ def admin_list(request: Request, status: str | None = Query(default=None, patter
     class_ids = visible_class_ids(admin, db)
     if class_ids is not None:
         stmt = stmt.where(HelpRequest.class_id.in_(class_ids))
-    if admin.role not in {ACADEMIC_ADMIN_ROLE, SUPER_ROLE}:
+    if not has_capability(admin, "manage_classes"):
         stmt = stmt.where(HelpRequest.assigned_admin_user_id == admin.id)
     if status:
         stmt = stmt.where(HelpRequest.status == status)

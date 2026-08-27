@@ -55,7 +55,7 @@ from ..models import (
     Problem,
     User,
 )
-from ..permissions import log_scope_denial, visible_student_ids
+from ..permissions import has_capability, log_scope_denial, visible_student_ids
 from ..results_common import (
     attempts_by_user as _attempts_by_user,
 )
@@ -80,6 +80,14 @@ from .admin_papers import _as_utc, _link_phase
 # score_policy=last 的场次就会出现：老师看到 92 分、学员端候考页和排行榜按 78 分算。
 
 router = APIRouter(prefix="/api/admin", tags=["admin-results"])
+
+
+def _require_results_reader(request: Request, db: Session):
+    """成绩端点的功能闸；数据范围由 visible_student_ids 另行收窄。"""
+    admin = current_admin(request, db)
+    if not has_capability(admin, "results_read"):
+        raise HTTPException(403, "没有查看学员成绩数据的权限。")
+    return admin
 
 def _iso(value: datetime | None) -> str | None:
     aware = _as_utc(value) if value is not None else None
@@ -206,7 +214,7 @@ def list_exam_results(request: Request, keyword: str = "", paper_type: str = "",
                       page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
                       db: Session = Depends(db_session)):
     """跨场次总览。source 为空 = 全部已实现的来源；未知的来源值是 422 不是空列表。"""
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     known_sources = {"exam_link"}  # lesson / practice 落地时加进来
@@ -239,7 +247,7 @@ def list_lesson_homework_results(request: Request, keyword: str = "", paper_type
     响应里的 `columns` / `stats` / `filters` / `kinds` 是**呈现契约**：页面按它
     生成表头、统计卡和下拉框，因此前端不持有任何作业类型的业务白名单。
     """
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     if kind and kind not in {meta["key"] for meta in kinds_meta()}:
@@ -264,7 +272,7 @@ def list_lesson_homework_results(request: Request, keyword: str = "", paper_type
 def lesson_homework_results(block_id: int, request: Request,
                             db: Session = Depends(db_session)):
     """单份课时作业成绩详情。哪一种作业由块类型决定，路由不认识具体类型。"""
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     _require_nonempty_scope(student_ids)
@@ -281,7 +289,7 @@ def lesson_homework_results(block_id: int, request: Request,
 def lesson_homework_student_attempts(block_id: int, user_id: int, request: Request,
                                     db: Session = Depends(db_session)):
     """按需返回一位学员在这份作业上的全部记录，避免详情页为每人预传历史。"""
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     _require_nonempty_scope(student_ids)
@@ -298,7 +306,7 @@ def lesson_homework_record(block_id: int, record_id: int, request: Request,
     整卷作业的答卷回看有自己的富文本回看端点（/attempts/{id}/review），因此
     `record` 只由需要它的类型声明；没声明的类型这里是 404，不是空壳弹窗。
     """
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     _require_nonempty_scope(student_ids)
@@ -313,7 +321,7 @@ def lesson_homework_record(block_id: int, record_id: int, request: Request,
 def lesson_homework_item_analysis(block_id: int, request: Request,
                                   db: Session = Depends(db_session)):
     """课时作业逐题分析。只对整卷作业成立：Scratch 作业没有题目可逐题看。"""
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     _require_nonempty_scope(student_ids)
@@ -348,7 +356,7 @@ def link_results(link_id: int, request: Request, db: Session = Depends(db_sessio
     代表成绩由 counted_attempt() 按**本条链接的 score_policy** 选，与学员端候考页、
     排行榜同一个函数——三处口径必须一致，否则老师和学员对着不同的分数说话。
     """
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     link = db.get(ExamLink, link_id)
@@ -427,7 +435,7 @@ def link_item_analysis(link_id: int, request: Request, db: Session = Depends(db_
         基本就是答案配错了（选项 is_correct 配反、填空 alternatives 漏配一种写法）。
       - `all_low`：得分率极低且高分组也没做对——先查题，再谈讲评。
     """
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     link = db.get(ExamLink, link_id)
@@ -452,7 +460,7 @@ def link_item_analysis(link_id: int, request: Request, db: Session = Depends(db_
 def attempt_review(attempt_id: int, request: Request, db: Session = Depends(db_session)):
     """单份答卷逐题回看。管理员本就能 preview 整卷答案，所以这里不下发限制：
     正确答案、学员答案、编程题代码与逐测试点结果全给——这是老师复核成绩的工作台。"""
-    admin = current_admin(request, db)
+    admin = _require_results_reader(request, db)
     student_ids = visible_student_ids(admin, db)
     limit(request, "admin-results", client_ip(request), 60, 60)
     attempt = db.get(PaperAttempt, attempt_id)

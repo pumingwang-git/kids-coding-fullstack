@@ -109,22 +109,20 @@ def test_reviewer_cannot_search_students_by_keyword(tmp_path: Path):
     assert resp.status_code == 403, resp.text
 
 
-def test_editor_has_no_global_submission_scope(tmp_path: Path):
-    """editor 只有内容权限，不因旧批改台角色闸获得全站学生范围。"""
+def test_editor_is_denied_before_submission_scope_is_evaluated(tmp_path: Path):
+    """editor 只有内容录入权限，不得再通过旧批改台功能闸。"""
     app, sid, username = _submitted(tmp_path)
     client, headers = _role_login(app, "editor")
 
     listed = client.get("/api/admin/scratch/submissions", headers=headers)
-    assert listed.status_code == 200, listed.text
-    assert listed.json()["total"] == 0
+    assert listed.status_code == 403, listed.text
 
     searched = client.get("/api/admin/scratch/submissions",
                           params={"keyword": username[:4]}, headers=headers)
-    assert searched.status_code == 200, searched.text
-    assert searched.json()["total"] == 0
-    # 范围闸一律 404，与「不存在」不可区分（《39》§3.2）。
+    assert searched.status_code == 403, searched.text
+    # 功能授权先于资源存在性和班级范围，避免内容角色枚举提交 ID。
     for path in _read_paths(sid)[1:]:
-        assert client.get(path, headers=headers).status_code == 404
+        assert client.get(path, headers=headers).status_code == 403
 
 
 def test_teacher_empty_scope_covers_all_six_submission_endpoints(tmp_path: Path):

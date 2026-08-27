@@ -9,7 +9,13 @@ import pytest
 from sqlalchemy import select
 
 from app.audit_summary import diff_summary
-from app.audit_summary import EVENT_CATEGORY, RETENTION_DAYS, ensure_known_event_type, CATEGORY_GRADE
+from app.audit_summary import (
+    EVENT_CATEGORY,
+    RETENTION_DAYS,
+    SYSTEM_AUDIT_RETENTION_PURGE,
+    ensure_known_event_type,
+    CATEGORY_GRADE,
+)
 from app.models import AuditEvent
 from test_admin_auth import ADMIN_PASSWORD, admin_client, admin_csrf_headers, admin_login
 from test_admin_classes import seed_course
@@ -21,7 +27,7 @@ HISTORICAL_EVENT_TYPES = {
     "admin_problem_clone", "admin_problem_offline",
     "exam_judge_failed",
 }
-NON_ROUTER_EVENT_TYPES = {"audit_retention_purge"}
+NON_ROUTER_EVENT_TYPES = {SYSTEM_AUDIT_RETENTION_PURGE}
 
 
 def test_diff_summary_is_allowlisted_versioned_and_redacted():
@@ -155,7 +161,7 @@ def _literal_audit_event_types() -> set[str]:
                 continue
             event_positions = {"audit": 2, "_audit": 2, "_audit_success": 2,
                                "_audit_admin_user_event": 2, "_audit_paper": 2,
-                               "_audit_problem": 2}
+                               "_audit_problem": 2, "_audit_role_policy": 2}
             event_position = event_positions.get(node.func.id)
             if event_position is None or len(node.args) <= event_position:
                 continue

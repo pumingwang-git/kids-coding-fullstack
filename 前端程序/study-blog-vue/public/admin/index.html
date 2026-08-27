@@ -6,44 +6,62 @@
   <title>管理总览 · 后台</title>
   <link rel="stylesheet" href="admin.css" />
 </head>
-<body>
+<body class="admin-dashboard">
 <div class="app">
   <aside class="sidebar" id="sidebar"></aside>
   <div class="main">
     <header class="topbar" id="topbar"></header>
-    <main class="content">
-      <div class="page-head">
-        <div><h1>管理总览</h1><p>关键数据一览（接入统计接口后生效）</p></div>
-      </div>
+    <main class="content dashboard-content">
+      <section class="dashboard-welcome" aria-labelledby="dashboardTitle">
+        <div>
+          <p class="dashboard-kicker">今日工作台</p>
+          <h1 id="dashboardTitle">把重要的教学工作放在眼前</h1>
+          <p class="dashboard-subtitle">内容、题目与班级状态集中在这里，接着上次的进度继续处理。</p>
+        </div>
+        <div class="dashboard-date" id="dashboardDate">--</div>
+      </section>
+      <p class="dashboard-error" id="blockedPageNotice" role="status" hidden></p>
 
-      <div class="stats">
-        <div class="stat"><b id="statCourses">-</b><span>课程（课包）</span></div>
-        <div class="stat"><b id="statQuestions">-</b><span>题目</span></div>
-        <div class="stat"><b id="statPapers">-</b><span>试卷 / 作业</span></div>
-        <div class="stat"><b id="statStudents">-</b><span>学员</span></div>
-        <div class="stat"><b id="statRate">-</b><span>作业完成率</span></div>
-      </div>
+      <section class="dashboard-stats" aria-label="核心指标">
+        <a class="dashboard-stat" href="courses.html"><span class="dashboard-stat-label">课包总数</span><strong id="statCourses">--</strong><span class="dashboard-stat-meta" id="statCoursesMeta">正在读取</span></a>
+        <a class="dashboard-stat is-alert" href="questions.html?status=pending"><span class="dashboard-stat-label">待审核题目</span><strong id="statQuestions">--</strong><span class="dashboard-stat-meta" id="statQuestionsMeta">正在读取</span></a>
+        <a class="dashboard-stat" href="papers.html?status=published"><span class="dashboard-stat-label">已发布试卷</span><strong id="statPapers">--</strong><span class="dashboard-stat-meta" id="statPapersMeta">正在读取</span></a>
+        <a class="dashboard-stat" href="students.html"><span class="dashboard-stat-label">可见学员</span><strong id="statStudents">--</strong><span class="dashboard-stat-meta">当前权限范围</span></a>
+        <a class="dashboard-stat" href="exam-links.html"><span class="dashboard-stat-label">活动考试链接</span><strong id="statLinks">--</strong><span class="dashboard-stat-meta" id="statLinksMeta">正在读取</span></a>
+      </section>
 
-      <div class="card" style="margin-top: 20px">
-        <h3>功能入口</h3>
-        <table>
-          <tr><th>模块</th><th>状态</th><th>入口</th></tr>
-          <tr><td>配题 · 题库管理</td><td><span class="tag">框架已建</span></td><td><a class="btn-text" href="questions.html">进入</a></td></tr>
-          <tr><td>配题 · 试卷管理</td><td><span class="tag">已上线</span></td><td><a class="btn-text" href="papers.html">进入</a></td></tr>
-          <tr><td>配课 · 课包/节点</td><td><span class="tag">已上线</span></td><td><a class="btn-text" href="courses.html">进入</a></td></tr>
-          <tr><td>运营 · 学员/兑换码/成绩</td><td><span class="tag">分步上线</span></td><td><a class="btn-text" href="students.html">进入</a></td></tr>
-        </table>
-        <!-- TODO(接 API)：GET /api/admin/stats 填充统计卡片 -->
-      </div>
+      <section class="dashboard-grid" aria-label="工作区">
+        <div class="dashboard-panel dashboard-queue-panel">
+          <div class="dashboard-panel-head"><div><h2>待处理队列</h2><p>按优先级整理今天需要确认的内容。</p></div><button class="dashboard-refresh" id="refreshDashboard" type="button">刷新</button></div>
+          <div class="dashboard-queue" id="dashboardQueue"><div class="dashboard-loading" aria-live="polite">正在整理工作项…</div></div>
+        </div>
+        <div class="dashboard-panel dashboard-shortcuts-panel">
+          <div class="dashboard-panel-head"><div><h2>快速开始</h2><p>进入最常用的管理工作。</p></div></div>
+          <div class="dashboard-shortcuts">
+            <a class="dashboard-shortcut" href="questions.html"><span class="shortcut-icon shortcut-icon-question" aria-hidden="true">题</span><span><b>新增试题</b><small>录入并提交审核</small></span><span class="shortcut-arrow" aria-hidden="true">→</span></a>
+            <a class="dashboard-shortcut" href="courses.html"><span class="shortcut-icon shortcut-icon-course" aria-hidden="true">课</span><span><b>新建课包</b><small>建立课程内容骨架</small></span><span class="shortcut-arrow" aria-hidden="true">→</span></a>
+            <a class="dashboard-shortcut" href="teaching.html"><span class="shortcut-icon shortcut-icon-teaching" aria-hidden="true">教</span><span><b>教学工作台</b><small>查看班级与作业进度</small></span><span class="shortcut-arrow" aria-hidden="true">→</span></a>
+            <a class="dashboard-shortcut" href="reports.html"><span class="shortcut-icon shortcut-icon-report" aria-hidden="true">析</span><span><b>成绩统计</b><small>查看考试与答卷表现</small></span><span class="shortcut-arrow" aria-hidden="true">→</span></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="dashboard-panel dashboard-modules-panel">
+        <div class="dashboard-panel-head"><div><h2>业务模块</h2><p>从内容生产到教学运营，一处进入完整工作流。</p></div><a class="dashboard-all-link" href="learning-catalog.html">查看学习目录 <span aria-hidden="true">→</span></a></div>
+        <div class="dashboard-modules">
+          <a class="dashboard-module" href="questions.html"><span class="module-index">01</span><span><b>题库管理</b><small>题目录入、审核与标签</small></span><span class="module-arrow" aria-hidden="true">↗</span></a>
+          <a class="dashboard-module" href="papers.html"><span class="module-index">02</span><span><b>试卷管理</b><small>组卷、发布与考试链接</small></span><span class="module-arrow" aria-hidden="true">↗</span></a>
+          <a class="dashboard-module" href="courses.html"><span class="module-index">03</span><span><b>课包管理</b><small>课程信息与上下架</small></span><span class="module-arrow" aria-hidden="true">↗</span></a>
+          <a class="dashboard-module" href="classes.html"><span class="module-index">04</span><span><b>班级管理</b><small>成员、教师与课程范围</small></span><span class="module-arrow" aria-hidden="true">↗</span></a>
+          <a class="dashboard-module" href="materials.html"><span class="module-index">05</span><span><b>资料管理</b><small>文档、图片与视频资源</small></span><span class="module-arrow" aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+      <p class="dashboard-error" id="dashboardError" role="status" hidden></p>
     </main>
   </div>
 </div>
 <script type="module" src="admin-api.js"></script>
 <script type="module" src="admin-layout.js"></script>
-<script type="module">
-  import { initLayout } from "./admin-layout.js";
-  initLayout();
-  // TODO：接入统计接口后填充 id=stat* 的统计卡片
-</script>
+<script type="module" src="index.js"></script>
 </body>
 </html>

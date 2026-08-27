@@ -13,6 +13,7 @@ function cookie(name) {
 function errorMessage(body) {
   const detail = body?.detail;
   if (typeof detail === "string") return detail;
+  if (detail && typeof detail.message === "string") return detail.message;
   if (Array.isArray(detail)) {
     const field = detail[0]?.loc?.at(-1) || "";
     const label = { username: "用户名", password: "密码" }[field] || "输入内容";
@@ -131,15 +132,37 @@ export async function adminUpload(path, formData, options = {}, retryOnUnauthori
  * 文件名优先用服务端 Content-Disposition 里的那个（它才知道题号），取不到再用兜底名。
  */
 export async function adminDownload(path, fallbackName, retryOnUnauthorized = true) {
-  const send = () => fetch(`/api/admin${path}`, { credentials: "include" });
-  let response = await send();
-  if (retryOnUnauthorized && response.status === 401) {
-    try {
-      await refreshSession();
-      response = await send();
-    } catch {
-      // 刷新失败 → 保留原始 401，下面统一抛
+  const send = (requestPath) => fetch(`/api/admin${requestPath}`, { credentials: "include" });
+  const authorizedFetch = async (requestPath) => {
+    let result = await send(requestPath);
+    if (retryOnUnauthorized && result.status === 401) {
+      try {
+        await refreshSession();
+        result = await send(requestPath);
+      } catch {
+        // 保留原始 401，交给统一错误处理。
+      }
     }
+    return result;
+  };
+  let response = await authorizedFetch(path);
+
+  // 大导出返回 202 + job_id。轮询使用同一受保护下载通道，完成后直接得到 CSV。
+  if (response.status === 202 || response.status === 409) {
+    const queued = await parseBody(response);
+    if (!queued?.job_id) throw new Error(errorMessage(queued));
+    const pollPath = `/classes/export-jobs/${encodeURIComponent(queued.job_id)}`;
+    for (let attempt = 0; attempt < 160; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      response = await authorizedFetch(pollPath);
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && !contentType.includes("application/json")) break;
+      const status = await parseBody(response);
+      if (!response.ok) throw new Error(errorMessage(status));
+      if (status?.status === "failed") throw new Error(status.error || "导出任务失败。");
+      response = null;
+    }
+    if (!response) throw new Error("导出任务等待超时，请稍后重试。");
   }
   if (!response.ok) throw new Error(errorMessage(await parseBody(response)));
 

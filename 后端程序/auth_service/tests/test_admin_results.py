@@ -119,7 +119,7 @@ def test_overview_visibility_follows_paper_read_permission(tmp_path):
     assert logged.status_code == 200, logged.text
     wheaders = {"X-CSRF-Token": writer.cookies.get("admin_csrf_token")}
 
-    assert writer.get("/api/admin/exam-results", headers=wheaders).json()["total"] == 0
+    assert writer.get("/api/admin/exam-results", headers=wheaders).status_code == 403
     assert env.admin.get("/api/admin/exam-results", headers=env.admin_headers).json()["total"] == 1
     assert TestClient(env.app).get("/api/admin/exam-results").status_code == 401
 
@@ -211,7 +211,7 @@ def test_lesson_homework_results_require_course_and_paper_read_scope(tmp_path):
     assert writer.post("/api/admin/login", headers={"X-CSRF-Token": writer.cookies.get("admin_csrf_token")},
                        json={"username": "writer", "password": ADMIN_PASSWORD}).status_code == 200
     headers = {"X-CSRF-Token": writer.cookies.get("admin_csrf_token")}
-    assert writer.get("/api/admin/lesson-homework-results", headers=headers).json()["total"] == 0
+    assert writer.get("/api/admin/lesson-homework-results", headers=headers).status_code == 403
     assert writer.get(f"/api/admin/lesson-homework/{built['block']['id']}/results", headers=headers).status_code == 403
     assert env.admin.get("/api/admin/lesson-homework/99999/results", headers=env.admin_headers).status_code == 404
 

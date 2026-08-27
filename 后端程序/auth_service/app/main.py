@@ -18,6 +18,7 @@ from .judge.runner import JudgeRunner
 from .learning_catalog import ensure_learning_catalog
 from .mailer import InMemoryEmailSender, SmtpEmailSender
 from .models import Base
+from .permissions import ensure_admin_role_catalog
 from .rate_limit import InMemoryRateLimiter, RedisRateLimiter
 from .routers.admin_auth import router as admin_router
 from .routers.admin_classes import router as admin_classes_router
@@ -114,6 +115,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # 开发库跳过初始化，避免应用导入阶段用业务代码替代 Alembic。
     if inspect(engine).has_table("learning_areas"):
         ensure_learning_catalog(session_factory)
+    if inspect(engine).has_table("admin_roles"):
+        ensure_admin_role_catalog(session_factory)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

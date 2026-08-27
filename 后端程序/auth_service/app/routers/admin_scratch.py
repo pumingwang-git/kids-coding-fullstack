@@ -35,9 +35,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from ..course_access import completed_block_ids
 from ..audit_summary import diff_summary
-from ..notification_links import lesson_homework_link
+from ..course_access import completed_block_ids
 from ..models import (
     AdminUser,
     Course,
@@ -50,11 +49,10 @@ from ..models import (
     User,
     Video,
 )
+from ..notification_links import lesson_homework_link
 from ..notification_service import create_notification, request_hash
 from ..permissions import (
-    ACADEMIC_ADMIN_ROLE,
-    ASSISTANT_ROLE,
-    TEACHER_ROLE,
+    has_capability,
     is_editor,
     log_scope_denial,
     visible_student_ids,
@@ -144,8 +142,7 @@ def _require_editor(request: Request, db: Session):
 def _require_submission_reader(request: Request, db: Session):
     """学生作品与批改端点的功能闸；数据范围由调用点另行收窄。"""
     admin = current_admin(request, db)
-    grading_roles = {TEACHER_ROLE, ASSISTANT_ROLE, ACADEMIC_ADMIN_ROLE}
-    if not is_editor(admin) and admin.role not in grading_roles:
+    if not has_capability(admin, "scratch_review"):
         raise HTTPException(403, "没有查看或批改学生作品的权限。")
     return admin
 

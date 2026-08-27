@@ -5,6 +5,7 @@ import csv
 import io
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,14 +23,14 @@ from ..models import (
     CourseLessonBlock,
     ExamAssignment,
     ExamLink,
-    User,
     ExportJob,
+    User,
 )
 from ..permissions import (
     CLASS_INSIGHT_EXPORT_CAPABILITY,
-    can_export_class_insight,
     can_export_class_insight_for_class,
     exportable_class_ids,
+    has_capability,
     log_scope_denial,
     visible_student_ids,
 )
@@ -61,7 +62,8 @@ def _exportable_class_or_404(
 ) -> tuple[AdminUser, ClassGroup, set[int] | None]:
     """Apply the export feature gate, then the stricter class scope gate."""
     admin = current_admin(request, db)
-    if not can_export_class_insight(admin):
+    # 保留字面量，供 capability 目录守卫确认该功能闸真实存在。
+    if not has_capability(admin, "export_class_insight"):
         raise HTTPException(403, "没有导出学情 CSV 的权限。")
 
     class_ids = exportable_class_ids(admin, db)
@@ -301,10 +303,12 @@ def export_class_insight(
     if row_count > EXPORT_ROW_LIMIT:
         job = ExportJob(requested_by=admin.id, export_type="class_insight",
                         params={"class_id": class_id, "inactive_days_gte": inactive_days_gte})
-        db.add(job); db.commit(); db.refresh(job)
+        db.add(job)
+        db.commit()
+        db.refresh(job)
         from ..tasks.exports import run_export_job
         run_export_job.delay(job.id)
-        return Response(status_code=409, content=(f'{{"job_id":"{job.id}"}}').encode(), media_type="application/json")
+        return JSONResponse(status_code=202, content={"job_id": job.id, "status": "queued"})
     content, row_count = build_class_insight_csv(db, admin, class_id, inactive_days_gte, class_ids)
     audit(db, request.app.state.settings, "export_download", "success", client_ip(request), admin.id,
           resource_type="class_insight_export", resource_id=class_id,

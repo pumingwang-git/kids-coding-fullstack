@@ -1,7 +1,7 @@
+import uuid
 from datetime import datetime
 
 import sqlalchemy as sa
-import uuid
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -124,6 +124,45 @@ class PasswordHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AdminRole(Base):
+    """Database-managed B-side role definition.
+
+    Capability keys remain code-owned; only role composition is persisted.
+    Retired keys are never reused so historical audit entries stay meaningful.
+    """
+
+    __tablename__ = "admin_roles"
+    __table_args__ = (
+        CheckConstraint("scope IN ('global', 'class', 'none')", name="ck_admin_roles_scope"),
+    )
+
+    key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    label: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    scope: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa.false())
+    is_protected: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa.false())
+    is_assignable: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa.true())
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    sort_order: Mapped[int] = mapped_column(Integer, default=1000, server_default="1000")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AdminRoleCapability(Base):
+    """Capability grants for one admin role."""
+
+    __tablename__ = "admin_role_capabilities"
+
+    role_key: Mapped[str] = mapped_column(
+        ForeignKey("admin_roles.key", ondelete="CASCADE"), primary_key=True
+    )
+    capability_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+
 class AdminUser(Base):
     """B 端管理员，独立于学生账号。"""
     __tablename__ = "admin_users"
@@ -132,7 +171,9 @@ class AdminUser(Base):
     password_hash: Mapped[str] = mapped_column(String(512))
     display_name: Mapped[str] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(32), default="editor")
+    role_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa.false())
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

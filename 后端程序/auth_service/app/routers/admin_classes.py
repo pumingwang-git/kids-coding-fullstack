@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -19,25 +20,30 @@ from ..class_enrollment import (
     revoke_for_membership,
     sync_class_window,
 )
-from ..models import AdminUser, ClassGroup, ClassMember, ClassTeacher, Course, Enrollment, User, HelpRequest, ExportJob
+from ..models import (
+    AdminUser,
+    ClassGroup,
+    ClassMember,
+    ClassTeacher,
+    Course,
+    Enrollment,
+    ExportJob,
+    HelpRequest,
+    User,
+)
 from ..notification_links import admin_help_request_link
 from ..notification_service import create_notification
-from .admin_enrollments import ENROLLMENT_STATUS_LABELS
 from ..permissions import (
-    ACADEMIC_ADMIN_ROLE,
-    ASSISTANT_ROLE,
-    SUPER_ROLE,
-    TEACHER_ROLE,
+    has_capability,
     log_scope_denial,
     visible_class_ids,
 )
 from ..security import as_utc, utcnow
 from .admin_auth import audit, client_ip, current_admin, db_session, require_csrf
+from .admin_enrollments import ENROLLMENT_STATUS_LABELS
 
 router = APIRouter(prefix="/api/admin/classes", tags=["admin-classes"])
 EXPORT_ROW_LIMIT = 5000
-MANAGER_ROLES = frozenset({ACADEMIC_ADMIN_ROLE, SUPER_ROLE})
-READER_ROLES = MANAGER_ROLES | frozenset({TEACHER_ROLE, ASSISTANT_ROLE})
 CLASS_STATUS_LABELS = {
     "draft": "草稿",
     "active": "进行中",
@@ -89,7 +95,7 @@ class TransferPayload(BaseModel):
 
 def _require_manager(request: Request, db: Session):
     admin = current_admin(request, db)
-    if admin.role not in MANAGER_ROLES:
+    if not has_capability(admin, "manage_classes"):
         raise HTTPException(403, "仅教务管理员或超级管理员可管理班级。")
     return admin
 
@@ -98,7 +104,7 @@ def _require_class_reader(
     request: Request, db: Session, class_id: int | None = None
 ):
     admin = current_admin(request, db)
-    if admin.role not in READER_ROLES:
+    if not has_capability(admin, "class_read"):
         raise HTTPException(403, "没有查看班级关系的权限。")
     class_ids = visible_class_ids(admin, db)
     if class_id is not None and class_ids is not None and class_id not in class_ids:
@@ -219,7 +225,7 @@ def _require_relation_manager(
     summary: dict | None = None,
 ):
     admin = current_admin(request, db)
-    if admin.role not in MANAGER_ROLES:
+    if not has_capability(admin, "manage_classes"):
         _audit_failure(
             db,
             request,
@@ -375,6 +381,9 @@ def build_class_relationship_csv(db: Session, admin, class_ids=None) -> tuple[by
 @router.get("/export")
 def export_class_relationships(request: Request, db: Session = Depends(db_session)):
     """Export all visible member and teacher relationship history as CSV."""
+    admin = current_admin(request, db)
+    if not has_capability(admin, "export_class_relationships"):
+        raise HTTPException(403, "没有导出班级关系 CSV 的权限。")
     admin, class_ids = _require_class_reader(request, db)
     # Keep small exports synchronous; only materialize a job above the sentinel.
     class_filter = [] if class_ids is None else [ClassGroup.id.in_(class_ids)]
@@ -383,10 +392,12 @@ def export_class_relationships(request: Request, db: Session = Depends(db_sessio
     total = member_count + teacher_count
     if total > EXPORT_ROW_LIMIT:
         job = ExportJob(requested_by=admin.id, export_type="class_relationships", params={})
-        db.add(job); db.commit(); db.refresh(job)
+        db.add(job)
+        db.commit()
+        db.refresh(job)
         from ..tasks.exports import run_export_job
         run_export_job.delay(job.id)
-        return Response(status_code=409, content=(f'{{"job_id":"{job.id}"}}').encode(), media_type="application/json")
+        return JSONResponse(status_code=202, content={"job_id": job.id, "status": "queued"})
     content, row_count = build_class_relationship_csv(db, admin, class_ids)
     audit(db, request.app.state.settings, "export_download", "success", client_ip(request), admin.id,
           resource_type="class_relationship_export",
@@ -401,7 +412,9 @@ def get_export_job(job_id: str, request: Request, db: Session = Depends(db_sessi
     """Poll/download a queued export without widening its authorization scope."""
     admin = current_admin(request, db)
     job = db.get(ExportJob, job_id)
-    if job is None or (job.requested_by != admin.id and admin.role not in MANAGER_ROLES):
+    if job is None or (
+        job.requested_by != admin.id and not has_capability(admin, "manage_classes")
+    ):
         raise HTTPException(404, "导出任务不存在。")
     if job.status != "completed":
         return {"job_id": job.id, "status": job.status, "row_count": job.row_count, "error": job.error}

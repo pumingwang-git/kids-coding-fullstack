@@ -74,7 +74,13 @@ def registered_routes():
 def test_page_calls_paths_that_the_backend_actually_registers(accounts_js):
     routes = registered_routes()
     assert ("/api/admin/admin-users", "GET") in routes
+    assert ("/api/admin/admin-users", "POST") in routes
     assert ("/api/admin/admin-users/{admin_user_id}/role", "PUT") in routes
+    assert ("/api/admin/admin-users/{admin_user_id}/password-reset", "POST") in routes
+    assert ("/api/admin/roles", "GET") in routes
+    assert ("/api/admin/roles", "POST") in routes
+    assert ("/api/admin/roles/{role_key}", "PUT") in routes
+    assert ("/api/admin/roles/{role_key}", "DELETE") in routes
 
     # adminRequest 会自动补 /api/admin 前缀，所以页面里写的是相对路径。
     assert '"/admin-users"' in accounts_js
@@ -142,6 +148,35 @@ def test_role_options_are_rendered_from_the_api_payload(accounts_js):
     assert re.search(r"roleOptions\s*\n?\s*\.map\(|roleOptions\.map\(", body), "下拉必须由 roleOptions 渲染"
 
 
+def test_account_creation_and_permission_matrix_are_real_ui(accounts_js, accounts_html):
+    body = strip_comments(accounts_js)
+    assert 'method: "POST"' in body
+    assert '"/admin-users"' in body
+    assert "initial_password" in body
+    assert "capabilityOptions" in body and "roleCapabilities" in body
+    assert re.search(r'id="createAccountBtn"', accounts_html)
+    assert re.search(r'id="permissionMatrix"', accounts_html)
+    assert re.search(r'id="initialPassword"', accounts_html)
+
+
+def test_dynamic_role_policy_ui_uses_revision_and_server_catalog(accounts_js, accounts_html):
+    body = strip_comments(accounts_js)
+    assert 'adminRequest("/roles")' in body
+    assert 'adminRequest("/roles", { method: "POST"' in body
+    assert "ifMatch(editingPolicy.revision)" in body
+    assert "capabilityOptions" in body and "scopeOptions" in body
+    for control in (
+        "createRoleBtn", "rolePolicyCard", "rolePolicyMask", "rolePolicyKey",
+        "rolePolicyScope", "roleCapabilityGroups", "rolePolicyDelete",
+    ):
+        assert re.search(rf'id="{control}"', accounts_html), f"缺少动态角色控件 #{control}"
+
+
+def test_account_role_assignment_sends_authorization_revision(accounts_js):
+    body = strip_comments(accounts_js)
+    assert "ifMatch(editing.role_revision)" in body
+
+
 def test_scope_note_comes_from_the_api_not_the_page(accounts_js, accounts_html):
     """范围说明必须来自接口：前端抄一份，E2 换真实查询时它会静默过期。"""
     from app.permissions import ROLE_SCOPE_NOTES
@@ -184,6 +219,22 @@ def test_menu_entries_use_server_menus_intersection(layout_js):
     assert "data-menu-page" in body and "applyMenuFilter" in body
     assert "me.menus" in body
     assert "superOnly" not in body
+
+
+def test_layout_blocks_the_current_page_and_filters_all_page_links(layout_js):
+    body = strip_comments(layout_js)
+    assert "me.allowed_pages" in body
+    assert "allowedPages.has(currentPage())" in body
+    assert 'location.replace("index.html?blocked="' in body
+    assert "filterPageLinks(me.allowed_pages)" in body
+    assert "querySelectorAll" in body and 'a[href$=".html"]' in body
+
+
+def test_dashboard_waits_for_authorization_and_refilters_dynamic_links():
+    source = read("index.js")
+    assert "const layoutReady = initLayout()" in source
+    assert "await layoutReady" in source
+    assert "filterPageLinks(me.allowed_pages)" in source
 
 
 def test_role_change_entry_is_not_exposed_on_the_ungated_dashboard():

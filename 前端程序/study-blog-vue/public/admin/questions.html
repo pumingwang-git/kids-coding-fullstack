@@ -3895,10 +3895,7 @@
       // 审核动作由后端 allowed_actions 决定，前端不放宽；但要把"为什么不能审"讲清楚。
       function reviewBlockedReason(problem, allowed) {
         if (problem.status !== "pending" || allowed.has("approve")) return "";
-        const isAuthor = problem.created_by?.id && problem.created_by.id === currentAdmin?.id;
-        return isAuthor
-          ? '<span class="muted action-note" title="职责分离：题目录入人不能审核自己的题，请交由其他审核员处理">不可自审</span>'
-          : '<span class="muted action-note" title="当前角色不具备审核权限，需要 reviewer 或 super_admin">无审核权限</span>';
+        return '<span class="muted action-note" title="当前账号缺少内容审核权限">无审核权限</span>';
       }
 
       // 行渲染：页面专属（题型/难度/来源/知识点徽标 + 行内动作），三态交给列表组件。

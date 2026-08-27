@@ -41,7 +41,7 @@ function syncMaterialRefresh(hasPending, signature = "") {
 }
 
 async function boot() {
-  try { readOnly = (await adminMe())?.role === "reviewer"; } catch { return; }
+  try { readOnly = (await adminMe())?.capabilities?.content_edit !== true; } catch { return; }
   for (const id of ["newFolderBtn", "importFolderBtn", "uploadBtn"]) $(id).disabled = readOnly;
   await Promise.all([loadFolders(), loadMaterials()]);
 }

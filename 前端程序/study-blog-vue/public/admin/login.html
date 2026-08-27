@@ -24,7 +24,7 @@
   <script type="module" src="admin-api.js"></script>
   <script type="module" src="slider-captcha.js"></script>
   <script type="module">
-    import { adminLogin, adminSliderCaptcha, adminVerifySlider } from "./admin-api.js";
+    import { adminLogin, adminMe, adminSliderCaptcha, adminVerifySlider } from "./admin-api.js";
     import { createSliderCaptcha } from "./slider-captcha.js";
 
     const errorEl = document.getElementById("error");
@@ -65,6 +65,11 @@
           slider_id: value.slider_id,
           slider_x: value.slider_x,
         });
+        const me = await adminMe();
+        if (me.must_change_password) {
+          location.href = "password-change.html";
+          return;
+        }
         const next = new URLSearchParams(location.search).get("next");
         location.href = next || "index.html";
       } catch (reason) {

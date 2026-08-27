@@ -12,12 +12,8 @@ from ..notification_domain import notification_kind_label
 from ..notification_links import announcement_link, parse_announcement_target
 from ..notification_service import create_notification, revoke_notification
 from ..permissions import (
-    ACADEMIC_ADMIN_ROLE,
-    ASSISTANT_ROLE,
-    SUPER_ROLE,
-    TEACHER_ROLE,
+    has_capability,
     visible_class_ids,
-    can_read_students,
 )
 from ..text_sanitize import plain_text
 from ..security import utcnow
@@ -69,7 +65,7 @@ def _admin_notification_or_404(db: Session, admin, notification_id: int) -> tupl
         and (class_ids is None or notification.target_id in class_ids)
     )
     sent = notification.kind == "class_announcement" and in_visible_class and (
-        notification.created_by == admin.id or admin.role in {SUPER_ROLE, ACADEMIC_ADMIN_ROLE}
+        notification.created_by == admin.id or has_capability(admin, "manage_classes")
     )
     if receipt is None and not sent:
         raise HTTPException(404, "通知不存在。")
@@ -178,7 +174,7 @@ def announce(class_id: int, payload: AnnouncementPayload, request: Request,
              idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
              admin=Depends(current_admin), db: Session = Depends(db_session)):
     require_csrf(request)
-    if not can_read_students(admin):
+    if not has_capability(admin, "announcements_send"):
         raise HTTPException(403, "没有发布班级公告的权限。")
     admin_classes._require_class_reader(request, db, class_id)
     target = parse_announcement_target(payload.link_url)
