@@ -26,8 +26,9 @@
     POST   /api/scratch/works                  {title?,is_public?}  新建自由作品（默认私密）
     GET    /api/scratch/works                                         我的作品列表
     GET    /api/scratch/works/{id}                                    编辑上下文（本人）
-    PUT    /api/scratch/works/{id}             multipart(file)       保存当前版本
+    PUT    /api/scratch/works/{id}             multipart(file[,cover]) 保存当前版本
     GET    /api/scratch/works/{id}/content.sb3                        取回内容（本人）
+    GET    /api/scratch/works/{id}/cover                              封面（本人；无真图发生成图）
     PATCH  /api/scratch/works/{id}             {title?,description?,is_public?}  更新元数据
     DELETE /api/scratch/works/{id}                                    删除
     POST   /api/scratch/works/share            {project_id}          闯关作品 → 广场快照
@@ -35,12 +36,14 @@
     GET    /api/scratch/gallery                ?page=&size=&sort=&keyword=  公开作品分页
     GET    /api/scratch/gallery/{id}                                     公开作品详情（views+1）
     GET    /api/scratch/gallery/{id}/content.sb3                         公开作品内容
+    GET    /api/scratch/gallery/{id}/cover                               公开作品封面
 """
 from __future__ import annotations
 
 import hashlib
 import html
 import json
+import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
@@ -49,11 +52,15 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from ..models import ScratchChallenge, ScratchProject, ScratchProjectRevision, ScratchWork, User
+from ..scratch_cover import (COVER_MAX_UPLOAD_BYTES, COVER_MEDIA_TYPE, CoverInvalid,
+                             normalize_cover, read_cover, store_cover)
 from ..scratch_sb3 import Sb3Invalid, inspect_sb3, read_sb3, store_sb3
 from ..security import as_utc
 from .auth_secure import audit, client_ip, current_user, db_session, limit, require_csrf
 
 router = APIRouter(prefix="/api/scratch", tags=["student-scratch-works"])
+
+logger = logging.getLogger(__name__)
 
 SB3_MEDIA_TYPE = "application/x.scratch.sb3"
 
@@ -103,9 +110,7 @@ def _work_payload(work: ScratchWork, *, mine: bool, author: User | None = None,
         "created_at": as_utc(work.created_at).isoformat() if work.created_at else None,
         "updated_at": as_utc(work.updated_at).isoformat() if work.updated_at else None,
         "has_content": bool(work.sb3_key),
-        # Scratch VM does not expose a server-side thumbnail, so expose a stable
-        # generated cover rather than making clients guess a missing field.
-        "thumbnail_url": f"{cover_base}/{work.id}/cover.svg",
+        "thumbnail_url": _cover_url(work, cover_base),
     }
     if author is not None:
         payload["author"] = {"id": author.id, "username": author.username}
@@ -113,6 +118,22 @@ def _work_payload(work: ScratchWork, *, mine: bool, author: User | None = None,
         payload["content_url"] = (f"/api/scratch/works/{work.id}/content.sb3"
                                   if work.sb3_key else None)
     return payload
+
+
+def _cover_url(work: ScratchWork, cover_base: str) -> str:
+    """封面地址。**永远给得出一个能显示的地址**：有真图发真图，没有发生成占位图，
+    所以这个字段不为空，客户端不需要判空（见《63》§6.1）。
+
+    带 `v=` 是因为响应头是 `private, max-age=60`：地址不变的话，学生刚改完舞台
+    保存，卡片上还是一分钟前那张封面——看着就像"保存没生效"。
+
+    版本号取**封面内容哈希**（`cover_key` 里现成的），不取保存时间：时间戳只有秒
+    精度，同一秒内连按两次保存会算出同一个地址，第二张封面就被缓存吃掉了（这条
+    是被测试逮住的，不是推演出来的）。用哈希还白捡一个好处——封面没变时地址也
+    不变，浏览器正常复用缓存。
+    """
+    stamp = work.cover_key.rsplit("/", 1)[-1][:12] if work.cover_key else "0"
+    return f"{cover_base}/{work.id}/cover?v={stamp}"
 
 
 def _own_work(db: Session, request: Request, work_id: int) -> tuple[User, ScratchWork]:
@@ -125,6 +146,8 @@ def _own_work(db: Session, request: Request, work_id: int) -> tuple[User, Scratc
 
 
 def _cover_svg(work: ScratchWork) -> str:
+    """没有真封面时的兜底图。**不要删**：老作品、闯关分享来的快照、截图失败的那次
+    保存、以及封面文件丢失，四种情况共用它。封面这条路上永远不该出现裂图。"""
     title = html.escape((work.title or "未命名作品")[:32])
     # A compact, deterministic cover that works before and after an .sb3 upload.
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300">
@@ -141,9 +164,26 @@ def _cover_svg(work: ScratchWork) -> str:
 </svg>'''
 
 
-def _cover_response(work: ScratchWork) -> Response:
+def _cover_response(work: ScratchWork, settings) -> Response:
+    """下发封面。存了真图就发真图，否则发生成图。
+
+    `read_cover` 返回 None（文件被误删、换过存储根）也走生成图这条路——把这一步
+    写成 404 或 500，学生看到的就是一个裂图，而他什么都没做错。
+    """
+    if work.cover_key:
+        raw = read_cover(work.cover_key, settings)
+        if raw is not None:
+            return Response(content=raw, media_type=COVER_MEDIA_TYPE,
+                            headers={"Cache-Control": "private, max-age=60"})
     return Response(content=_cover_svg(work), media_type="image/svg+xml",
                     headers={"Cache-Control": "private, max-age=60"})
+
+
+def _save_cover(work: ScratchWork, raw: bytes, settings) -> None:
+    """校验 + 重编码 + 落盘 + 回填。不合规抛 `CoverInvalid`，由调用方吞掉。"""
+    normalized = normalize_cover(raw)
+    cover_key, _digest = store_cover(normalized, settings)
+    work.cover_key = cover_key
 
 
 def _save_bytes(work: ScratchWork, raw: bytes, settings) -> None:
@@ -212,11 +252,15 @@ def work_detail(work_id: int, request: Request, db: Session = Depends(db_session
 @router.put("/works/{work_id}")
 async def save_work(work_id: int, request: Request,
                     file: UploadFile = File(...),
+                    cover: UploadFile | None = File(default=None),
                     source: str = Form(default="autosave"),
                     db: Session = Depends(db_session)):
-    """保存当前版本（multipart `file` = .sb3）。与闯关保存同一条校验顺序：
-    先归属、再限流、最后才读文件体——反过来先读 10MB 再判权限，等于给任何
-    登录用户开一条免费的带宽/磁盘消耗通道。
+    """保存当前版本（multipart `file` = .sb3，可选 `cover` = 舞台截图）。
+
+    与闯关保存同一条校验顺序：先归属、再限流、最后才读文件体——反过来先读 10MB
+    再判权限，等于给任何登录用户开一条免费的带宽/磁盘消耗通道。封面搭在同一次
+    请求里，所以不单独限流；也**必须**在同一次请求里，分两次传会出现"图是新版、
+    内容是旧版"的错配。
     """
     require_csrf(request)
     _user, work = _own_work(db, request, work_id)
@@ -229,6 +273,14 @@ async def save_work(work_id: int, request: Request,
         raise HTTPException(413, f"作品文件不能超过 {settings.scratch_sb3_max_bytes // (1024 * 1024)} MB。")
     changed = work.sha256 is None or work.sha256 != hashlib.sha256(raw).hexdigest()
     _save_bytes(work, raw, settings)
+    # 封面失败**不牵连作品**：它是装饰，作品是资产。这里故意吞掉异常而不是转 400，
+    # 学生的心智模型里"保存"就是保存作品，不该被一张截图挡住。旧封面原样保留。
+    if cover is not None:
+        try:
+            cover_raw = await cover.read(COVER_MAX_UPLOAD_BYTES + 1)
+            _save_cover(work, cover_raw, settings)
+        except CoverInvalid as exc:
+            logger.info("作品 %s 的封面被拒：%s", work.id, exc.message)
     db.commit()
     db.refresh(work)
     return {"work_id": work.id, "unchanged": not changed,
@@ -251,10 +303,13 @@ def work_content(work_id: int, request: Request, db: Session = Depends(db_sessio
     )
 
 
-@router.get("/works/{work_id}/cover.svg")
+@router.get("/works/{work_id}/cover")
 def work_cover(work_id: int, request: Request, db: Session = Depends(db_session)):
+    """本人作品封面。别人的作品按 404（范围闸，与"不存在"逐字相同）——封面能猜到，
+    等于私密作品的画面能被枚举。地址不带扩展名：同一个地址可能发 WebP 也可能发 SVG。
+    """
     _user, work = _own_work(db, request, work_id)
-    return _cover_response(work)
+    return _cover_response(work, request.app.state.settings)
 
 
 @router.patch("/works/{work_id}")
@@ -432,8 +487,8 @@ def gallery_content(work_id: int, request: Request, db: Session = Depends(db_ses
     )
 
 
-@router.get("/gallery/{work_id}/cover.svg")
+@router.get("/gallery/{work_id}/cover")
 def gallery_cover(work_id: int, request: Request, db: Session = Depends(db_session)):
     current_user(request, db)
     work = _gallery_visible(db, work_id)
-    return _cover_response(work)
+    return _cover_response(work, request.app.state.settings)

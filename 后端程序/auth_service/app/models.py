@@ -1995,6 +1995,11 @@ class ScratchWork(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     sprite_count: Mapped[int] = mapped_column(Integer, default=0)
     extensions_json: Mapped[str] = mapped_column(Text, default="[]")
+    # 封面：保存时由工作台截舞台画面传上来，服务端重编码成 480×360 WebP 后内容寻址落盘。
+    # 为空＝没截到 / 老作品 / 分享来的快照，下发时回落到 `_cover_svg()` 生成的占位图。
+    # 不另存"封面更新时间"：下发地址上的缓存版本号直接取这个 key 里的内容哈希，
+    # 时间戳只有秒精度，同一秒内连存两次会算出同一个地址，第二张就被缓存吃掉。
+    cover_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source: Mapped[str] = mapped_column(String(16), default="free")  # free / challenge
     source_project_id: Mapped[int | None] = mapped_column(
         ForeignKey("scratch_projects.id", ondelete="SET NULL"), nullable=True, index=True
