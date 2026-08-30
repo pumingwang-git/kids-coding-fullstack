@@ -1,9 +1,12 @@
 <script setup>
-import { onMounted, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { computed, onMounted, ref } from "vue";
+import { RouterLink, useRoute } from "vue-router";
 import AppIcon from "../components/AppIcon.vue";
 import { fetchExamTasks } from "../services/studentTasks";
+import { taskEntryPath } from "../services/taskEntry";
 
+const route = useRoute();
+const areaKey = computed(() => String(route.params.areaKey || "kids"));
 const items = ref([]);
 const loading = ref(true);
 const error = ref("");
@@ -15,7 +18,7 @@ async function load() {
   catch (reason) { error.value = reason.message || "暂时无法读取考试安排。"; }
   finally { loading.value = false; }
 }
-function taskPath(item) { return `/exam/${encodeURIComponent(item.entry.token)}`; }
+function taskPath(item) { return taskEntryPath(item, { areaKey: areaKey.value }); }
 onMounted(load);
 </script>
 

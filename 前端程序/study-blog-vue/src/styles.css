@@ -1,3 +1,36 @@
+/* Tailwind utilities for the teaching-Q&A surfaces. Preflight stays disabled so
+   the existing student views keep their global element styles. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted-surface);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent-surface);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
 /* ==========================================================================
    Design tokens
    ========================================================================== */
@@ -21,6 +54,29 @@
   --control-radius: 4px;
   --card-radius: 8px;
   --card-shadow: 0 10px 24px rgba(34, 43, 40, 0.08);
+  --ann-teacher: var(--danger);
+  --ann-student: #187f95;
+
+  /* shadcn-vue semantic aliases. Existing tokens remain the color source. */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: var(--paper);
+  --secondary: var(--mint);
+  --secondary-foreground: var(--ink);
+  --muted-surface: var(--mint);
+  --muted-foreground: var(--muted);
+  --accent-surface: var(--cream);
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--accent);
+  --radius: var(--card-radius);
 }
 
 :root.dark {
@@ -31,6 +87,8 @@
   --muted: #b4bdb7;
   --line: rgba(237, 244, 238, 0.18);
   --kids-panel: #1e2c3b;
+  --ann-teacher: var(--danger);
+  --ann-student: #64cce3;
 }
 
 /* ==========================================================================
@@ -959,6 +1017,39 @@ label small {
   display: none;
 }
 
+.site-record {
+  width: min(1180px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 24px 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+.site-record a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.site-record a:hover {
+  color: var(--accent);
+}
+.site-record a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 70%, white);
+  outline-offset: 3px;
+}
+.site-record img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
 .app-header a:focus-visible,
 .app-header button:focus-visible,
 .kids-shell a:focus-visible,
@@ -1752,7 +1843,9 @@ label small {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 .collapse-toggle:hover {
   background: rgba(77, 130, 194, 0.1);
@@ -1873,6 +1966,30 @@ label small {
 .kids-user img {
   width: 32px;
   height: 32px;
+}
+.kids-notifications {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+.notification-badge {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  line-height: 17px;
+  text-align: center;
+}
+.kids-notifications:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 70%, white);
+  outline-offset: 3px;
 }
 .kids-user-actions button {
   border: 0;
@@ -2010,6 +2127,66 @@ label small {
 .tasks-dashboard-page {
   max-width: 1060px;
 }
+
+.task-queue-current {
+  margin: 20px 0;
+  padding: 24px;
+  border-radius: 8px;
+  background: var(--kids-panel);
+}
+.task-queue-current h2 {
+  margin: 10px 0 6px;
+}
+.task-queue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.task-queue-upcoming {
+  margin-bottom: 18px;
+}
+.task-completed-toggle {
+  margin-top: 12px;
+}
+.task-alert {
+  margin: 10px 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--kids-sun);
+  color: var(--accent);
+}
+.task-queue .student-task-list {
+  display: grid;
+  gap: 8px;
+}
+.task-queue .student-task-list a {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 6px;
+  background: var(--kids-panel);
+}
+.task-timeline-main {
+  display: grid;
+  gap: 22px;
+  margin-top: 22px;
+}
+.task-timeline-segment > h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.task-timeline .student-task-list h3 {
+  margin: 8px 0 6px;
+  font-size: 17px;
+}
+.task-timeline-meta {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  min-width: 150px;
+  color: var(--muted);
+}
 .student-task-heading,
 .tasks-dashboard-heading {
   position: relative;
@@ -2022,53 +2199,186 @@ label small {
   background: var(--area-surface);
   color: #203c5b;
 }
-.homework-heading { background: color-mix(in srgb, var(--kids-coral) 13%, var(--kids-panel)); }
-.exam-heading { background: color-mix(in srgb, var(--kids-sky) 76%, var(--kids-panel)); }
+.homework-heading {
+  background: color-mix(in srgb, var(--kids-coral) 13%, var(--kids-panel));
+}
+.exam-heading {
+  background: color-mix(in srgb, var(--kids-sky) 76%, var(--kids-panel));
+}
 .student-task-heading > div,
-.tasks-dashboard-heading > div { position: relative; z-index: 1; max-width: 620px; }
+.tasks-dashboard-heading > div {
+  position: relative;
+  z-index: 1;
+  max-width: 620px;
+}
 .student-task-heading h1,
-.tasks-dashboard-heading h1 { margin: 0; font: 900 42px/1.2 var(--font-display); letter-spacing: 0; }
+.tasks-dashboard-heading h1 {
+  margin: 0;
+  font: 900 42px/1.2 var(--font-display);
+  letter-spacing: 0;
+}
 .student-task-heading p,
-.tasks-dashboard-heading p { margin: 12px 0 0; color: #54708d; line-height: 1.7; }
+.tasks-dashboard-heading p {
+  margin: 12px 0 0;
+  color: #54708d;
+  line-height: 1.7;
+}
 .student-task-heading img,
-.tasks-dashboard-heading img { position: absolute; right: 4%; bottom: -34px; width: 220px; height: 240px; object-fit: contain; }
-.student-task-message { margin: 20px 0 0; padding: 26px; border: 1px solid var(--line); border-radius: 8px; background: var(--kids-panel); color: var(--muted); text-align: center; }
-.student-task-error { color: var(--danger); }
-.student-task-error .button { margin-top: 10px; }
+.tasks-dashboard-heading img {
+  position: absolute;
+  right: 4%;
+  bottom: -34px;
+  width: 220px;
+  height: 240px;
+  object-fit: contain;
+}
+.student-task-message {
+  margin: 20px 0 0;
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--kids-panel);
+  color: var(--muted);
+  text-align: center;
+}
+.student-task-error {
+  color: var(--danger);
+}
+.student-task-error .button {
+  margin-top: 10px;
+}
 .student-task-empty,
-.tasks-dashboard-empty { margin-top: 20px; min-height: 190px; border: 1px solid var(--line); border-radius: 8px; background: var(--kids-panel); }
-.tasks-dashboard-empty .primary-action { display: inline-flex; margin-top: 14px; }
-.student-task-list { display: grid; gap: 10px; margin-top: 20px; }
+.tasks-dashboard-empty {
+  margin-top: 20px;
+  min-height: 190px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--kids-panel);
+}
+.tasks-dashboard-empty .primary-action {
+  display: inline-flex;
+  margin-top: 14px;
+}
+.student-task-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
 .student-task-list > a,
-.task-group-item { display: grid; grid-template-columns: minmax(0, 1fr) max-content 20px; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid rgba(55, 87, 123, 0.14); border-radius: 8px; background: var(--kids-panel); color: inherit; }
+.task-group-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content 20px;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid rgba(55, 87, 123, 0.14);
+  border-radius: 8px;
+  background: var(--kids-panel);
+  color: inherit;
+}
 .student-task-list > a:hover,
-.task-group-item:hover { border-color: var(--kids-blue); box-shadow: 0 8px 18px rgba(34, 43, 40, 0.08); }
-.task-phase { display: inline-flex; min-height: 22px; align-items: center; padding: 2px 8px; border-radius: 999px; background: var(--mint); color: var(--accent); font-size: 12px; font-weight: 800; }
+.task-group-item:hover {
+  border-color: var(--kids-blue);
+  box-shadow: 0 8px 18px rgba(34, 43, 40, 0.08);
+}
+.task-phase {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--mint);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
 .student-task-list h2,
-.task-group-item h2 { margin: 8px 0 4px; font-size: 17px; overflow-wrap: anywhere; }
+.task-group-item h2 {
+  margin: 8px 0 4px;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
 .student-task-list p,
-.task-group-item p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.task-group-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
 .task-due,
-.task-tries { color: var(--muted); font-size: 12px; text-align: right; }
-.tasks-dashboard-groups { display: grid; gap: 24px; margin-top: 22px; }
-.task-group { display: grid; gap: 9px; }
-.task-group > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.task-group > header span { display: inline-flex; align-items: center; gap: 8px; font: 800 21px/1.3 var(--font-display); }
-.task-group > header a { color: var(--kids-blue); font-size: 13px; font-weight: 800; }
-.task-group-item { grid-template-columns: minmax(0, 1fr) 20px; padding: 16px 18px; }
+.task-tries {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+.tasks-dashboard-groups {
+  display: grid;
+  gap: 24px;
+  margin-top: 22px;
+}
+.task-group {
+  display: grid;
+  gap: 9px;
+}
+.task-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.task-group > header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 800 21px/1.3 var(--font-display);
+}
+.task-group > header a {
+  color: var(--kids-blue);
+  font-size: 13px;
+  font-weight: 800;
+}
+.task-group-item {
+  grid-template-columns: minmax(0, 1fr) 20px;
+  padding: 16px 18px;
+}
 @media (max-width: 800px) {
+  .site-record {
+    width: min(100% - 32px, 1180px);
+    padding: 20px 0 28px;
+  }
+
   .student-task-heading,
-  .tasks-dashboard-heading { min-height: 205px; padding: 28px 24px; }
+  .tasks-dashboard-heading {
+    min-height: 205px;
+    padding: 28px 24px;
+  }
   .student-task-heading h1,
-  .tasks-dashboard-heading h1 { font-size: 34px; }
+  .tasks-dashboard-heading h1 {
+    font-size: 34px;
+  }
   .student-task-heading img,
-  .tasks-dashboard-heading img { right: -24px; width: 175px; opacity: 0.28; }
+  .tasks-dashboard-heading img {
+    right: -24px;
+    width: 175px;
+    opacity: 0.28;
+  }
 }
 @media (max-width: 520px) {
-  .student-task-list > a { grid-template-columns: minmax(0, 1fr) 18px; gap: 12px; }
+  .student-task-list > a {
+    grid-template-columns: minmax(0, 1fr) 18px;
+    gap: 12px;
+  }
   .task-due,
-  .task-tries { grid-column: 1 / -1; grid-row: 2; text-align: left; }
-  .student-task-list > a > .app-icon { grid-column: 2; grid-row: 1; }
+  .task-tries {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    text-align: left;
+  }
+  .student-task-list > a > .app-icon {
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
 /* —— 继续学习卡片（学习端首页，聚合接口返回的真实最近学习记录） —— */
 .continue-items {
@@ -2749,7 +3059,9 @@ label small {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--paper);
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 .work-card:hover {
   box-shadow: 0 10px 24px rgba(34, 43, 40, 0.1);
@@ -2909,7 +3221,9 @@ label small {
   background: var(--paper);
   text-align: left;
   cursor: pointer;
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 .home-work-card:hover {
   box-shadow: 0 8px 20px rgba(34, 43, 40, 0.1);
@@ -2966,7 +3280,10 @@ label small {
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
   box-sizing: border-box;
 }
 .create-hub-tabs button:hover {
@@ -3044,17 +3361,6 @@ label small {
   height: 100%;
   object-fit: cover;
   display: block;
-}
-.work-cover-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.work-cover-placeholder svg {
-  width: 100%;
-  height: 100%;
 }
 .work-cover-badge {
   position: absolute;

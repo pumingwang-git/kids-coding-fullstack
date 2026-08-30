@@ -17,7 +17,7 @@ from .course_access import (
 )
 from .lesson_homework_kinds import KINDS
 from .models import (
-    ClassMember, Course, CourseLesson, CourseLessonBlock, ExamAssignment, ExamLink,
+    ClassMember, Course, CourseLesson, CourseLessonBlock, CourseSection, ExamAssignment, ExamLink,
     LessonBlockCompletion, LessonProblemAttempt, LessonProblemBlock, Paper, PaperAttempt, User,
 )
 from .routers.exam import _phase
@@ -64,6 +64,7 @@ class TaskFacts:
     has_open_attempt: bool
     submitted_at: datetime | None
     grading_done: bool
+    attempts_left: int | None = None
 
 
 def _attempt_is_open(attempt: PaperAttempt, now: datetime) -> bool:
@@ -94,7 +95,7 @@ def practice_phase(completed: bool, tries: int) -> str:
 
 
 def _visible_blocks(db: Session, user: User,
-                    block_types: list[str]) -> list[tuple[CourseLesson, CourseLessonBlock, Course]]:
+                    block_types: list[str]) -> list[tuple[CourseLesson, CourseLessonBlock, Course, CourseSection]]:
     """已开通课包中当前可进入的块，作业与练习共用同一套两道闸门。"""
     course_ids = enrolled_course_ids(db, user)
     if not course_ids:
@@ -103,10 +104,12 @@ def _visible_blocks(db: Session, user: User,
     candidates_by_lesson: dict[int, list[CourseLessonBlock]] = defaultdict(list)
     lessons: dict[int, CourseLesson] = {}
     courses: dict[int, Course] = {}
-    for block, lesson, course in db.execute(
-        select(CourseLessonBlock, CourseLesson, Course)
+    sections: dict[int, CourseSection] = {}
+    for block, lesson, course, section in db.execute(
+        select(CourseLessonBlock, CourseLesson, Course, CourseSection)
         .join(CourseLesson, CourseLesson.id == CourseLessonBlock.lesson_id)
         .join(Course, Course.id == CourseLesson.course_id)
+        .join(CourseSection, CourseSection.id == CourseLesson.section_id)
         .where(
             CourseLesson.course_id.in_(course_ids),
             CourseLessonBlock.block_type.in_(block_types),
@@ -116,6 +119,7 @@ def _visible_blocks(db: Session, user: User,
         candidates_by_lesson[lesson.id].append(block)
         lessons[lesson.id] = lesson
         courses[course.id] = course
+        sections[section.id] = section
 
     ordered_by_lesson: dict[int, list[CourseLessonBlock]] = defaultdict(list)
     if lessons:
@@ -127,14 +131,14 @@ def _visible_blocks(db: Session, user: User,
         ):
             ordered_by_lesson[block.lesson_id].append(block)
 
-    visible: list[tuple[CourseLesson, CourseLessonBlock, Course]] = []
+    visible: list[tuple[CourseLesson, CourseLessonBlock, Course, CourseSection]] = []
     for lesson_id, lesson in lessons.items():
         ordered = ordered_by_lesson[lesson_id]
         completed = completed_block_ids(db, user, lesson_id)
         granted = lesson_access(db, user, lesson) is Access.GRANTED
         for block in candidates_by_lesson[lesson_id]:
             if block_gate(db, user, lesson, block, ordered, completed, granted)["lock_reason"] is None:
-                visible.append((lesson, block, courses[lesson.course_id]))
+                visible.append((lesson, block, courses[lesson.course_id], sections[lesson.section_id]))
     return visible
 
 
@@ -144,7 +148,7 @@ def collect_homework_candidates(db: Session, user: User) -> list[dict]:
     visible = _visible_blocks(db, user, list(kinds_by_block_type))
 
     ids_by_kind: dict[object, list[int]] = defaultdict(list)
-    for _lesson, block, _course in visible:
+    for _lesson, block, _course, _section in visible:
         kind = kinds_by_block_type[block.block_type]
         ids_by_kind[kind].append(block.id)
     facts_by_kind = {kind: kind.student_facts(db, user, ids)
@@ -152,16 +156,19 @@ def collect_homework_candidates(db: Session, user: User) -> list[dict]:
     return [{"source_type": kinds_by_block_type[block.block_type].student_source_type,
              "source_id": block.id, "lesson_id": lesson.id, "block_id": block.id,
              "course_id": course.id, "course_title": course.title,
-             "lesson_title": lesson.title, "title": block.title,
+            "lesson_title": lesson.title, "title": block.title,
+             "section_id": section.id, "section_title": section.title,
+             "section_sort": section.sort_order, "lesson_sort": lesson.sort_order,
+             "block_sort": block.sort_order,
              "kind": kind.key, "facts": facts_by_kind[kind][block.id]}
-            for lesson, block, course in visible
+            for lesson, block, course, section in visible
             for kind in (kinds_by_block_type[block.block_type],)]
 
 
 def collect_practice_candidates(db: Session, user: User) -> list[dict]:
     """批量收集可进入的课中练习及其完成/作答事实。"""
     visible = _visible_blocks(db, user, ["practice"])
-    block_ids = [block.id for _lesson, block, _course in visible]
+    block_ids = [block.id for _lesson, block, _course, _section in visible]
     details = {detail.block_id: detail for detail in db.scalars(
         select(LessonProblemBlock).where(LessonProblemBlock.block_id.in_(block_ids or [0]))
     )}
@@ -180,11 +187,14 @@ def collect_practice_candidates(db: Session, user: User) -> list[dict]:
     return [{"source_type": SOURCE_LESSON_PRACTICE, "source_id": block.id,
              "title": block.title, "course_id": course.id, "course_title": course.title,
              "lesson_id": lesson.id, "lesson_title": lesson.title,
+             "section_id": section.id, "section_title": section.title,
+             "section_sort": section.sort_order, "lesson_sort": lesson.sort_order,
+             "block_sort": block.sort_order,
              "problem_id_no": details[block.id].problem_id_no,
              "completed": block.id in completed,
              "tries": attempts[block.id].tries if block.id in attempts else 0,
              "last_correct": attempts[block.id].last_correct if block.id in attempts else None}
-            for lesson, block, course in visible if block.id in details]
+            for lesson, block, course, section in visible if block.id in details]
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -198,7 +208,9 @@ def build_homework_item(candidate: dict, phase: str) -> dict:
                   "title": candidate["title"]},
         "phase": phase, "phase_label": HOMEWORK_PHASE_LABELS[phase],
         "due_at": _iso(candidate["facts"].due_at),
+        "attempts_left": candidate["facts"].attempts_left,
         "origin": {"course_id": candidate["course_id"], "course_title": candidate["course_title"],
+                   "section_id": candidate["section_id"], "section_title": candidate["section_title"],
                    "lesson_id": candidate["lesson_id"], "lesson_title": candidate["lesson_title"]},
         "entry": {"kind": candidate["source_type"], "lesson_id": candidate["lesson_id"],
                   "block_id": candidate["block_id"]},
@@ -212,6 +224,9 @@ def build_practice_item(candidate: dict, phase: str) -> dict:
                   "title": candidate["title"]},
         "phase": phase, "phase_label": PRACTICE_PHASE_LABELS[phase],
         "origin": {"course_id": candidate["course_id"], "course_title": candidate["course_title"],
+                   "section_id": candidate["section_id"], "section_title": candidate["section_title"],
+                   "section_sort": candidate["section_sort"], "lesson_sort": candidate["lesson_sort"],
+                   "block_sort": candidate["block_sort"],
                    "lesson_id": candidate["lesson_id"], "lesson_title": candidate["lesson_title"]},
         "entry": {"kind": SOURCE_LESSON_PRACTICE, "lesson_id": candidate["lesson_id"],
                   "block_id": candidate["source_id"]},

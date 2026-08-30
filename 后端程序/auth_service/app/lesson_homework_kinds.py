@@ -299,10 +299,11 @@ def _paper_student_facts(db: Session, user: User, block_ids: list[int]) -> dict[
 
     if not block_ids:
         return {}
-    due_by_block = dict(db.execute(
-        select(LessonPaperBlock.block_id, LessonPaperBlock.due_at)
+    config_rows = db.execute(
+        select(LessonPaperBlock.block_id, LessonPaperBlock.due_at, LessonPaperBlock.attempt_limit)
         .where(LessonPaperBlock.block_id.in_(block_ids))
-    ).all())
+    ).all()
+    config_by_block = {row[0]: (row[1], row[2]) for row in config_rows}
     attempts = list(db.scalars(
         select(PaperAttempt).where(
             PaperAttempt.source_type == SOURCE_LESSON_HOMEWORK,
@@ -328,12 +329,14 @@ def _paper_student_facts(db: Session, user: User, block_ids: list[int]) -> dict[
         rows = by_block.get(block_id, [])
         latest = max((row for row in rows if row.status == "submitted"),
                      key=lambda row: (row.submitted_at or row.created_at, row.id), default=None)
+        due_at, limit = config_by_block.get(block_id, (None, None))
         facts[block_id] = TaskFacts(
-            due_at=due_by_block.get(block_id),
+            due_at=due_at,
             has_open_attempt=any(_attempt_is_open(row, now) for row in rows),
             submitted_at=latest.submitted_at if latest else None,
             grading_done=(all(status != "pending" for status in answer_statuses[latest.id])
                           if latest else False),
+            attempts_left=None if not limit else max(0, limit - len(rows)),
         )
     return facts
 
@@ -345,9 +348,11 @@ def _paper_class_facts(db: Session, block_id: int,
 
     if not user_ids:
         return {}
-    due_at = db.scalar(
-        select(LessonPaperBlock.due_at).where(LessonPaperBlock.block_id == block_id)
-    )
+    config_rows = db.execute(
+        select(LessonPaperBlock.due_at, LessonPaperBlock.attempt_limit)
+        .where(LessonPaperBlock.block_id == block_id)
+    ).all()
+    due_at, limit = config_rows[0] if config_rows else (None, None)
     attempts = list(db.scalars(
         select(PaperAttempt).where(
             PaperAttempt.source_type == SOURCE_LESSON_HOMEWORK,
@@ -379,6 +384,7 @@ def _paper_class_facts(db: Session, block_id: int,
             submitted_at=latest.submitted_at if latest else None,
             grading_done=(all(status != "pending" for status in answer_statuses[latest.id])
                           if latest else False),
+            attempts_left=None if not limit else max(0, limit - len(rows)),
         )
     return facts
 

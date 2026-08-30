@@ -12,7 +12,9 @@ from test_lesson_problem_blocks import seed_paper
 from test_lesson_practice import answer, build_practice, seed_choice_problem
 from test_scratch import build_scratch_lesson
 
-from app.models import LessonPaperBlock, PaperAttempt, Problem, ProblemTag, Tag, User
+from app.models import (
+    CourseLessonBlock, LessonPaperBlock, PaperAttempt, Problem, ProblemTag, Tag, User,
+)
 from app.routers.exam import _phase
 from app.student_tasks import (
     EXAM_PHASE_GROUPS,
@@ -141,7 +143,7 @@ def test_paper_empty_submission_is_explicitly_grading_done():
 
         def execute(self, _statement):
             self.execute_calls += 1
-            rows = [(7, None)] if self.execute_calls == 1 else []
+            rows = [(7, None, None)] if self.execute_calls == 1 else []
             return Result(rows)
 
         def scalars(self, _statement):
@@ -286,15 +288,81 @@ def test_homework_endpoint_returns_contract_and_validates_filters(tmp_path: Path
     body = response.json()
     assert body["total"] == 1 and body["page_size"] == 20
     item = body["items"][0]
-    assert set(item) == {"source_type", "source_id", "scope", "phase", "phase_label",
-                         "due_at", "origin", "entry"}
+    assert set(item) == {
+        "source_type", "source_id", "scope", "phase", "phase_label",
+        "due_at", "attempts_left", "segment", "origin", "entry",
+    }
     assert item["source_type"] == "lesson_homework"
     assert item["due_at"] is None
+    assert item["attempts_left"] is None
+    assert item["segment"] == "later"
+    assert item["origin"]["section_id"]
+    assert item["origin"]["section_title"]
     assert item["entry"] == {"kind": "lesson_homework", "lesson_id": built["lesson_id"],
                               "block_id": built["block_ids"][0]}
     assert student.get("/api/student/homework?status=bad").status_code == 422
     assert student.get("/api/student/homework?sort=created_at").status_code == 422
     assert student.get("/api/student/homework?page_size=101").status_code == 422
+
+
+def test_homework_counts_follow_filters_without_rescanning_candidates(tmp_path: Path, monkeypatch):
+    app = build_app(tmp_path)
+    student = student_login(app)
+    paper_id = seed_paper(app)["paper_id"]
+    first = build_lesson_with_blocks(
+        app, [{"block_type": "homework", "paper_id": paper_id}], open_policy="closed",
+    )
+    second = build_lesson_with_blocks(
+        app, [{"block_type": "homework", "paper_id": paper_id}], open_policy="closed",
+    )
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=first["course_id"])
+    set_enrollment(app, student_id=user.id, course_id=second["course_id"])
+
+    calls = 0
+    original = student_tasks_router.collect_homework_candidates
+
+    def counted(db, current_user):
+        nonlocal calls
+        calls += 1
+        return original(db, current_user)
+
+    monkeypatch.setattr(student_tasks_router, "collect_homework_candidates", counted)
+    response = student.get(f"/api/student/homework?course_id={first['course_id']}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 1
+    assert body["counts"] == {
+        "due_48h": 0, "this_week": 0, "later": 1,
+        "overdue": 0, "submitted": 0, "graded": 0,
+    }
+    assert body["items"][0]["segment"] == "later"
+    assert calls == 1
+
+
+def test_homework_week_boundary_uses_shanghai_local_week():
+    now = datetime(2026, 8, 30, 15, 0, tzinfo=UTC)
+    assert student_tasks_router._week_end_utc(now) == datetime(
+        2026, 8, 30, 15, 59, 59, 999999, tzinfo=UTC,
+    )
+
+
+def test_homework_due_within_48_hours_wins_over_next_week_segment():
+    # 北京时间周日 10:00 到周一 09:00 只有 23 小时；跨周不能降低紧急程度。
+    now = datetime(2026, 8, 30, 2, 0, tzinfo=UTC)
+    due_at = datetime(2026, 8, 31, 1, 0, tzinfo=UTC)
+    candidate = {
+        "facts": TaskFacts(
+            due_at=due_at,
+            has_open_attempt=False,
+            submitted_at=None,
+            grading_done=False,
+        ),
+    }
+
+    assert student_tasks_router._homework_segment(
+        candidate, "todo", now, student_tasks_router._week_end_utc(now),
+    ) == "due_48h"
 
 
 def test_practice_endpoint_has_three_phases_and_no_problem_identity(tmp_path: Path):
@@ -414,6 +482,42 @@ def test_practice_endpoint_paginates_second_page_and_keeps_total(tmp_path: Path)
     assert [item["source_id"] for item in body["items"]] == built["block_ids"][20:]
 
 
+def test_practice_queue_orders_later_created_block_by_course_sort_order(tmp_path: Path):
+    """队列同级必须按课程结构排序，不能退回 block.id 创建顺序。"""
+    app = build_app(tmp_path)
+    student = student_login(app)
+    problem_numbers = [
+        seed_choice_problem(app, problem_id_no=f"Q34000{index}")["problem_id_no"]
+        for index in (1, 2)
+    ]
+    built = build_lesson_with_blocks(app, [
+        {"block_type": "practice", "title": "先创建",
+         "problem_id_no": problem_numbers[0], "display_no": "1"},
+        {"block_type": "practice", "title": "后创建但排前",
+         "problem_id_no": problem_numbers[1], "display_no": "2"},
+    ], open_policy="closed")
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=built["course_id"])
+
+    db = app.state.session_factory()
+    try:
+        first = db.get(CourseLessonBlock, built["block_ids"][0])
+        second = db.get(CourseLessonBlock, built["block_ids"][1])
+        first.sort_order = 20
+        db.flush()
+        second.sort_order = 0
+        db.commit()
+    finally:
+        db.close()
+
+    response = student.get("/api/student/practice/queue?preview=1")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["current"]["source_id"] == built["block_ids"][1]
+    assert body["upcoming"][0]["source_id"] == built["block_ids"][0]
+    assert body["current"]["origin"]["block_sort"] == 0
+
+
 def test_exam_phase_groups_every_existing_exam_window():
     source = SimpleNamespace(
         open_at=NOW + timedelta(hours=2), close_at=NOW + timedelta(hours=3), entry_open_minutes=30,
@@ -507,9 +611,10 @@ def test_tasks_overview_includes_running_exam_and_classifies_remaining_groups(tm
                         lambda db, user, now: [({"source_id": 9, "phase": "running"}, "running")])
     body = student.get("/api/student/tasks/overview").json()
     assert body["in_progress"]["items"] == [{"source_id": 9, "phase": "running"}]
-    assert body["to_review"]["items"] == [{"id": 1, "phase": "graded"}]
+    assert body["to_review"]["items"] == [{"id": 1, "phase": "graded", "segment": "graded"}]
     assert body["unfinished"]["items"] == [
-        {"id": 3, "phase": "in_progress"}, {"id": 2, "phase": "overdue"}
+        {"id": 3, "phase": "in_progress"},
+        {"id": 2, "phase": "overdue", "segment": "overdue"},
     ]
 
 

@@ -813,7 +813,7 @@ def _entry_blocker(source: AttemptSource, now: datetime, used: int, ongoing: Pap
     if open_at and now < open_at:
         return f"考试尚未开始，开始时间 {open_at.astimezone(UTC).strftime('%Y-%m-%d %H:%M')} UTC。"
     if close_at and now >= close_at:
-        return "考试已结束。"
+        return "作业已过截止时间，不能再提交了。" if source.source_type == SOURCE_LESSON_HOMEWORK else "考试已结束。"
     # 续做要排在次数检查之前，否则刷新页面会被自己的 ongoing 顶掉一次机会。
     if ongoing is not None:
         return None

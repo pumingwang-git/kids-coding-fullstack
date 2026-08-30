@@ -12,6 +12,9 @@ function query(params = {}) {
 export function fetchPracticeTasks(params) {
   return request(`/api/student/practice${query(params)}`);
 }
+export function fetchPracticeQueue(params) {
+  return request(`/api/student/practice/queue${query(params)}`);
+}
 
 export function fetchHomeworkTasks(params) {
   return request(`/api/student/homework${query(params)}`);

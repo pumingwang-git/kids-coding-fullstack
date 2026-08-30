@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import AppIcon from "../components/AppIcon.vue";
 import { fetchTaskOverview } from "../services/studentTasks";
+import { taskEntryPath } from "../services/taskEntry";
 
 const route = useRoute();
 const areaKey = computed(() => String(route.params.areaKey || "kids"));
@@ -28,12 +29,7 @@ async function load() {
   finally { loading.value = false; }
 }
 function taskPath(item) {
-  if (item.kind === "mistakes_review") return `/areas/${areaKey.value}/tasks/mistakes/review`;
-  if (item.entry?.kind === "exam_link") return `/exam/${encodeURIComponent(item.entry.token)}`;
-  if (item.entry?.kind === "lesson_homework") return `/learn/${item.entry.lesson_id}/homework/${item.entry.block_id}`;
-  if (item.entry?.lesson_id) return `/learn/${item.entry.lesson_id}`;
-  if (item.continue_lesson_id) return `/learn/${item.continue_lesson_id}`;
-  return `/areas/${areaKey.value}/courses`;
+  return taskEntryPath(item, { areaKey: areaKey.value });
 }
 function itemTitle(item) {
   if (item.kind === "mistakes_review") return `重练 ${item.total} 道错题`;

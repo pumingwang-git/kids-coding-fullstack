@@ -25,11 +25,13 @@ class _Rows:
 
 
 class _PaperDb:
-    def __init__(self, attempts, due_at=None, answer_rows=()):
+    def __init__(self, attempts, due_at=None, attempt_limit=None, answer_rows=()):
         self.attempts = attempts
         self.due_at = due_at
+        self.attempt_limit = attempt_limit
         self.answer_rows = answer_rows
         self.calls = 0
+        self.execute_calls = 0
 
     def scalar(self, _statement):
         self.calls += 1
@@ -41,6 +43,11 @@ class _PaperDb:
 
     def execute(self, _statement):
         self.calls += 1
+        self.execute_calls += 1
+        if self.execute_calls == 1:
+            if len(_statement.selected_columns) == 3:
+                return _Rows([(3, self.due_at, self.attempt_limit)])
+            return _Rows([(self.due_at, self.attempt_limit)])
         return _Rows(self.answer_rows)
 
 
