@@ -20,6 +20,23 @@ from test_admin_role_change import login_as, login_root, seed_admin
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 ADMIN_DIR = SERVICE_ROOT.parents[1] / "前端程序" / "study-blog-vue" / "public" / "admin"
 
+# 已进目录、但功能尚未实现的 capability。功能落地后必须从这里删除，
+# 否则守卫会继续允许没有真实闸门的能力存在。
+PENDING_CAPABILITY_WIRING = {
+    "realtime_assist": "M3 · 《58》§5.1 / 《67》C 线",
+    "support_content_request": "M3-H1 · 《58》§2.7",
+    "support_content_approve": "M3-H1 · 《58》§2.7",
+}
+
+# capability 必须在管理路由中以字面量或真实授权谓词出现；
+# help_respond 通过 help_requests.py 调用其专用谓词接线。
+ROUTER_CAPABILITY_MARKERS = {
+    key: (f'"{key}"', f"'{key}'") for key in CAPABILITY_CATALOG
+}
+ROUTER_CAPABILITY_MARKERS["help_respond"] = (
+    "_require_help_respond(admin, db)",
+)
+
 
 def _load_migration(name: str):
     path = SERVICE_ROOT / "alembic" / "versions" / f"{name}.py"
@@ -31,16 +48,17 @@ def _load_migration(name: str):
 
 
 def test_every_capability_is_read_by_at_least_one_gate():
-    """目录中的每项 capability 都必须在 permissions.py 外被功能闸读取。"""
+    """目录中的每项 capability 都必须被路由功能闸读取，或登记为待接线。"""
     sources = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in (SERVICE_ROOT / "app").rglob("*.py")
-        if path.name != "permissions.py" and "__pycache__" not in str(path)
+        for path in (SERVICE_ROOT / "app" / "routers").rglob("*.py")
+        if "__pycache__" not in str(path)
     )
     unenforced = [
         key
         for key in CAPABILITY_CATALOG
-        if f'"{key}"' not in sources and f"'{key}'" not in sources
+        if key not in PENDING_CAPABILITY_WIRING
+        and not any(marker in sources for marker in ROUTER_CAPABILITY_MARKERS[key])
     ]
     assert unenforced == [], f"以下权限只在目录里存在，没有任何闸门读取：{unenforced}"
 
