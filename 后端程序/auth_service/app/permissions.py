@@ -105,6 +105,10 @@ CAPABILITY_CATALOG = {
     "results_read": {"group": "教学", "label": "查看学情", "description": "按数据范围查看学员、作业和考试结果。"},
     "scratch_review": {"group": "教学", "label": "批改学生作品", "description": "按带班范围查看并批改学生 Scratch 作品。"},
     "announcements_send": {"group": "教学", "label": "发布班级公告", "description": "向权限范围内的班级发布公告。"},
+    "help_respond": {"group": "教学", "label": "回复学生答疑", "description": "查看并回复带班范围内的学生答疑。"},
+    "realtime_assist": {"group": "教学", "label": "发起实时答疑", "description": "在带班范围内邀请学生连线并编写讲解稿。"},
+    "support_content_request": {"group": "安全", "label": "申请查看答疑正文", "description": "申请临时查看答疑正文或截图。"},
+    "support_content_approve": {"group": "安全", "label": "批准答疑正文查看", "description": "批准有时限且可审计的答疑内容查看申请。"},
     "manage_classes": {"group": "教务", "label": "管理班级", "description": "新建班级并维护成员和带班关系。"},
     "manage_enrollments": {"group": "教务", "label": "管理课程开通", "description": "新增、撤销和调整课程资格。"},
     "export_class_insight": {"group": "数据", "label": "导出班级学情", "description": "导出权限范围内的学员姓名与成绩。"},
@@ -126,15 +130,17 @@ ROLE_CAPABILITIES = {
     ACADEMIC_ADMIN_ROLE: _capabilities(
         "class_read", "results_read", "scratch_review", "announcements_send",
         "manage_classes", "manage_enrollments", "export_class_insight",
-        "export_class_relationships",
+        "export_class_relationships", "support_content_request",
     ),
     TEACHER_ROLE: _capabilities(
         "class_read", "results_read", "scratch_review", "announcements_send",
-        "export_class_insight", "export_class_relationships",
+        "export_class_insight", "export_class_relationships", "help_respond",
+        "realtime_assist",
     ),
     ASSISTANT_ROLE: _capabilities(
         "class_read", "results_read", "scratch_review", "announcements_send",
-        "export_class_insight", "export_class_relationships",
+        "export_class_insight", "export_class_relationships", "help_respond",
+        "realtime_assist",
     ),
     "reviewer": _capabilities("content_review"),
     "editor": _capabilities("content_edit"),
@@ -147,6 +153,7 @@ ALL_MENU_PAGES = (
     "courses.html", "learning-catalog.html", "nodes.html", "materials.html",
     "videos.html", "students.html", "enrollments.html", "classes.html",
     "teaching.html", "reports.html", "homework-results.html",
+    "help-desk.html", "support-content.html",
     "accounts.html", "audit-logs.html",
 )
 
@@ -174,6 +181,8 @@ PAGE_CAPABILITY_ANY = {
     "teaching.html": ("class_read", "announcements_send"),
     "reports.html": ("results_read",),
     "homework-results.html": ("results_read",),
+    "help-desk.html": ("help_respond", "support_content_request"),
+    "support-content.html": ("support_content_request", "support_content_approve"),
     "accounts.html": ("manage_admin_accounts", "manage_admin_roles"),
     "audit-logs.html": ("audit_events_read",),
 }
@@ -249,8 +258,6 @@ def _snapshot_from_values(
     is_protected: bool,
     is_assignable: bool,
 ) -> AuthorizationSnapshot:
-    if role_key == SUPER_ROLE:
-        enabled_capabilities = set(CAPABILITY_CATALOG)
     capabilities = MappingProxyType(_capabilities(*enabled_capabilities))
     menus = pages_for_capabilities(capabilities)
     allowed_pages = tuple(dict.fromkeys((
@@ -282,15 +289,20 @@ def authorization_snapshot(db, admin) -> AuthorizationSnapshot:
 
     role = db.get(AdminRole, admin.role) if db is not None else None
     if role is not None and role.deleted_at is None:
-        enabled = set(db.scalars(
-            select(AdminRoleCapability.capability_key).where(
-                AdminRoleCapability.role_key == role.key
-            )
-        ))
+        if role.key == SUPER_ROLE:
+            enabled = set(CAPABILITY_CATALOG)
+            scope = GLOBAL_SCOPE
+        else:
+            enabled = set(db.scalars(
+                select(AdminRoleCapability.capability_key).where(
+                    AdminRoleCapability.role_key == role.key
+                )
+            ))
+            scope = role.scope
         snapshot = _snapshot_from_values(
             role_key=role.key,
             role_label=role.label,
-            scope=role.scope,
+            scope=scope,
             revision=role.revision,
             enabled_capabilities=enabled,
             is_system=role.is_system,
@@ -336,15 +348,19 @@ def role_options(db, *, assignable_only: bool = False, include_retired: bool = F
     roles = list(db.scalars(query))
     result = []
     for role in roles:
-        enabled = set(db.scalars(
-            select(AdminRoleCapability.capability_key).where(
-                AdminRoleCapability.role_key == role.key
-            )
-        ))
+        enabled = (
+            set(CAPABILITY_CATALOG)
+            if role.key == SUPER_ROLE
+            else set(db.scalars(
+                select(AdminRoleCapability.capability_key).where(
+                    AdminRoleCapability.role_key == role.key
+                )
+            ))
+        )
         snapshot = _snapshot_from_values(
             role_key=role.key,
             role_label=role.label,
-            scope=role.scope,
+            scope=GLOBAL_SCOPE if role.key == SUPER_ROLE else role.scope,
             revision=role.revision,
             enabled_capabilities=enabled,
             is_system=role.is_system,
@@ -387,6 +403,16 @@ def ensure_admin_role_catalog(session_factory) -> None:
         existing = set(db.scalars(select(AdminRole.key)))
         for index, role_key in enumerate(KNOWN_ROLE_NAMES):
             if role_key in existing:
+                if role_key == SUPER_ROLE:
+                    role = db.get(AdminRole, role_key)
+                    role.scope = GLOBAL_SCOPE
+                    current = set(db.scalars(
+                        select(AdminRoleCapability.capability_key).where(
+                            AdminRoleCapability.role_key == role_key
+                        )
+                    ))
+                    for capability in set(CAPABILITY_CATALOG) - current:
+                        db.add(AdminRoleCapability(role_key=role_key, capability_key=capability))
                 continue
             role = AdminRole(
                 key=role_key,

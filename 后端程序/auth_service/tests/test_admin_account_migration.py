@@ -94,6 +94,73 @@ def test_0072_seeds_dynamic_role_catalog_and_account_revision(tmp_path, monkeypa
         get_settings.cache_clear()
 
 
+def test_0074_adds_and_removes_help_capability_grants(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path / 'help-capabilities-0074.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    get_settings.cache_clear()
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "alembic"))
+    engine = sa.create_engine(url)
+    try:
+        command.upgrade(config, "0073_scratch_work_cover")
+        command.upgrade(config, "0074_help_chat_realtime")
+        with engine.connect() as connection:
+            grants = set(connection.execute(sa.text(
+                "SELECT role_key, capability_key FROM admin_role_capabilities "
+                "WHERE capability_key LIKE 'help_%' "
+                "OR capability_key LIKE 'realtime_%' "
+                "OR capability_key LIKE 'support_content_%'"
+            )).all())
+        assert grants == {
+            ("teacher", "help_respond"),
+            ("teacher", "realtime_assist"),
+            ("assistant", "help_respond"),
+            ("assistant", "realtime_assist"),
+            ("academic_admin", "support_content_request"),
+            ("super_admin", "support_content_request"),
+            ("super_admin", "support_content_approve"),
+        }
+
+        command.downgrade(config, "0073_scratch_work_cover")
+        with engine.connect() as connection:
+            remaining = connection.scalar(sa.text(
+                "SELECT count(*) FROM admin_role_capabilities "
+                "WHERE capability_key LIKE 'help_%' "
+                "OR capability_key LIKE 'realtime_%' "
+                "OR capability_key LIKE 'support_content_%'"
+            ))
+        assert remaining == 0
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
+
+
+def test_0081_grants_super_admin_help_response(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path / 'super-help-capability-0081.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    get_settings.cache_clear()
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "alembic"))
+    engine = sa.create_engine(url)
+    try:
+        command.upgrade(config, "0080_restore_help_assign_rev")
+        with engine.connect() as connection:
+            assert connection.scalar(sa.text(
+                "SELECT count(*) FROM admin_role_capabilities "
+                "WHERE role_key = 'super_admin' AND capability_key = 'help_respond'"
+            )) == 0
+
+        command.upgrade(config, "0081_grant_super_help_respond")
+        with engine.connect() as connection:
+            assert connection.scalar(sa.text(
+                "SELECT count(*) FROM admin_role_capabilities "
+                "WHERE role_key = 'super_admin' AND capability_key = 'help_respond'"
+            )) == 1
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
+
+
 def test_0072_downgrade_refuses_accounts_using_custom_roles(tmp_path, monkeypatch):
     url = f"sqlite:///{tmp_path / 'dynamic-rbac-0072-refuse.db'}"
     monkeypatch.setenv("DATABASE_URL", url)

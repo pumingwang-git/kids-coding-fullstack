@@ -266,6 +266,36 @@ class NotificationReceipt(Base):
     )
 
 
+class HelpChatLine(Base):
+    """One student's durable help thread inside one class membership period."""
+
+    __tablename__ = "help_chat_lines"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("class_groups.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    last_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_help_chat_lines_active", "class_id", "student_id", unique=True,
+            sqlite_where=sa.text("ended_at IS NULL"),
+            postgresql_where=sa.text("ended_at IS NULL"),
+        ),
+    )
+
+
 class HelpRequest(Base):
     """Asynchronous student-to-teacher teaching support ticket."""
 
@@ -280,15 +310,23 @@ class HelpRequest(Base):
     assigned_admin_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=True, index=True
     )
+    chat_line_id: Mapped[int] = mapped_column(
+        ForeignKey("help_chat_lines.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     body: Mapped[str] = mapped_column(Text, nullable=False)
     context_type: Mapped[str] = mapped_column(String(64), nullable=False)
     context_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    context_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    context_key: Mapped[str] = mapped_column(String(255), nullable=False)
     request_key_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open", index=True)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     assignment_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (
@@ -298,6 +336,7 @@ class HelpRequest(Base):
             name="ck_help_requests_status_matches_closed_at",
         ),
         UniqueConstraint("student_id", "request_key_hash", name="uq_help_requests_student_key"),
+        UniqueConstraint("chat_line_id", "context_key", name="uq_help_requests_line_context"),
     )
 
 
@@ -305,7 +344,7 @@ class HelpMessage(Base):
     __tablename__ = "help_messages"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     help_request_id: Mapped[int] = mapped_column(
-        ForeignKey("help_requests.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("help_requests.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     sender_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True
@@ -325,6 +364,81 @@ class HelpMessage(Base):
             name="ck_help_messages_one_sender",
         ),
         UniqueConstraint("help_request_id", "sender_admin_user_id", "request_key_hash", name="uq_help_messages_admin_key"),
+        UniqueConstraint("help_request_id", "sender_user_id", "request_key_hash", name="uq_help_messages_student_key"),
+    )
+
+
+class HelpMessageAttachment(Base):
+    """Private file attached to a help message.
+
+    Object files are removed on withdrawal/expiry, but the row is retained so a
+    conversation can accurately show that an attachment used to exist.
+    """
+
+    __tablename__ = "help_message_attachments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    help_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("help_messages.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    mime: Mapped[str] = mapped_column(String(128), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    uploaded_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    uploaded_by_admin_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('image', 'text_file')", name="ck_help_attachment_kind"),
+        CheckConstraint("byte_size > 0", name="ck_help_attachment_byte_size"),
+        CheckConstraint(
+            "(uploaded_by_user_id IS NOT NULL AND uploaded_by_admin_user_id IS NULL) OR "
+            "(uploaded_by_user_id IS NULL AND uploaded_by_admin_user_id IS NOT NULL)",
+            name="ck_help_attachments_one_uploader",
+        ),
+    )
+
+
+class HelpChatLineRead(Base):
+    """Per-teacher cursor used to calculate queue unread counts."""
+
+    __tablename__ = "help_chat_line_reads"
+    admin_user_id: Mapped[int] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"), primary_key=True
+    )
+    chat_line_id: Mapped[int] = mapped_column(
+        ForeignKey("help_chat_lines.id", ondelete="RESTRICT"), primary_key=True
+    )
+    last_read_message_id: Mapped[int] = mapped_column(
+        ForeignKey("help_messages.id", ondelete="RESTRICT"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class HelpChatLineStudentRead(Base):
+    """学生在一条答疑会话中最后读到的消息，用于教师回复的已读回执。"""
+
+    __tablename__ = "help_chat_line_student_reads"
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True
+    )
+    chat_line_id: Mapped[int] = mapped_column(
+        ForeignKey("help_chat_lines.id", ondelete="RESTRICT"), primary_key=True
+    )
+    last_read_message_id: Mapped[int] = mapped_column(
+        ForeignKey("help_messages.id", ondelete="RESTRICT"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 

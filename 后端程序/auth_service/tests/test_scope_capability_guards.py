@@ -63,16 +63,24 @@ def test_every_capability_is_read_by_at_least_one_gate():
     assert unenforced == [], f"以下权限只在目录里存在，没有任何闸门读取：{unenforced}"
 
 
-def test_0072_seed_equals_code_owned_role_matrix():
-    """生产迁移种子必须与代码拥有的内置角色矩阵保持一致。"""
-    migration = _load_migration("0072_dynamic_admin_rbac")
+def test_migration_seeds_equal_code_owned_role_matrix():
+    """0072 基线与后续增量的并集必须等于当前内置角色矩阵。"""
+    baseline = _load_migration("0072_dynamic_admin_rbac")
+    help_contract = _load_migration("0074_help_chat_realtime")
+    super_help_contract = _load_migration("0081_grant_super_help_respond")
     code = {
         role: frozenset(key for key, enabled in capabilities.items() if enabled)
         for role, capabilities in ROLE_CAPABILITIES.items()
     }
-    assert {role: frozenset(grants) for role, grants in migration.ROLE_GRANTS.items()} == code
-    assert set(migration.CAPABILITIES) == set(CAPABILITY_CATALOG)
-    assert {key: (label, scope) for key, label, scope, *_ in migration.ROLE_SEEDS} == {
+    seeded = {
+        role: frozenset(baseline.ROLE_GRANTS[role])
+        | frozenset(help_contract.ROLE_GRANTS.get(role, ()))
+        | frozenset(super_help_contract.ROLE_GRANTS.get(role, ()))
+        for role in code
+    }
+    assert seeded == code
+    assert set(baseline.CAPABILITIES) | set(help_contract.CAPABILITIES) == set(CAPABILITY_CATALOG)
+    assert {key: (label, scope) for key, label, scope, *_ in baseline.ROLE_SEEDS} == {
         role: (ROLE_LABELS[role], ROLE_SCOPES[role]) for role in KNOWN_ROLE_NAMES
     }
 
