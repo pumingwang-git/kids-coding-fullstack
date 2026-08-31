@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     # 扫描的引用列不同，混在 data/media 里两个清理口径会互相干扰。
     # URL 形如 /course-covers/ab/abcd….png，由 nginx 直发；大小/缩放上限复用 media_*。
     course_cover_upload_root: str = "data/course_covers"
+    # 答疑附件始终经应用判权后下发，绝不作为静态公开目录暴露。
+    help_attachment_upload_root: str = "data/help_attachments"
+    help_attachment_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1 * 1024 * 1024, le=20 * 1024 * 1024)
+    help_attachment_retention_days: int = Field(default=30, ge=1, le=365)
     # 学生头像：独立存储区域（文档 28 P2）。绝不能并进 data/media——cleanup_media 的
     # _SCANNED_COLUMNS 不含 student_profiles.avatar_url，头像会被当孤儿清掉。
     # URL 形如 /avatars/ab/abcd….png，由 StaticFiles / nginx 直发；白名单格式与

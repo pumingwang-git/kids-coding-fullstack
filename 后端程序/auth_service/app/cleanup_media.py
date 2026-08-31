@@ -34,7 +34,7 @@ from sqlalchemy import select
 
 from .config import get_settings
 from .database import build_database
-from .models import ChoiceOption, Course, CourseCover, MediaAsset, Problem
+from .models import ChoiceOption, Course, CourseCover, HelpMessageAttachment, MediaAsset, Problem
 from .routers.admin_media import course_cover_relative_path, media_relative_path
 from .security import as_utc, utcnow
 
@@ -169,6 +169,46 @@ def sweep_course_covers(db, root: Path, retention_days: int, *, dry_run: bool = 
     return removed_rows, removed_files
 
 
+def sweep_help_attachments(db, root: Path, retention_days: int, *, dry_run: bool = False,
+                           verbose: bool = True) -> tuple[int, int]:
+    """Remove withdrawn and never-attached help files from their private root.
+
+    Unlike media text columns, attachment ownership is relational: an attachment
+    is live only when it is connected to a message and has not been purged.
+    """
+    now = utcnow()
+    cutoff = now - timedelta(days=retention_days)
+    removed_rows = removed_files = 0
+    known_files: set[Path] = set()
+    for attachment in db.scalars(select(HelpMessageAttachment)):
+        path = root / attachment.storage_key
+        expired = attachment.purged_at is not None or (
+            attachment.help_message_id is None and as_utc(attachment.created_at) <= cutoff
+        )
+        if not expired:
+            known_files.add(path)
+            continue
+        if path.exists():
+            removed_files += 1
+            if not dry_run:
+                path.unlink(missing_ok=True)
+        if attachment.help_message_id is None:
+            removed_rows += 1
+            if not dry_run:
+                db.delete(attachment)
+        if verbose:
+            print(f"[{'dry-run' if dry_run else 'delete'}] 答疑附件 {attachment.id}")
+    if root.exists():
+        for candidate in root.rglob("*"):
+            if candidate.is_file() and candidate not in known_files:
+                removed_files += 1
+                if not dry_run:
+                    candidate.unlink(missing_ok=True)
+    if not dry_run:
+        db.commit()
+    return removed_rows, removed_files
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="清理没有被任何题目引用的题干配图与课包封面。")
     parser.add_argument("--dry-run", action="store_true", help="只列出将被删除的文件，不写库也不删文件")
@@ -177,18 +217,22 @@ def main() -> None:
     settings = get_settings()
     root = Path(settings.media_upload_root).resolve()
     cover_root = Path(settings.course_cover_upload_root).resolve()
+    help_attachment_root = Path(settings.help_attachment_upload_root).resolve()
     engine, factory = build_database(settings.database_url)
     db = factory()
     try:
         rows, files = sweep_media(db, root, settings.media_retention_days, dry_run=args.dry_run)
         cover_rows, cover_files = sweep_course_covers(
             db, cover_root, settings.media_retention_days, dry_run=args.dry_run)
+        help_rows, help_files = sweep_help_attachments(
+            db, help_attachment_root, settings.help_attachment_retention_days, dry_run=args.dry_run)
     finally:
         db.close()
         engine.dispose()
     prefix = "将清理" if args.dry_run else "已清理"
     print(f"{prefix} {rows} 张孤儿图片、{files} 个游离文件、"
-          f"{cover_rows} 张孤儿封面、{cover_files} 个游离封面文件。")
+          f"{cover_rows} 张孤儿封面、{cover_files} 个游离封面文件、"
+          f"{help_rows} 个孤儿答疑附件、{help_files} 个答疑附件文件。")
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ from ..judge import JUDGE_FAILED, JudgeCase, JudgeUnavailable
 from ..mistake_book import record_wrong
 from ..judge.runner import JudgeQueueFull, JudgeTask, judge_key
 from ..attempt_source import (
+    SOURCE_EXAM_LINK,
     SOURCE_LESSON_HOMEWORK,
     AttemptSource,
     attempt_scope,
@@ -731,6 +732,8 @@ def _entry_payload(source: AttemptSource, paper: Paper, request: Request, user: 
         "phase": phase,
         "can_start": blocked is None,
         "blocked_reason": blocked,
+        # 考试时间窗内关闭联系老师入口；判据只来自服务端时间窗。
+        "help_enabled": not (source.source_type == SOURCE_EXAM_LINK and phase == "open"),
         "server_now": _iso(now),
     }
     if _score_visible(source, now) and paper.pass_score is not None:

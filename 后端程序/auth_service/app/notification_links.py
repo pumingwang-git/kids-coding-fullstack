@@ -29,14 +29,16 @@ def exam_attempt_link(access_token: str) -> str:
     return f"/exam/{quote(access_token, safe='-._~')}"
 
 
-def student_help_request_link(request_id: int) -> str:
+def student_help_request_link(request_id: int, line_id: int | None = None) -> str:
     _positive_id(request_id)
-    return "/notifications"
+    target = "/notifications"
+    return f"{target}?help_line={_positive_id(line_id)}" if line_id is not None else target
 
 
-def admin_help_request_link(request_id: int) -> str:
+def admin_help_request_link(request_id: int, line_id: int | None = None) -> str:
     _positive_id(request_id)
-    return "/admin/notifications.html"
+    target = "/admin/help-desk.html"
+    return f"{target}?line={_positive_id(line_id)}" if line_id is not None else target
 
 
 def help_request_link(request_id: int) -> str:

@@ -36,6 +36,12 @@
 
 生产环境须将 `DATABASE_URL` 设为 PostgreSQL，运行 `alembic upgrade head`，配置 Redis、企业 SMTP、独立随机密钥、HTTPS 及精确的前端源。SQLite 与内存限流器仅用于本地开发。登录须先通过一次性图片验证码；注册不使用图片验证码，改由邮箱验证码完成账号激活。服务端只保存图片验证码答案 HMAC，5 分钟过期且最多尝试 5 次。SMTP 发送失败的 outbox 项可由 `python -m app.workers` 重试，连续失败 5 次后进入 `dead` 状态供监控处理。
 
+## 答疑实时扩容
+
+答疑 WebSocket 的连接留在各 API 进程，聊天线变更事件通过 `REDIS_URL` 的 Pub/Sub 频道在进程间广播；事件不携带消息正文，客户端收到 `chat_line_id` 后仍通过既有 REST 接口按权限读取详情。生产 Nginx 的 `/api/` 反代必须保留 WebSocket 的 `Upgrade`、`Connection` 头和长读取超时，见 `部署配置/nginx-cache.conf`。
+
+可以启动多个 API worker，但 `JudgeRunner` 是每个 API 进程各自创建的线程池。增加 worker 数前，必须把 `JUDGE_WORKERS` 按进程数分摊，或将判题完全迁至独立 worker，避免实际判题并发倍增。
+
 ## 泄露密码检查与密码历史
 
 - 注册、密码重置和登录后的“修改密码”都会调用 HaveIBeenPwned Pwned Passwords 的 k-anonymity 接口：只发送密码 SHA-1 摘要的前 5 位，后缀在本地比对，完整密码与完整摘要均不离开本服务；前缀结果内存缓存 24 小时。默认 fail-open（泄露库不可用时放行并记日志），`PWNED_CHECK_STRICT=true` 时改为 fail-closed（返回 503）。国内网络不稳定时可将 `PWNED_API_BASE_URL` 指向保持 `/range/{prefix}` 接口的自建镜像。

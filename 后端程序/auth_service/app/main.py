@@ -15,6 +15,7 @@ from .config import Settings, get_settings
 from .database import build_database
 from .judge import build_judge_client
 from .judge.runner import JudgeRunner
+from .help_realtime import help_realtime_hub
 from .learning_catalog import ensure_learning_catalog
 from .mailer import InMemoryEmailSender, SmtpEmailSender
 from .models import Base
@@ -56,7 +57,9 @@ from .routers.exam import judge_submission, sweep_stale_judgings
 from .routers.exam import router as exam_router
 from .routers.focus import router as focus_router
 from .routers.help_requests import admin_router as admin_help_requests_router
+from .routers.help_requests import admin_chat_router as admin_help_chat_lines_router
 from .routers.help_requests import student_router as student_help_requests_router
+from .routers.help_requests import student_chat_router as student_help_chat_lines_router
 from .routers.admin_audit import router as admin_audit_router
 from .routers.learning_catalog import admin_router as admin_learning_catalog_router
 from .routers.learning_catalog import router as learning_catalog_router
@@ -122,6 +125,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         if settings.environment == "test":
             Base.metadata.create_all(engine)
+        help_realtime_hub.start(settings.redis_url)
         # 上一次进程退出时丢在半路的判题，在这里收尾——否则学员端会对着
         # 一条永远转圈的 queued 记录发呆。
         sweep_stale_judgings(session_factory, settings.judge_stale_seconds)
@@ -140,6 +144,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            help_realtime_hub.stop()
             app.state.judge_runner.shutdown()
             engine.dispose()
 
@@ -196,6 +201,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_notifications_router)
     app.include_router(admin_notifications_teaching_router)
     app.include_router(admin_help_requests_router)
+    app.include_router(admin_help_chat_lines_router)
     app.include_router(admin_audit_router)
     app.include_router(admin_enrollments_router)
     app.include_router(admin_courses_router)
@@ -223,6 +229,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(student_tasks_router)
     app.include_router(student_notifications_router)
     app.include_router(student_help_requests_router)
+    app.include_router(student_help_chat_lines_router)
     app.include_router(student_profile_router)
     app.include_router(typing_router)
     app.include_router(math_games_router)
