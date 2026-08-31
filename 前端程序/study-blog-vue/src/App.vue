@@ -2,8 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import AppIcon from "./components/AppIcon.vue";
+import HelpWidget from "./components/help/HelpWidget.vue";
 import { getCsrf, logout, request } from "./services/auth";
+import { unreadNotificationCount } from "./services/notifications";
 import { ensureSession, session } from "./stores/session";
+import { activeHelpContext, helpEnabled } from "./stores/helpContext";
 import { areaByKey, ensureLearningAreas } from "./stores/learningCatalog";
 import {
   areaNavigationModules,
@@ -16,6 +19,14 @@ const router = useRouter();
 const route = useRoute();
 const menuOpen = ref(false);
 const dark = ref(localStorage.getItem("study-theme") === "dark");
+const unreadNotifications = ref(0);
+const helpContext = computed(() => {
+  if (activeHelpContext.value) return activeHelpContext.value;
+  if (route.name === "lesson-homework" && route.params.blockId) {
+    return { context_type: "block", context_id: Number(route.params.blockId) };
+  }
+  return { context_type: "general" };
+});
 
 const shell = computed(() => {
   if (["exam", "lesson-homework", "lesson-player"].includes(String(route.name))) return "immersive";
@@ -201,6 +212,13 @@ onMounted(async () => {
     ensureSession(),
     ensureLearningAreas().catch(() => []),
   ]);
+  if (session.user) {
+    unreadNotificationCount()
+      .then((data) => {
+        unreadNotifications.value = Number(data.count || 0);
+      })
+      .catch(() => {});
+  }
 });
 </script>
 
@@ -242,6 +260,19 @@ onMounted(async () => {
       </div>
     </header>
     <RouterView />
+    <footer class="site-record" aria-label="网站备案信息">
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">
+        <span>晋ICP备2026010787号-1</span>
+      </a>
+      <a
+        href="https://beian.mps.gov.cn/#/query/webSearch?code=14102402000497"
+        target="_blank"
+        rel="noreferrer"
+      >
+        <img src="/assets/beian-icon.png" alt="" width="16" height="16" />
+        <span>晋公网安备14102402000497号</span>
+      </a>
+    </footer>
   </template>
 
   <div
@@ -363,6 +394,12 @@ onMounted(async () => {
           <span>{{ activeArea?.name || "学习专区" }}学习空间</span>
         </div>
         <div class="kids-user-actions">
+          <RouterLink to="/notifications" class="kids-notifications" aria-label="通知中心">
+            <AppIcon name="bell" /><span>通知</span
+            ><b v-if="unreadNotifications" class="notification-badge">{{
+              unreadNotifications > 99 ? "99+" : unreadNotifications
+            }}</b>
+          </RouterLink>
           <!-- 顶部头像进个人资料（文档 28 §2.1），带当前专区让「错题本/工具箱」落对地方 -->
           <RouterLink
             :to="activeArea ? { path: '/profile', query: { area: activeArea.key } } : '/profile'"
@@ -409,4 +446,9 @@ onMounted(async () => {
   </div>
 
   <RouterView v-else />
+  <HelpWidget
+    v-if="session.user && helpEnabled"
+    :context="helpContext"
+    :initial-line-id="route.query.help_line || null"
+  />
 </template>

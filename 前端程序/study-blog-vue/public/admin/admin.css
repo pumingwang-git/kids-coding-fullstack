@@ -4926,6 +4926,37 @@ body:not(.admin-dashboard) :focus-visible {
   }
 }
 
+/* N7 客服台：三栏独立滚动，消息输入区固定在聊天栏底部。 */
+.admin-help-desk .help-desk-workspace { grid-template-columns: 336px minmax(0, 1fr) 302px; height: calc(100vh - 180px); min-height: 0; }
+.admin-help-desk .help-queue-panel, .admin-help-desk .help-chat-panel, .admin-help-desk .help-profile-panel { min-height: 0; overflow: hidden; }
+.admin-help-desk .help-queue-panel { border-right: 1px solid #e3e8ee; }
+.admin-help-desk .help-queue-tabs { display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+.admin-help-desk .help-queue-tab { border: 0; background: transparent; border-radius: 4px; padding: 5px 8px; color: #65758a; font-size: 12px; cursor: pointer; }
+.admin-help-desk .help-queue-tab:hover, .admin-help-desk .help-queue-tab.is-active { background: #e8f2ee; color: #276f60; }
+.admin-help-desk .help-profile-panel { display: block; overflow-y: auto; background: #fff; }
+.admin-help-desk .help-profile-panel section { padding: 14px 16px; border-bottom: 1px solid #e3e8ee; }
+.admin-help-desk .help-profile-panel h3 { margin: 0 0 10px; color: #7a899c; font-size: 11px; font-weight: 700; }
+.admin-help-desk .help-profile-id { display: flex; align-items: center; gap: 10px; }
+.admin-help-desk .help-profile-id strong, .admin-help-desk .help-profile-id span { display: block; }
+.admin-help-desk .help-profile-id strong { color: #24364d; font-size: 14px; }
+.admin-help-desk .help-profile-id div span { color: #7a899c; font-size: 12px; }
+.admin-help-desk .help-profile-avatar { display: grid !important; place-items: center; width: 40px; height: 40px; border-radius: 9px; background: #e6eef5; color: #3a6a94 !important; font-weight: 700; }
+.admin-help-desk .help-profile-kv { display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; margin: 0; font-size: 12px; }
+.admin-help-desk .help-profile-kv dt { color: #7a899c; }
+.admin-help-desk .help-profile-kv dd { margin: 0; text-align: right; color: #24364d; }
+.admin-help-desk .help-profile-history { display: grid; gap: 7px; color: #7a899c; font-size: 12px; }
+.admin-help-desk .help-profile-history-item { display: grid; gap: 3px; width: 100%; padding: 7px 8px; border: 1px solid #e3e8ee; border-radius: 4px; background: #fff; color: #24364d; text-align: left; cursor: pointer; }
+.admin-help-desk .help-profile-history-item:hover:not(:disabled), .admin-help-desk .help-profile-history-item:focus-visible { border-color: #3a6a94; background: #f3f8fc; outline: 0; }
+.admin-help-desk .help-profile-history-item:disabled { cursor: default; opacity: .65; }
+.admin-help-desk .help-profile-history-item strong { font-size: 12px; font-weight: 700; }
+.admin-help-desk .help-profile-history-item span { color: #7a899c; font-size: 11px; }
+.admin-help-desk .help-message.is-history-target { outline: 2px solid #3a6a94; outline-offset: -2px; }
+.admin-help-desk .help-chat-panel { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.admin-help-desk .help-message-list { min-height: 0; overflow-y: auto; }
+.admin-help-desk .help-message-receipt { display: block; margin-top: 5px; color: #65758a; font-size: 11px; text-align: right; }
+@media (max-width: 1180px) { .admin-help-desk .help-desk-workspace { grid-template-columns: 300px minmax(0, 1fr); } .admin-help-desk .help-profile-panel { display: none; } }
+@media (max-width: 800px) { .admin-help-desk .help-desk-workspace { display: block; height: calc(100dvh - 185px); min-height: 520px; } }
+
 /* 审计日志：高密度只读表格，两个主体保持独立列。 */
 .audit-filter { margin-bottom: 18px; }
 .audit-filter-grid { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
@@ -4998,4 +5029,112 @@ body:not(.admin-dashboard) :focus-visible {
   .role-policy-row { grid-template-columns: 1fr; gap: 9px; }
   .role-policy-action { text-align: left; }
   .role-policy-form { grid-template-columns: 1fr; gap: 22px; padding: 16px; }
+}
+
+/* 答疑工作台：服务端排序的卡片队列 + 文字会话。 */
+.admin-help-desk { overflow-x: hidden; }
+.help-desk-content { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.help-desk-head { align-items: center; }
+.help-desk-status { min-height: 20px; margin: -10px 0 10px; color: #65758a; font-size: 12px; }
+.help-desk-status.is-error { color: var(--danger); }
+.help-desk-workspace { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); min-height: 0; height: calc(100vh - 180px); border: 1px solid #e3e8ee; border-radius: 8px; overflow: hidden; background: #fff; box-shadow: 0 4px 16px rgba(27, 54, 79, 0.035); }
+.help-queue-panel, .help-chat-panel { min-width: 0; min-height: 0; }
+.help-queue-panel { display: flex; flex-direction: column; border-right: 1px solid #e3e8ee; background: #f7f9fb; }
+.help-panel-head, .help-chat-head { flex: none; padding: 17px 18px; border-bottom: 1px solid #e3e8ee; background: #fff; }
+.help-panel-head h2, .help-chat-head h2 { margin: 0; color: #24364d; font-size: 16px; }
+.help-panel-head p, .help-chat-head p { margin: 4px 0 0; color: #748398; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.help-queue-list { display: grid; align-content: start; gap: 10px; min-height: 0; overflow-y: auto; padding: 12px; }
+.help-queue-card { display: grid; width: 100%; min-width: 0; gap: 13px; padding: 14px; border: 1px solid #dfe6ec; border-radius: 7px; background: #fff; color: #33445b; text-align: left; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+.help-queue-card:hover { border-color: #92b9d2; background: #fbfdff; }
+.help-queue-card.is-selected { border-color: #2f806e; box-shadow: 0 0 0 2px rgba(47, 128, 110, .11); }
+.help-queue-card:focus-visible { outline: 3px solid rgba(47, 128, 110, .28); outline-offset: 2px; }
+.help-queue-card-top, .help-queue-card-bottom { display: flex; align-items: center; min-width: 0; gap: 7px; }
+.help-queue-card-top strong { overflow: hidden; color: #23364c; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.help-queue-card-top > span { margin-left: auto; overflow: hidden; color: #7a899c; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.help-queue-card q { min-height: 46px; margin: 0; color: #273a50; font-size: 13px; font-weight: 650; line-height: 1.7; text-align: center; overflow-wrap: anywhere; }
+.help-queue-card-bottom { flex-wrap: wrap; color: #7a899c; font-size: 10px; }
+.help-queue-card-bottom time { margin-left: auto; }
+.help-waiting-status { padding: 2px 7px; border-radius: 999px; background: #edf1f4; color: #68788c; font-size: 10px; font-weight: 800; }
+.help-waiting-status[data-tone="danger"] { background: rgba(185, 92, 80, .13); color: #a3473e; }
+.help-waiting-status[data-tone="warning"] { background: rgba(191, 141, 57, .14); color: #8e6419; }
+.help-waiting-status[data-tone="success"] { background: rgba(47, 128, 110, .12); color: #276f60; }
+.help-queue-pager { display: flex; align-items: center; gap: 7px; flex: none; min-height: 53px; padding: 8px 12px; border-top: 1px solid #e3e8ee; background: #fff; color: #748398; font-size: 11px; }
+.help-queue-pager .spacer { flex: 1; }
+.help-queue-pager .btn { min-height: 32px; padding: 6px 9px; }
+.help-queue-state { display: grid; place-items: center; min-height: 210px; padding: 24px; color: #748398; text-align: center; }
+.help-queue-state strong { color: #33445b; }
+.help-queue-state p { max-width: 30ch; margin: 7px 0 14px; font-size: 12px; line-height: 1.6; }
+.help-queue-state.is-error p { color: var(--danger); }
+.help-queue-skeleton { display: grid; gap: 10px; }
+.help-queue-skeleton span { height: 122px; border-radius: 7px; background: #e9eef2; animation: help-pulse 1.1s ease-in-out infinite alternate; }
+
+.help-chat-panel { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: #fff; }
+.help-chat-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.help-chat-identity { min-width: 0; }
+.help-chat-identity h2, .help-chat-identity p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.help-chat-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.help-realtime-later { white-space: nowrap; }
+.help-mobile-back { display: none; flex: none; padding: 0; }
+.help-assignment-bar { display: grid; grid-template-columns: auto minmax(190px, 280px) auto auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 9px 18px; border-bottom: 1px solid #e3e8ee; background: #fff; }
+.help-assignment-bar label { color: #42566d; font-size: 11px; font-weight: 800; }
+.help-assignment-bar select { min-width: 0; padding-block: 7px; }
+.help-assignment-bar .btn { min-height: 32px; padding-block: 6px; }
+.help-assignment-bar > span { color: #748398; font-size: 11px; overflow-wrap: anywhere; }
+.help-context-strip { display: flex; align-items: center; gap: 9px; padding: 9px 18px; border-bottom: 1px solid #e3e8ee; background: #f7fafc; color: #65758a; font-size: 11px; overflow-wrap: anywhere; }
+.help-context-strip strong { flex: none; color: #34475d; }
+.help-message-list { min-height: 0; overflow-y: auto; padding: 22px clamp(18px, 4vw, 54px); background: #fbfcfd; }
+.help-message { width: min(72ch, 82%); margin: 0 0 16px; }
+.help-message.is-admin { margin-left: auto; }
+.help-message header { display: flex; align-items: center; gap: 8px; margin: 0 2px 5px; color: #758497; font-size: 10px; }
+.help-message header time { margin-left: auto; }
+.help-message p { margin: 0; padding: 11px 13px; border-radius: 7px; background: #fff; color: #2d4056; box-shadow: 0 2px 8px rgba(27, 54, 79, .07); font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.help-message.is-admin p { background: #e8f2ee; color: #23483f; }
+.help-chat-empty, .help-chat-loading { display: grid; place-items: center; align-content: center; min-height: 100%; color: #748398; text-align: center; }
+.help-chat-empty strong { color: #34475d; }
+.help-chat-empty p { max-width: 44ch; margin: 7px 0 14px; line-height: 1.6; }
+.help-chat-empty.is-error p { color: var(--danger); }
+.help-chat-loading { gap: 9px; }
+.help-chat-loading span { width: min(460px, 78%); height: 58px; border-radius: 7px; background: #e9eef2; animation: help-pulse 1.1s ease-in-out infinite alternate; }
+.help-chat-loading span:nth-child(2) { width: min(390px, 68%); justify-self: end; }
+.help-reply-form { display: grid; gap: 8px; padding: 14px 18px 16px; border-top: 1px solid #e3e8ee; background: #fff; }
+.help-reply-form label { color: #42566d; font-size: 11px; font-weight: 800; }
+.help-reply-form textarea { width: 100%; min-height: 76px; resize: vertical; }
+.help-reply-actions { display: flex; align-items: center; gap: 12px; }
+.help-reply-actions span { min-width: 0; color: #748398; font-size: 11px; overflow-wrap: anywhere; }
+.help-reply-actions .btn { margin-left: auto; flex: none; }
+@keyframes help-pulse { from { opacity: .55; } to { opacity: 1; } }
+
+@media (max-width: 800px) {
+  .admin-help-desk .content { padding: 18px 12px 24px; }
+  .help-desk-head { align-items: flex-start; flex-direction: row; gap: 10px; }
+  .help-desk-head h1 { font-size: 22px; }
+  .help-desk-head p { max-width: 30ch; }
+  .help-desk-head .btn { flex: none; padding-inline: 10px; }
+  .help-desk-workspace { display: block; height: calc(100dvh - 185px); min-height: 520px; }
+  .help-queue-panel, .help-chat-panel { height: 100%; }
+  .help-queue-panel { border-right: 0; }
+  .help-chat-panel { display: none; }
+  .help-desk-workspace.is-chat-open .help-queue-panel { display: none; }
+  .help-desk-workspace.is-chat-open .help-chat-panel { display: grid; }
+  .help-mobile-back { display: inline-flex; }
+  .help-chat-head { padding: 12px; gap: 9px; }
+  .help-chat-identity { flex: 1; }
+  .help-chat-actions { margin-left: 0; }
+  .help-realtime-later { max-width: 116px; padding: 6px 8px; white-space: normal; line-height: 1.25; }
+  .help-assignment-bar { grid-template-columns: minmax(0, 1fr) auto; padding: 10px 12px; }
+  .help-assignment-bar label, .help-assignment-bar > span { grid-column: 1 / -1; }
+  .help-assignment-bar .btn-text { display: none; }
+  .help-context-strip { padding: 8px 12px; }
+  .help-message-list { padding: 16px 12px; }
+  .help-message { width: 90%; }
+  .help-reply-form { padding: 10px 12px 12px; }
+}
+
+@media (max-width: 420px) {
+  .help-desk-head p { display: none; }
+  .help-desk-workspace { height: calc(100dvh - 148px); min-height: 560px; }
+  .help-chat-head { flex-wrap: wrap; }
+  .help-chat-identity { order: -1; width: 100%; flex-basis: 100%; }
+  .help-chat-actions { width: 100%; }
+  .help-chat-actions .help-realtime-later { margin-left: auto; }
 }

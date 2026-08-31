@@ -42,6 +42,7 @@ export const MENU = [
       { label: "课程开通", page: "enrollments.html", crumb: "运营 / 课程开通" },
       { label: "班级管理", page: "classes.html", crumb: "运营 / 班级管理" },
       { label: "教学工作台", page: "teaching.html", crumb: "运营 / 教学工作台" },
+      { label: "答疑工作台", page: "help-desk.html", crumb: "运营 / 答疑工作台" },
       { label: "成绩统计", page: "reports.html", crumb: "运营 / 成绩统计" },
       { label: "课时作业成绩", page: "homework-results.html", crumb: "运营 / 课时作业成绩" },
       { label: "账号与角色", page: "accounts.html", crumb: "运营 / 账号与角色" },

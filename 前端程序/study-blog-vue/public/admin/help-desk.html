@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>答疑工作台 · 学习平台后台</title>
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body class="admin-help-desk">
+    <div class="app" id="helpDeskApp">
+      <aside class="sidebar" id="sidebar"></aside>
+      <main class="main">
+        <header class="topbar" id="topbar"></header>
+        <div class="content help-desk-content">
+          <header class="page-head help-desk-head"><div><h1>答疑客服台</h1><p>按服务端顺序处理学生问题，回复保留在同一班级会话中。</p></div><button class="btn" id="refreshQueueBtn" type="button">刷新队列</button></header>
+          <div class="help-desk-status" id="deskStatus" role="status" aria-live="polite"></div>
+          <div class="help-desk-workspace" id="deskWorkspace">
+            <section class="help-queue-panel" id="queuePanel" aria-labelledby="queueTitle">
+              <header class="help-panel-head"><h2 id="queueTitle">会话队列</h2><p id="queueSummary">正在读取队列…</p><div class="help-queue-tabs" role="tablist" aria-label="会话筛选"><button class="help-queue-tab is-active" type="button" data-filter="waiting">待我回复</button><button class="help-queue-tab" type="button" data-filter="mine">我承办的</button><button class="help-queue-tab" type="button" data-filter="all">全部</button><button class="help-queue-tab" type="button" data-filter="closed">已结束</button></div></header>
+              <div class="help-queue-list" id="queueList" aria-live="polite" aria-busy="true"></div><footer class="help-queue-pager" id="queuePager" aria-label="答疑队列分页"></footer>
+            </section>
+
+            <section class="help-chat-panel" id="chatPanel" aria-labelledby="chatTitle">
+              <header class="help-chat-head">
+                <button class="btn-text help-mobile-back" id="backToQueueBtn" type="button">
+                  返回队列
+                </button>
+                <div class="help-chat-identity">
+                  <h2 id="chatTitle">选择一条学生会话</h2>
+                  <p id="chatMeta">从左侧队列开始处理答疑。</p>
+                </div>
+                <div class="help-chat-actions">
+                  <button class="btn" id="toggleAssignmentBtn" type="button" hidden>转派</button>
+                </div>
+              </header>
+
+              <form class="help-assignment-bar" id="assignmentForm" hidden>
+                <label for="assignmentTarget">转派给同班带课人员</label>
+                <select id="assignmentTarget" required>
+                  <option value="">正在读取候选人…</option>
+                </select>
+                <button class="btn" id="assignBtn" type="submit">确认转派</button>
+                <button class="btn-text" id="cancelAssignmentBtn" type="button">取消</button>
+                <span id="assignmentHint" role="status" aria-live="polite"></span>
+              </form>
+
+              <aside class="help-context-strip" id="contextStrip" hidden>
+                <strong>问题上下文</strong><span id="contextLabel"></span>
+              </aside>
+              <div class="help-message-list" id="messageList" aria-live="polite">
+                <div class="help-chat-empty">
+                  <strong>还没有打开会话</strong>
+                  <p>队列会把学生原话和等待状态放在最前面。</p>
+                </div>
+              </div>
+              <form class="help-reply-form" id="replyForm" hidden>
+                <label for="replyBody">回复学生</label>
+                <textarea
+                  id="replyBody"
+                  name="body"
+                  rows="3"
+                  maxlength="4000"
+                  placeholder="输入清楚、可执行的回复…"
+                  required
+                ></textarea>
+                <div class="help-reply-actions">
+                  <span id="replyHint">回复将发送到当前会话。</span>
+                  <button class="btn primary" id="sendReplyBtn" type="submit">发送回复</button>
+                </div>
+              </form>
+          </section>
+          <aside class="help-profile-panel" id="profilePanel" aria-label="学生档案"><section><h3>学生档案</h3><div class="help-profile-id"><span class="help-profile-avatar" id="profileAvatar">学</span><div><strong id="profileName">选择会话</strong><span id="profileClass">班级信息</span></div></div></section><section><h3>学习情况</h3><dl class="help-profile-kv"><dt>课包进度</dt><dd id="profileProgress">正在读取</dd><dt>最近学习</dt><dd id="profileLastActivity">正在读取</dd><dt>本周练习</dt><dd id="profilePractice">正在读取</dd><dt>待交作业</dt><dd id="profileHomework">正在读取</dd><dt>累计求助</dt><dd id="profileHelpCount">正在读取</dd></dl></section><section><h3>历史会话</h3><div id="profileHistory" class="help-profile-history"><span>选择会话后查看</span></div></section></aside>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="help-desk.js"></script>
+  </body>
+</html>
