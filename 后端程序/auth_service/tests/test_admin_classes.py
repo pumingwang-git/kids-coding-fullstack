@@ -8,7 +8,17 @@ import pytest
 from sqlalchemy import select
 from test_exam import ADMIN_PASSWORD, admin_login, build_app
 
-from app.models import AdminUser, AuditEvent, ClassMember, ClassTeacher, Course, User
+from app.models import (
+    AdminUser,
+    AuditEvent,
+    ClassMember,
+    ClassTeacher,
+    Course,
+    Enrollment,
+    HelpChatLine,
+    HelpRequest,
+    User,
+)
 from app.security import password_hash
 
 
@@ -88,6 +98,25 @@ def login_as_role(app, role: str, admin_id: int = 2):
     return client, {"X-CSRF-Token": client.cookies.get("admin_csrf_token")}
 
 
+def create_draft_class(client, headers, course_id: int, *, name: str = "待发布班") -> int:
+    response = client.post(
+        "/api/admin/classes",
+        headers=headers,
+        json={"name": name, "course_id": course_id},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def assign_active_teacher(client, headers, class_id: int, teacher_id: int) -> None:
+    response = client.post(
+        f"/api/admin/classes/{class_id}/teachers",
+        headers=headers,
+        json={"admin_user_id": teacher_id, "role_in_class": "teacher"},
+    )
+    assert response.status_code == 201, response.text
+
+
 def test_class_crud_archive_and_delete_guard(tmp_path: Path):
     app = build_app(tmp_path)
     client, headers = admin_login(app)
@@ -118,6 +147,152 @@ def test_class_crud_archive_and_delete_guard(tmp_path: Path):
 
     assert client.delete(f"/api/admin/classes/{class_id}", headers=headers).status_code == 200
     assert client.get(f"/api/admin/classes/{class_id}", headers=headers).status_code == 404
+
+
+def test_publish_turns_a_draft_class_active(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    course_id = seed_course(app)
+    teacher_id = seed_teacher(app)
+    class_id = create_draft_class(client, headers, course_id)
+    assign_active_teacher(client, headers, class_id, teacher_id)
+
+    published = client.post(f"/api/admin/classes/{class_id}/publish", headers=headers)
+
+    assert published.status_code == 200, published.text
+    assert published.json()["status"] == "active"
+    assert client.get(f"/api/admin/classes/{class_id}", headers=headers).json()["status"] == "active"
+
+
+def test_publish_requires_an_active_teacher(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    class_id = create_draft_class(client, headers, seed_course(app))
+
+    response = client.post(f"/api/admin/classes/{class_id}/publish", headers=headers)
+
+    assert response.status_code == 409
+    assert client.get(f"/api/admin/classes/{class_id}", headers=headers).json()["status"] == "draft"
+
+
+def test_publish_rejects_an_archived_class(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    course_id = seed_course(app)
+    teacher_id = seed_teacher(app)
+    class_id = create_draft_class(client, headers, course_id)
+    assign_active_teacher(client, headers, class_id, teacher_id)
+    assert client.post(f"/api/admin/classes/{class_id}/archive", headers=headers).status_code == 200
+
+    assert client.post(f"/api/admin/classes/{class_id}/publish", headers=headers).status_code == 409
+
+
+def test_publish_is_idempotent(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    course_id = seed_course(app)
+    teacher_id = seed_teacher(app)
+    class_id = create_draft_class(client, headers, course_id)
+    assign_active_teacher(client, headers, class_id, teacher_id)
+
+    assert client.post(f"/api/admin/classes/{class_id}/publish", headers=headers).status_code == 200
+    assert client.post(f"/api/admin/classes/{class_id}/publish", headers=headers).status_code == 200
+    db = app.state.session_factory()
+    try:
+        events = db.scalars(
+            select(AuditEvent).where(AuditEvent.event_type == "admin_class_publish")
+        ).all()
+        assert len(events) == 1
+    finally:
+        db.close()
+
+
+def test_publish_denied_without_manage_classes(tmp_path: Path):
+    app = build_app(tmp_path)
+    manager, manager_headers = admin_login(app)
+    class_id = create_draft_class(manager, manager_headers, seed_course(app))
+    teacher, teacher_headers = login_as_role(app, "teacher")
+
+    assert teacher.post(f"/api/admin/classes/{class_id}/publish", headers=teacher_headers).status_code == 403
+    db = app.state.session_factory()
+    try:
+        event = db.scalar(
+            select(AuditEvent)
+            .where(
+                AuditEvent.event_type == "admin_class_publish",
+                AuditEvent.outcome == "failure",
+            )
+            .order_by(AuditEvent.id.desc())
+        )
+        assert event is not None
+        assert event.admin_user_id == 2
+    finally:
+        db.close()
+
+
+def test_publish_writes_an_audit_event(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    course_id = seed_course(app)
+    teacher_id = seed_teacher(app)
+    class_id = create_draft_class(client, headers, course_id)
+    assign_active_teacher(client, headers, class_id, teacher_id)
+
+    assert client.post(f"/api/admin/classes/{class_id}/publish", headers=headers).status_code == 200
+    db = app.state.session_factory()
+    try:
+        event = db.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == "admin_class_publish")
+            .order_by(AuditEvent.id.desc())
+        )
+        assert event.resource_type == "class_group"
+        assert event.resource_id == class_id
+        assert json.loads(event.summary_json)["changed"]["status"] == {
+            "old": "draft", "new": "active"
+        }
+    finally:
+        db.close()
+
+
+def test_publish_does_not_touch_existing_enrollments(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    course_id = seed_course(app)
+    teacher_id = seed_teacher(app)
+    student_id = seed_student(app)
+    class_id = create_draft_class(client, headers, course_id)
+    assign_active_teacher(client, headers, class_id, teacher_id)
+    enrolled = client.post(
+        f"/api/admin/classes/{class_id}/members",
+        headers=headers,
+        json={"student_id": student_id},
+    )
+    assert enrolled.status_code == 201, enrolled.text
+    db = app.state.session_factory()
+    try:
+        before = [(row.id, row.opened_at) for row in db.scalars(select(Enrollment).order_by(Enrollment.id))]
+    finally:
+        db.close()
+
+    assert client.post(f"/api/admin/classes/{class_id}/publish", headers=headers).status_code == 200
+    db = app.state.session_factory()
+    try:
+        after = [(row.id, row.opened_at) for row in db.scalars(select(Enrollment).order_by(Enrollment.id))]
+        assert after == before
+    finally:
+        db.close()
+
+
+def test_publish_only_needs_a_teacher_not_students(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    course_id = seed_course(app)
+    teacher_id = seed_teacher(app)
+    class_id = create_draft_class(client, headers, course_id)
+    assign_active_teacher(client, headers, class_id, teacher_id)
+
+    assert client.post(f"/api/admin/classes/{class_id}/publish", headers=headers).json()["status"] == "active"
 
 
 def test_class_with_relationships_cannot_be_physically_deleted(tmp_path: Path):
@@ -438,6 +613,7 @@ def test_teacher_assignment_unassignment_and_failure_audit(tmp_path: Path):
     finally:
         db.close()
 
+
     unassigned = client.post(
         f"/api/admin/classes/{class_id}/teachers/{assignment_id}/unassign",
         headers=headers,
@@ -468,6 +644,47 @@ def test_teacher_assignment_unassignment_and_failure_audit(tmp_path: Path):
         assert db.scalar(select(ClassTeacher.id).where(ClassTeacher.id == assignment_id)) is not None
     finally:
         db.close()
+
+
+def test_unassign_teacher_with_open_help_request_succeeds(tmp_path: Path):
+    app = build_app(tmp_path)
+    client, headers = admin_login(app)
+    teacher_id = 1
+    student_id = seed_student(app)
+    class_id = create_draft_class(client, headers, seed_course(app))
+    assignment = client.post(
+        f"/api/admin/classes/{class_id}/teachers",
+        headers=headers,
+        json={"admin_user_id": teacher_id, "role_in_class": "teacher"},
+    ).json()
+    db = app.state.session_factory()
+    try:
+        line = HelpChatLine(class_id=class_id, student_id=student_id)
+        db.add(line)
+        db.flush()
+        db.add(
+            HelpRequest(
+                class_id=class_id,
+                student_id=student_id,
+                assigned_admin_user_id=teacher_id,
+                chat_line_id=line.id,
+                body="需要帮助",
+                context_type="general",
+                context_key="general",
+                request_key_hash="request-key",
+                request_hash="request-hash",
+                status="open",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        f"/api/admin/classes/{class_id}/teachers/{assignment['id']}/unassign",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
 
 
 def test_enroll_withdraw_and_transfer_have_atomic_audit_contract(tmp_path: Path, monkeypatch):

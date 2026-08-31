@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..class_groups import active_teacher_assignments_for_class
 from ..class_enrollment import (
     CLASS_BATCH_SOURCE,
     grant_for_membership,
@@ -497,6 +498,50 @@ def archive_class(class_id: int, request: Request, db: Session = Depends(db_sess
     return _serialize_class(row)
 
 
+@router.post("/{class_id}/publish")
+def publish_class(class_id: int, request: Request, db: Session = Depends(db_session)):
+    """将草稿班级发布，使学生可建立答疑聊天线。"""
+    require_csrf(request)
+    admin = _require_relation_manager(
+        request,
+        db,
+        "class_publish",
+        resource_type="class_group",
+        resource_id=class_id,
+        summary={"schema_version": 1, "reason_code": "forbidden"},
+    )
+    row = db.get(ClassGroup, class_id)
+    if row is None:
+        raise HTTPException(404, "班级不存在。")
+    if row.status == "archived":
+        raise HTTPException(409, "已归档班级不可发布。")
+    if row.status == "active":
+        return _serialize_class(row)
+
+    teachers = active_teacher_assignments_for_class(db, row.id)
+    if not teachers:
+        raise HTTPException(409, "发布前至少需要一位在职带班教师。")
+
+    row.status = "active"
+    row.updated_at = utcnow()
+    _audit_success(
+        db,
+        request,
+        "class_publish",
+        admin.id,
+        resource_type="class_group",
+        resource_id=row.id,
+        summary={
+            "schema_version": 1,
+            "changed": {"status": {"old": "draft", "new": "active"}},
+            "active_teacher_count": len(teachers),
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _serialize_class(row)
+
+
 @router.delete("/{class_id}")
 def delete_class(class_id: int, request: Request, db: Session = Depends(db_session)):
     require_csrf(request)
@@ -639,7 +684,7 @@ def _unassign_class_teacher(
             body="你的联系请求已转交新的承办教师。" if successor else "你的联系请求已进入未分派队列。",
             target_type="help_request", target_id=ticket.id,
             source_type="help_request", source_id=ticket.id,
-            link_url=admin_help_request_link(ticket.id),
+            link_url=admin_help_request_link(ticket.id, ticket.chat_line_id),
             idempotency_key=f"help-request-assigned:{ticket.id}:{ticket.assignment_revision}",
             recipients=([{"user_id": None, "admin_user_id": successor.admin_user_id}]
                         if successor else [{"user_id": ticket.student_id, "admin_user_id": None}]),

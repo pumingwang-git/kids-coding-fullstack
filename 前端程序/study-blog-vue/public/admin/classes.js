@@ -72,6 +72,7 @@ function renderDetail(row) {
     .join("");
   const editable = canManageClasses && row.status !== "archived";
   $("editClassBtn").hidden = !editable;
+  $("publishClassBtn").hidden = !canManageClasses || row.status !== "draft";
   $("archiveClassBtn").hidden = !canManageClasses || row.status === "archived";
   $("deleteClassBtn").hidden = !canManageClasses;
   $("classDetail").hidden = false;
@@ -164,6 +165,7 @@ function setManageControls() {
   });
   if (!canManageClasses) {
     $("editClassBtn").hidden = true;
+    $("publishClassBtn").hidden = true;
     $("archiveClassBtn").hidden = true;
     $("deleteClassBtn").hidden = true;
   }
@@ -256,6 +258,26 @@ async function archiveClass() {
   try {
     await adminRequest(`/classes/${row.id}/archive`, { method: "POST" });
     toast("班级归档完成");
+    await loadClasses();
+  } catch (error) {
+    toast(relationError(error), "error");
+  }
+}
+
+async function publishClass() {
+  const row = classes.find((item) => item.id === selectedId);
+  if (!row || !canManageClasses) return;
+  const teacherCount = teachers.filter((item) => item.ended_at == null).length;
+  const ok = await confirmDialog({
+    title: "发布班级",
+    message: `确认发布“${row.name}”吗？`,
+    detail: `发布后学员即可在「联系老师」里向带班教师留言。当前在职带班教师 ${teacherCount} 人。`,
+    confirmText: "发布",
+  });
+  if (!ok) return;
+  try {
+    await adminRequest(`/classes/${row.id}/publish`, { method: "POST" });
+    toast("班级已发布");
     await loadClasses();
   } catch (error) {
     toast(relationError(error), "error");
@@ -371,18 +393,23 @@ async function loadClasses() {
 }
 
 async function submitRelation(path, payload, successText) {
+  let result;
   try {
-    const result = await adminRequest(path, {
+    result = await adminRequest(path, {
       method: "POST",
       body: JSON.stringify(payload || {}),
     });
-    toast(successText);
-    await refreshRelations();
-    return result;
   } catch (error) {
     toast(relationError(error), "error");
     return null;
   }
+  toast(successText);
+  try {
+    await refreshRelations();
+  } catch (error) {
+    toast(`操作已完成，但刷新关系列表失败：${relationError(error)}`, "error");
+  }
+  return result;
 }
 
 function updateMemberBulkSelection(selected) {
@@ -475,6 +502,7 @@ $("editClassBtn").addEventListener("click", () => {
   if (row) openClassForm(row);
 });
 $("archiveClassBtn").addEventListener("click", archiveClass);
+$("publishClassBtn").addEventListener("click", publishClass);
 $("deleteClassBtn").addEventListener("click", deleteClass);
 $("exportClassRelationships").addEventListener("click", async () => {
   try {

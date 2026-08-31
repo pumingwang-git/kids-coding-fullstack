@@ -47,11 +47,13 @@ def test_classes_page_wires_master_data_actions_and_capability_gate():
     assert 'adminRequest("/me")' in classes_js
     assert "can_manage_classes" in classes_js
     assert 'method: editingClassId ? "PUT" : "POST"' in classes_js
+    assert 'adminRequest(`/classes/${row.id}/publish`' in classes_js
     assert 'adminRequest(`/classes/${row.id}/archive`' in classes_js
     assert 'adminRequest(`/classes/${row.id}`, { method: "DELETE" })' in classes_js
     for element_id in (
         "createClassBtn",
         "editClassBtn",
+        "publishClassBtn",
         "archiveClassBtn",
         "deleteClassBtn",
         "classFormMask",

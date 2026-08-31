@@ -57,7 +57,7 @@ EVENT_CATEGORY: dict[str, str] = {
         "account_create", "account_password_reset", "account_password_change",
         "role_create", "role_update", "role_delete",
         "class_teacher_unassign", "class_member_enroll", "class_member_withdraw",
-        "class_member_transfer", "export_download",
+        "class_member_transfer", "class_publish", "export_download",
     )},
     **{event: CATEGORY_GRADE for event in _admin_events(
         "course_homework_deadline_extend", "scratch_submission_review", "scratch_submission_return",
