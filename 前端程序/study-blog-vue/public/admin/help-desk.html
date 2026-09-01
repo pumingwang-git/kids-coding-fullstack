@@ -55,14 +55,20 @@
               </div>
               <form class="help-reply-form" id="replyForm" hidden>
                 <label for="replyBody">回复学生</label>
+                <div class="help-reply-tools" aria-label="回复工具">
+                  <button class="btn-text help-composer-tool" id="emojiPickerBtn" type="button" aria-expanded="false" aria-controls="emojiPicker" title="插入表情">表情</button>
+                  <button class="btn-text help-composer-tool" id="attachmentPickerBtn" type="button" title="添加图片">图片</button>
+                  <input id="replyAttachmentInput" type="file" accept="image/*" hidden />
+                  <div class="help-emoji-picker" id="emojiPicker" hidden role="dialog" aria-label="选择表情"></div>
+                </div>
                 <textarea
                   id="replyBody"
                   name="body"
                   rows="3"
                   maxlength="4000"
                   placeholder="输入清楚、可执行的回复…"
-                  required
                 ></textarea>
+                <div class="help-attachment-preview" id="replyAttachmentPreview" hidden aria-live="polite"></div>
                 <div class="help-reply-actions">
                   <span id="replyHint">回复将发送到当前会话。</span>
                   <button class="btn primary" id="sendReplyBtn" type="submit">发送回复</button>

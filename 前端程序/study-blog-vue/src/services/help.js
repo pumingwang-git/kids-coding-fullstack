@@ -17,8 +17,47 @@ export function listHelpChatLines({ page = 1, pageSize = 20 } = {}) {
   return request(`${STUDENT_LINES_PATH}?${params}`);
 }
 
-export function getHelpChatLine(lineId) {
-  return request(`${STUDENT_LINES_PATH}/${encodeURIComponent(lineId)}`);
+export function getHelpChatLine(lineId, options = null) {
+  if (!options) return request(`${STUDENT_LINES_PATH}/${encodeURIComponent(lineId)}`);
+  const params = new URLSearchParams({ limit: String(options.limit || 50) });
+  if (options.beforeId != null) params.set("before_id", String(options.beforeId));
+  return request(`${STUDENT_LINES_PATH}/${encodeURIComponent(lineId)}?${params}`);
+}
+
+export function recallHelpMessage(messageId) {
+  return request(`/api/student/help-messages/${encodeURIComponent(messageId)}/recall`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function uploadHelpAttachment(requestId, file, { requestKey, onProgress } = {}) {
+  const csrf = (typeof document === "undefined" ? "" : document.cookie)
+    .split("; ")
+    .find((item) => item.startsWith("csrf_token="))
+    ?.slice("csrf_token=".length);
+  const form = new FormData();
+  form.append("file", file);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/student/help-requests/${encodeURIComponent(requestId)}/attachments`);
+    xhr.withCredentials = true;
+    if (csrf) xhr.setRequestHeader("X-CSRF-Token", decodeURIComponent(csrf));
+    xhr.setRequestHeader("Idempotency-Key", requestKey || idempotencyKey());
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onerror = () => reject(new Error("网络断开，请重试。"));
+    xhr.onload = () => {
+      const body = JSON.parse(xhr.responseText || "{}");
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(body.detail || "图片上传失败，请重试。"));
+        return;
+      }
+      resolve(body);
+    };
+    xhr.send(form);
+  });
 }
 
 export function createHelpRequest(payload, { requestKey = idempotencyKey() } = {}) {
@@ -43,6 +82,7 @@ export function itemsOf(payload) {
 }
 
 export function messagesOf(payload) {
+  if (Array.isArray(payload?.items)) return payload.items;
   return Array.isArray(payload?.messages) ? payload.messages : [];
 }
 

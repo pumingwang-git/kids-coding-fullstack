@@ -1,8 +1,10 @@
-import { adminRequest, ifMatch } from "./admin-api.js";
+import { adminRequest, adminUpload, ifMatch } from "./admin-api.js";
 import { escapeHtml, fmtTime } from "./admin-ui.js";
 import { initLayout } from "./admin-layout.js";
 
 const PAGE_SIZE = 20;
+const CHAT_PAGE_SIZE = 40;
+const EMOJIS = ["🙂", "😊", "👍", "👏", "💡", "🤔", "✅", "🎯", "💪", "🙏", "📌", "🌟"];
 
 function firstValue(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== "");
@@ -152,9 +154,21 @@ export function messageMarkup(message) {
     Boolean(message.sender_user_id) ||
     message.role === "student";
   const sender = firstValue(message.sender_label, isStudent ? "学生" : "教师");
+  const recalled = message.recalled === true;
+  const attachments = recalled ? [] : (Array.isArray(message.attachments) ? message.attachments : []);
+  const attachmentMarkup = attachments
+    .map((attachment) => {
+      const url = firstValue(attachment.url, attachment.download_url, attachment.view_url, "");
+      if (!url) return "";
+      return `<a class="help-message-image" href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${escapeHtml(attachment.original_name || "消息图片")}" loading="lazy" /></a>`;
+    })
+    .join("");
+  const recallControl = !isStudent && message.can_recall === true && !recalled
+    ? `<button class="btn-text help-message-recall" type="button" data-recall-message-id="${escapeHtml(String(message.id ?? ""))}">撤回</button>`
+    : "";
   return `<article class="help-message ${isStudent ? "is-student" : "is-admin"}" data-message-id="${escapeHtml(String(message.id ?? ""))}" data-help-request-id="${escapeHtml(String(message.help_request_id ?? ""))}">
-    <header><strong>${escapeHtml(sender)}</strong>${message.created_at ? `<time>${escapeHtml(fmtTime(message.created_at))}</time>` : ""}</header>
-    <p>${escapeHtml(message.body || "")}</p>${isStudent && message.read_by_assigned_teacher ? '<small class="help-message-receipt">已读</small>' : ""}${!isStudent && message.read_by_student ? '<small class="help-message-receipt">学生已读</small>' : ""}
+    <header><strong>${escapeHtml(sender)}</strong>${message.created_at ? `<time>${escapeHtml(fmtTime(message.created_at))}</time>` : ""}${recallControl}</header>
+    <p${recalled ? ' class="is-recalled"' : ""}>${recalled ? `${isStudent ? "对方" : "你"}撤回了一条消息` : escapeHtml(message.body || "")}</p>${attachmentMarkup}${isStudent && message.read_by_assigned_teacher ? '<small class="help-message-receipt">已读</small>' : ""}${!isStudent && message.read_by_student ? '<small class="help-message-receipt">学生已读</small>' : ""}
   </article>`;
 }
 
@@ -167,10 +181,44 @@ export function createHelpDesk(root = document, request = adminRequest) {
     filter: "waiting",
     selectedId: null,
     detail: null,
+    messages: [],
+    nextCursor: null,
+    hasMoreMessages: false,
+    loadingOlderMessages: false,
+    replyAttachments: [],
     queueBusy: false,
     detailBusy: false,
   };
   const replyKeys = createRetryKeyCache();
+
+  function clearReplyAttachments() {
+    state.replyAttachments.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    state.replyAttachments = [];
+    $("replyAttachmentInput").value = "";
+    renderReplyAttachments();
+  }
+
+  function renderReplyAttachments() {
+    const host = $("replyAttachmentPreview");
+    host.hidden = !state.replyAttachments.length;
+    host.innerHTML = state.replyAttachments
+      .map(
+        (item, index) => `<figure class="help-reply-image-preview"><img src="${escapeHtml(item.previewUrl)}" alt="待发送图片：${escapeHtml(item.file.name)}" /><figcaption>${escapeHtml(item.file.name)}</figcaption><button class="btn-text" type="button" data-remove-reply-attachment="${index}" aria-label="移除图片 ${escapeHtml(item.file.name)}">移除</button></figure>`,
+      )
+      .join("");
+  }
+
+  function renderMessages({ stickToBottom = false } = {}) {
+    const host = $("messageList");
+    const messages = state.messages;
+    const olderButton = state.hasMoreMessages
+      ? `<div class="help-message-history"><button class="btn" type="button" data-load-older-messages${state.loadingOlderMessages ? " disabled" : ""}>${state.loadingOlderMessages ? "正在加载…" : "加载更早消息"}</button></div>`
+      : "";
+    host.innerHTML = messages.length
+      ? `${olderButton}${messages.map(messageMarkup).join("")}`
+      : '<div class="help-chat-empty"><strong>这条会话还没有可显示的消息</strong><p>可以刷新队列后再试。</p></div>';
+    if (stickToBottom) host.scrollTop = host.scrollHeight;
+  }
 
   function setStatus(message = "", kind = "") {
     $("deskStatus").textContent = message;
@@ -315,6 +363,9 @@ export function createHelpDesk(root = document, request = adminRequest) {
     $("toggleAssignmentBtn").hidden = true;
     $("messageList").innerHTML =
       '<div class="help-chat-loading"><span></span><span></span><span></span></div>';
+    $("emojiPicker").hidden = true;
+    $("emojiPickerBtn").setAttribute("aria-expanded", "false");
+    clearReplyAttachments();
     renderProfileLoading(item);
   }
 
@@ -327,6 +378,7 @@ export function createHelpDesk(root = document, request = adminRequest) {
     $("toggleAssignmentBtn").hidden = true;
     $("messageList").innerHTML =
       '<div class="help-chat-empty"><strong>还没有打开会话</strong><p>队列会把学生原话和等待状态放在最前面。</p></div>';
+    clearReplyAttachments();
   }
 
   function renderDetail(detail) {
@@ -346,7 +398,9 @@ export function createHelpDesk(root = document, request = adminRequest) {
     const context = contextText(detail);
     $("contextLabel").textContent = context;
     $("contextStrip").hidden = !context;
-    const messages = messageRows(detail);
+    state.messages = messageRows(detail);
+    state.nextCursor = detail.next_cursor ?? null;
+    state.hasMoreMessages = detail.has_more === true && state.nextCursor != null;
     if (metadataOnly(detail)) {
       $("messageList").innerHTML =
         '<div class="help-chat-empty"><strong>当前仅可查看会话元数据</strong><p>正文与回复入口由服务端权限控制。</p></div>';
@@ -355,13 +409,10 @@ export function createHelpDesk(root = document, request = adminRequest) {
       $("toggleAssignmentBtn").hidden = true;
       return;
     }
-    $("messageList").innerHTML = messages.length
-      ? messages.map(messageMarkup).join("")
-      : '<div class="help-chat-empty"><strong>这条会话还没有可显示的消息</strong><p>可以刷新队列后再试。</p></div>';
+    renderMessages({ stickToBottom: true });
     const requestRow = activeRequest(detail);
     const canReply = detail.can_reply === true && Boolean(requestRow?.id);
     setReplyAvailability(canReply);
-    $("messageList").scrollTop = $("messageList").scrollHeight;
     renderAssignmentCandidates(detail, requestRow, detail.can_reassign === true);
   }
 
@@ -434,24 +485,91 @@ export function createHelpDesk(root = document, request = adminRequest) {
     profileHighlightTimer = setTimeout(() => target.classList.remove("is-history-target"), 1800);
   }
 
+  async function loadOlderMessages() {
+    if (state.loadingOlderMessages || !state.hasMoreMessages || state.selectedId == null) return;
+    const host = $("messageList");
+    const previousHeight = host.scrollHeight;
+    const previousTop = host.scrollTop;
+    state.loadingOlderMessages = true;
+    renderMessages();
+    try {
+      const params = new URLSearchParams({
+        before_id: String(state.nextCursor),
+        limit: String(CHAT_PAGE_SIZE),
+      });
+      const page = await request(`/help-chat-lines/${encodeURIComponent(state.selectedId)}?${params}`);
+      if (String(state.selectedId) !== String(page.id ?? state.selectedId)) return;
+      const earlier = messageRows(page);
+      const known = new Set(state.messages.map((item) => String(item.id)));
+      state.messages = [...earlier.filter((item) => !known.has(String(item.id))), ...state.messages];
+      state.nextCursor = page.next_cursor ?? null;
+      state.hasMoreMessages = page.has_more === true && state.nextCursor != null;
+      renderMessages();
+      host.scrollTop = previousTop + (host.scrollHeight - previousHeight);
+    } catch (error) {
+      setStatus(error.message || "更早消息加载失败，请重试。", "error");
+    } finally {
+      state.loadingOlderMessages = false;
+      renderMessages();
+      host.scrollTop = previousTop + (host.scrollHeight - previousHeight);
+    }
+  }
+
+  async function uploadReplyAttachments(requestRow) {
+    const uploadedIds = [];
+    for (const attachment of state.replyAttachments) {
+      if (attachment.id != null) {
+        uploadedIds.push(attachment.id);
+        continue;
+      }
+      const formData = new FormData();
+      formData.append("file", attachment.file, attachment.file.name);
+      const uploaded = await adminUpload(
+        `/help-requests/${encodeURIComponent(requestRow.id)}/attachments`,
+        formData,
+        { headers: { "Idempotency-Key": attachment.key } },
+      );
+      attachment.id = uploaded.id;
+      uploadedIds.push(uploaded.id);
+    }
+    return uploadedIds;
+  }
+
+  async function recallMessage(messageId) {
+    const message = state.messages.find((item) => String(item.id) === String(messageId));
+    if (!message || message.can_recall !== true || message.recalled === true) return;
+    const control = $("messageList").querySelector(`[data-recall-message-id="${messageId}"]`);
+    if (control) control.disabled = true;
+    try {
+      await request(`/help-messages/${encodeURIComponent(messageId)}/recall`, { method: "POST", body: "{}" });
+      await selectLine(state.selectedId);
+      await loadQueue();
+    } catch (error) {
+      setStatus(error.message || "撤回失败，请重试。", "error");
+      if (control) control.disabled = false;
+    }
+  }
+
   async function sendReply(event) {
     event.preventDefault();
     const requestRow = activeRequest(state.detail || {});
     const body = $("replyBody").value.trim();
-    if (state.detail?.can_reply !== true || !requestRow?.id || !body) return;
+    if (state.detail?.can_reply !== true || !requestRow?.id || (!body && !state.replyAttachments.length)) return;
     const requestKey = replyKeys.keyFor(requestRow.id, body);
     $("replyBody").disabled = true;
     $("sendReplyBtn").disabled = true;
     $("sendReplyBtn").textContent = "发送中…";
     $("replyHint").textContent = "正在发送回复…";
     try {
+      const attachmentIds = await uploadReplyAttachments(requestRow);
       await request(`/help-requests/${encodeURIComponent(requestRow.id)}/messages`, {
         method: "POST",
         headers: { "Idempotency-Key": requestKey },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, attachment_ids: attachmentIds }),
       });
       replyKeys.markSucceeded();
       $("replyBody").value = "";
+      clearReplyAttachments();
       $("replyHint").textContent = "回复已发送。";
       await selectLine(state.selectedId);
       await loadQueue();
@@ -634,6 +752,9 @@ export function createHelpDesk(root = document, request = adminRequest) {
   });
   $("messageList").addEventListener("click", (event) => {
     if (event.target.closest("[data-retry-detail]")) selectLine(state.selectedId);
+    if (event.target.closest("[data-load-older-messages]")) loadOlderMessages();
+    const recall = event.target.closest("[data-recall-message-id]");
+    if (recall) recallMessage(recall.dataset.recallMessageId);
   });
   $("profileHistory").addEventListener("click", (event) => {
     const item = event.target.closest("[data-profile-message-id]");
@@ -662,13 +783,51 @@ export function createHelpDesk(root = document, request = adminRequest) {
   $("cancelAssignmentBtn").addEventListener("click", closeAssignment);
   $("assignmentForm").addEventListener("submit", reassign);
   $("replyForm").addEventListener("submit", sendReply);
+  $("emojiPicker").innerHTML = EMOJIS.map(
+    (emoji) => `<button type="button" class="help-emoji-option" data-emoji="${emoji}" aria-label="插入表情 ${emoji}">${emoji}</button>`,
+  ).join("");
+  $("emojiPickerBtn").addEventListener("click", () => {
+    const opening = $("emojiPicker").hidden;
+    $("emojiPicker").hidden = !opening;
+    $("emojiPickerBtn").setAttribute("aria-expanded", String(opening));
+  });
+  $("emojiPicker").addEventListener("click", (event) => {
+    const option = event.target.closest("[data-emoji]");
+    if (!option || $("replyBody").disabled) return;
+    const input = $("replyBody");
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    input.setRangeText(option.dataset.emoji, start, end, "end");
+    input.focus();
+  });
+  $("attachmentPickerBtn").addEventListener("click", () => $("replyAttachmentInput").click());
+  $("replyAttachmentInput").addEventListener("change", () => {
+    const files = [...$("replyAttachmentInput").files].filter((file) => file.type.startsWith("image/"));
+    state.replyAttachments.push(
+      ...files.map((file) => ({
+        file,
+        key: idempotencyKey(),
+        previewUrl: URL.createObjectURL(file),
+        id: null,
+      })),
+    );
+    $("replyAttachmentInput").value = "";
+    renderReplyAttachments();
+  });
+  $("replyAttachmentPreview").addEventListener("click", (event) => {
+    const control = event.target.closest("[data-remove-reply-attachment]");
+    if (!control) return;
+    const [attachment] = state.replyAttachments.splice(Number(control.dataset.removeReplyAttachment), 1);
+    if (attachment) URL.revokeObjectURL(attachment.previewUrl);
+    renderReplyAttachments();
+  });
   $("replyBody").addEventListener("input", () => {
     publishTyping(true);
     clearTimeout(typingStopTimer);
     typingStopTimer = setTimeout(() => publishTyping(false), 900);
   });
 
-  return { loadQueue, selectLine, sendReply, reassign, startRealtime, state };
+  return { loadQueue, selectLine, sendReply, reassign, recallMessage, loadOlderMessages, startRealtime, state };
 }
 
 const app = document.getElementById("helpDeskApp");

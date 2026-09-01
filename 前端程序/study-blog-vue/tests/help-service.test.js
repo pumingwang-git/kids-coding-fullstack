@@ -8,7 +8,9 @@ import {
   getHelpChatLine,
   listHelpChatLines,
   messagesOf,
+  recallHelpMessage,
   subscribeToHelpChatEvents,
+  uploadHelpAttachment,
 } from "../src/services/help";
 
 describe("student help service", () => {
@@ -22,6 +24,10 @@ describe("student help service", () => {
     );
     await getHelpChatLine(7);
     expect(request).toHaveBeenLastCalledWith("/api/student/help-chat-lines/7");
+    await getHelpChatLine(7, { beforeId: 42, limit: 50 });
+    expect(request).toHaveBeenLastCalledWith(
+      "/api/student/help-chat-lines/7?limit=50&before_id=42",
+    );
   });
 
   it("sends only public context fields and keeps context_key server-owned", async () => {
@@ -57,6 +63,50 @@ describe("student help service", () => {
 
   it("reads messages from the server-owned detail contract", () => {
     expect(messagesOf({ messages: [{ id: 2 }, { id: 1 }] }).map((item) => item.id)).toEqual([2, 1]);
+  });
+
+  it("uses the server withdrawal contract instead of treating the two-minute hint as authorization", async () => {
+    request.mockResolvedValue({ id: 8, recalled: true });
+    await recallHelpMessage(8);
+    expect(request).toHaveBeenCalledWith("/api/student/help-messages/8/recall", {
+      method: "POST",
+      body: "{}",
+    });
+  });
+
+  it("uploads an image with one stable idempotency key and reports byte progress", async () => {
+    const instances = [];
+    class FakeXmlHttpRequest {
+      constructor() {
+        this.upload = {};
+        this.headers = {};
+        this.status = 201;
+        this.responseText = JSON.stringify({ id: 17, original_name: "code.png" });
+        instances.push(this);
+      }
+      open(...args) {
+        this.openArgs = args;
+      }
+      setRequestHeader(name, value) {
+        this.headers[name] = value;
+      }
+      send() {
+        this.upload.onprogress({ lengthComputable: true, loaded: 4, total: 5 });
+        this.onload();
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeXmlHttpRequest);
+    const progress = vi.fn();
+    await expect(
+      uploadHelpAttachment(9, new File(["image"], "code.png", { type: "image/png" }), {
+        requestKey: "attachment-retry-key",
+        onProgress: progress,
+      }),
+    ).resolves.toMatchObject({ id: 17 });
+    expect(instances[0].openArgs).toEqual(["POST", "/api/student/help-requests/9/attachments"]);
+    expect(instances[0].headers["Idempotency-Key"]).toBe("attachment-retry-key");
+    expect(progress).toHaveBeenCalledWith(80);
+    vi.unstubAllGlobals();
   });
 
   it("uses a one-time subprotocol ticket and retries without a visible error", async () => {

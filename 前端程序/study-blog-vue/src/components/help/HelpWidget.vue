@@ -5,6 +5,7 @@ import { autoUpdate, flip, offset, shift, useFloating } from "@floating-ui/vue";
 import {
   AlertCircle,
   GraduationCap,
+  ImagePlus,
   MessageCircleQuestion,
   RefreshCw,
   Send,
@@ -30,8 +31,11 @@ import {
   itemsOf,
   listHelpChatLines,
   messagesOf,
+  recallHelpMessage,
   subscribeToHelpChatEvents,
+  uploadHelpAttachment,
 } from "@/services/help";
+import HelpEmojiPicker from "./HelpEmojiPicker.vue";
 import HelpMessageScroller from "./HelpMessageScroller.vue";
 
 const props = defineProps({
@@ -53,6 +57,10 @@ const selectedClassId = ref(null);
 const selectedLineId = ref(null);
 const detail = ref(null);
 const message = ref("");
+const attachment = ref(null);
+const attachmentError = ref("");
+const previewAttachment = ref(null);
+const loadingEarlier = ref(false);
 const teacherTyping = ref(false);
 const textarea = ref(null);
 const trigger = ref(null);
@@ -107,9 +115,12 @@ const classChoices = computed(() => {
   return [...choices.values()];
 });
 const messages = computed(() => messagesOf(detail.value));
+const hasMore = computed(() => !!detail.value?.has_more);
 const canSend = computed(() => !!activeClass.value && !!message.value.trim() && !sending.value);
 const canCompose = computed(() => !!activeClass.value);
-const unreadCount = computed(() => lines.value.reduce((total, line) => total + Number(line.unread_count || 0), 0));
+const unreadCount = computed(() =>
+  lines.value.reduce((total, line) => total + Number(line.unread_count || 0), 0),
+);
 
 function classLabel(item) {
   return item.course_title ? `${item.class_name} · ${item.course_title}` : item.class_name;
@@ -121,8 +132,33 @@ async function focusComposer() {
   textarea.value?.focus?.();
 }
 
-async function loadDetail(lineId) {
-  detail.value = await getHelpChatLine(lineId);
+async function loadDetail(lineId, options) {
+  detail.value = options ? await getHelpChatLine(lineId, options) : await getHelpChatLine(lineId);
+}
+
+function mergeEarlier(page) {
+  const existing = messagesOf(detail.value);
+  const incoming = messagesOf(page);
+  const known = new Set(existing.map((item) => String(item.id)));
+  detail.value = {
+    ...detail.value,
+    ...page,
+    messages: [...incoming.filter((item) => !known.has(String(item.id))), ...existing],
+    items: [...incoming.filter((item) => !known.has(String(item.id))), ...existing],
+  };
+}
+
+async function loadEarlier() {
+  if (!selectedLineId.value || !detail.value?.has_more || loadingEarlier.value) return;
+  loadingEarlier.value = true;
+  try {
+    const page = await getHelpChatLine(selectedLineId.value, {
+      beforeId: detail.value.next_cursor,
+    });
+    mergeEarlier(page);
+  } finally {
+    loadingEarlier.value = false;
+  }
 }
 
 async function load() {
@@ -148,9 +184,12 @@ async function load() {
     ) {
       selectedClassId.value = lines.value[0]?.class_id ?? null;
     }
-    selectedLineId.value = props.initialLineId != null && lines.value.some((item) => String(item.id) === String(props.initialLineId))
-      ? props.initialLineId
-      : lines.value.find((item) => String(item.class_id) === String(selectedClassId.value))?.id ?? null;
+    selectedLineId.value =
+      props.initialLineId != null &&
+      lines.value.some((item) => String(item.id) === String(props.initialLineId))
+        ? props.initialLineId
+        : (lines.value.find((item) => String(item.class_id) === String(selectedClassId.value))
+            ?.id ?? null);
     detail.value = selectedLineId.value ? await getHelpChatLine(selectedLineId.value) : null;
     if (props.initialLineId != null && selectedLineId.value) open.value = true;
   } catch (error) {
@@ -183,13 +222,19 @@ async function refreshFromRealtimeEvent(event) {
 }
 
 function scheduleRealtimeRefresh(event) {
-  if (event.event === "admin_typing" && String(event.chat_line_id) === String(selectedLineId.value)) {
+  if (
+    event.event === "admin_typing" &&
+    String(event.chat_line_id) === String(selectedLineId.value)
+  ) {
     teacherTyping.value = true;
     window.clearTimeout(teacherTypingTimer);
     teacherTypingTimer = window.setTimeout(() => (teacherTyping.value = false), 2500);
     return;
   }
-  if (event.event === "admin_stopped_typing" && String(event.chat_line_id) === String(selectedLineId.value)) {
+  if (
+    event.event === "admin_stopped_typing" &&
+    String(event.chat_line_id) === String(selectedLineId.value)
+  ) {
     teacherTyping.value = false;
     return;
   }
@@ -206,7 +251,11 @@ function scheduleRealtimeRefresh(event) {
 
 function publishTyping(isTyping) {
   if (selectedLineId.value == null) return;
-  unsubscribeEvents?.send?.({ type: "typing", chat_line_id: Number(selectedLineId.value), is_typing: isTyping });
+  unsubscribeEvents?.send?.({
+    type: "typing",
+    chat_line_id: Number(selectedLineId.value),
+    is_typing: isTyping,
+  });
 }
 
 function onMessageInput() {
@@ -215,12 +264,100 @@ function onMessageInput() {
   typingStopTimer = window.setTimeout(() => publishTyping(false), 900);
 }
 
-async function send() {
+function insertEmoji(emoji) {
+  message.value += emoji;
+  focusComposer();
+}
+
+function chooseAttachment(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  attachmentError.value = "";
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    attachmentError.value = "只能选择图片文件。";
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    attachmentError.value = "图片不能超过 10 MB。";
+    return;
+  }
+  attachment.value?.previewUrl && URL.revokeObjectURL(attachment.value.previewUrl);
+  attachment.value = {
+    file,
+    key: idempotencyKey(),
+    progress: 0,
+    previewUrl: URL.createObjectURL(file),
+    status: "ready",
+  };
+}
+
+function addOptimisticMessage(text, requestKey) {
+  const local = {
+    id: `local-${requestKey}`,
+    body: text,
+    sender_type: "student",
+    created_at: new Date().toISOString(),
+    status: "sending",
+    requestKey,
+    attachments: attachment.value
+      ? [
+          {
+            id: `local-file-${requestKey}`,
+            original_name: attachment.value.file.name,
+            url: attachment.value.previewUrl,
+          },
+        ]
+      : [],
+  };
+  const current = messagesOf(detail.value);
+  detail.value = {
+    ...(detail.value || {}),
+    messages: [...current, local],
+    items: [...current, local],
+  };
+  return local;
+}
+
+function replaceOptimisticMessage(local, created) {
+  const confirmed =
+    created?.messages?.find((item) => item.body === local.body && item.sender_type === "student") ||
+    created?.messages?.at(-1);
+  if (!confirmed) return;
+  const current = messagesOf(detail.value);
+  const next = current.map((item) =>
+    item.id === local.id ? { ...confirmed, attachments: local.attachments } : item,
+  );
+  detail.value = { ...detail.value, messages: next, items: next };
+}
+
+async function retryMessage(local) {
+  if (!local?.requestKey || local.status !== "failed") return;
+  message.value = local.body;
+  await send(local);
+}
+
+async function recall(messageToRecall) {
+  try {
+    const recalled = await recallHelpMessage(messageToRecall.id);
+    const current = messagesOf(detail.value);
+    const next = current.map((item) =>
+      item.id === messageToRecall.id ? { ...item, ...recalled, recalled: true } : item,
+    );
+    detail.value = { ...detail.value, messages: next, items: next };
+  } catch (error) {
+    sendError.value = error?.message || "这条消息暂时无法撤回。";
+  }
+}
+
+async function send(retrying = null) {
   const text = message.value.trim();
   if (!text || !activeClass.value || sending.value) return;
 
   const sameFailedBody = failedAttempt?.body === text;
-  const requestKey = sameFailedBody ? failedAttempt.key : idempotencyKey();
+  const requestKey =
+    retrying?.requestKey || (sameFailedBody ? failedAttempt.key : idempotencyKey());
+  const local = retrying || addOptimisticMessage(text, requestKey);
   sending.value = true;
   sendError.value = "";
   try {
@@ -232,6 +369,7 @@ async function send() {
       },
       { requestKey },
     );
+    replaceOptimisticMessage(local, created);
     failedAttempt = null;
     message.value = "";
     publishTyping(false);
@@ -247,9 +385,33 @@ async function send() {
       ];
     }
     selectedLineId.value = lineId;
+    if (attachment.value && created.id != null) {
+      attachment.value.status = "uploading";
+      const uploaded = await uploadHelpAttachment(created.id, attachment.value.file, {
+        requestKey: attachment.value.key,
+        onProgress: (progress) => (attachment.value.progress = progress),
+      });
+      const current = messagesOf(detail.value);
+      const next = current.map((item) =>
+        item.id === local.id || item.id === created?.messages?.at(-1)?.id
+          ? {
+              ...item,
+              attachments: [{ ...uploaded, url: uploaded.url || attachment.value.previewUrl }],
+            }
+          : item,
+      );
+      detail.value = { ...detail.value, messages: next, items: next };
+      attachment.value.status = "uploaded";
+    }
+    attachment.value = null;
     await loadDetail(lineId);
     await focusComposer();
   } catch (error) {
+    const current = messagesOf(detail.value);
+    const next = current.map((item) =>
+      item.id === local.id ? { ...item, status: "failed" } : item,
+    );
+    detail.value = { ...detail.value, messages: next, items: next };
     failedAttempt = { body: text, key: requestKey };
     sendError.value = error?.message || "消息没有发出去，请重试。";
   } finally {
@@ -305,9 +467,12 @@ watch(open, (isOpen) => {
   if (isOpen) load().then(focusComposer);
 });
 
-watch(() => props.initialLineId, (lineId) => {
-  if (lineId != null) open.value = true;
-});
+watch(
+  () => props.initialLineId,
+  (lineId) => {
+    if (lineId != null) open.value = true;
+  },
+);
 
 watch(selectedClassId, async (classId, previous) => {
   if (classId === previous || loading.value) return;
@@ -335,7 +500,9 @@ watch(selectedClassId, async (classId, previous) => {
   <Button ref="trigger" class="help-widget-trigger" type="button" size="lg" @click="open = true">
     <MessageCircleQuestion data-icon="inline-start" />
     问老师
-    <span v-if="unreadCount" class="help-unread-dot" :aria-label="`有 ${unreadCount} 条未读回复`">{{ unreadCount > 9 ? "9+" : unreadCount }}</span>
+    <span v-if="unreadCount" class="help-unread-dot" :aria-label="`有 ${unreadCount} 条未读回复`">{{
+      unreadCount > 9 ? "9+" : unreadCount
+    }}</span>
   </Button>
 
   <Teleport to="body">
@@ -432,7 +599,16 @@ watch(selectedClassId, async (classId, previous) => {
           <h3>可以直接开口</h3>
           <p>把刚才卡住的地方告诉老师吧。</p>
         </div>
-        <HelpMessageScroller v-else :messages="messages" />
+        <HelpMessageScroller
+          v-else
+          :messages="messages"
+          :has-more="hasMore"
+          :loading-earlier="loadingEarlier"
+          :load-earlier="loadEarlier"
+          @recall="recall"
+          @retry="retryMessage"
+          @preview="previewAttachment = $event"
+        />
 
         <form v-if="canCompose" class="help-composer" @submit.prevent="send">
           <FieldGroup>
@@ -453,9 +629,38 @@ watch(selectedClassId, async (classId, previous) => {
               />
             </Field>
           </FieldGroup>
+          <div v-if="attachment" class="help-attachment-queue">
+            <img :src="attachment.previewUrl" alt="待发送的图片预览" />
+            <div>
+              <strong>{{ attachment.file.name }}</strong
+              ><span v-if="attachment.status === 'uploading'"
+                >上传中 {{ attachment.progress }}%</span
+              ><span v-else>准备发送</span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="移除图片"
+              title="移除图片"
+              @click="
+                URL.revokeObjectURL(attachment.previewUrl);
+                attachment = null;
+              "
+              ><X
+            /></Button>
+          </div>
           <div class="help-composer-actions">
-            <p v-if="sendError" role="alert">{{ sendError }}</p>
+            <p v-if="sendError || attachmentError" role="alert">
+              {{ sendError || attachmentError }}
+            </p>
             <span v-else>Enter 发送，Shift + Enter 换行</span>
+            <div class="help-composer-tools">
+              <HelpEmojiPicker @select="insertEmoji" />
+              <label class="help-file-button" aria-label="添加图片" title="添加图片"
+                ><ImagePlus /><input type="file" accept="image/*" @change="chooseAttachment"
+              /></label>
+            </div>
             <Button
               class="help-send-button"
               type="submit"
@@ -473,6 +678,29 @@ watch(selectedClassId, async (classId, previous) => {
         <div v-else class="help-history-note">这个班级已结束，聊天记录仍可查看。</div>
       </template>
     </aside>
+  </Teleport>
+  <Teleport to="body">
+    <div
+      v-if="previewAttachment"
+      class="help-image-preview"
+      role="dialog"
+      aria-modal="true"
+      aria-label="图片预览"
+      @click.self="previewAttachment = null"
+    >
+      <button
+        type="button"
+        aria-label="关闭图片预览"
+        title="关闭图片预览"
+        @click="previewAttachment = null"
+      >
+        <X />
+      </button>
+      <img
+        :src="previewAttachment.url || previewAttachment.thumbnail_url"
+        :alt="previewAttachment.original_name || '图片附件'"
+      />
+    </div>
   </Teleport>
 </template>
 
@@ -496,10 +724,23 @@ watch(selectedClassId, async (classId, previous) => {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--background);
-  box-shadow: 0 24px 60px rgba(34, 43, 40, 0.28);
+  box-shadow: var(--card-shadow);
 }
-.help-unread-dot { min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: #d92d20; color: #fff; font-size: 11px; line-height: 18px; }
-.help-typing { padding: 7px 20px; color: var(--muted-foreground); font-size: 12px; }
+.help-unread-dot {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--destructive);
+  color: var(--primary-foreground);
+  font-size: 11px;
+  line-height: 18px;
+}
+.help-typing {
+  padding: 7px 20px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
 .help-window-header {
   display: flex;
   align-items: center;
@@ -653,6 +894,97 @@ watch(selectedClassId, async (classId, previous) => {
 }
 .help-composer-actions p {
   color: var(--destructive);
+}
+.help-composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  margin-right: 42px;
+}
+.help-file-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.help-file-button:hover {
+  background: var(--muted-surface);
+  color: var(--primary);
+}
+.help-file-button svg {
+  width: 19px;
+  height: 19px;
+}
+.help-file-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.help-attachment-queue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted-surface);
+  font-size: 12px;
+}
+.help-attachment-queue img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+.help-attachment-queue div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+.help-attachment-queue strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.help-attachment-queue span {
+  color: var(--muted-foreground);
+}
+.help-image-preview {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--foreground) 72%, transparent);
+}
+.help-image-preview img {
+  max-width: min(900px, 100%);
+  max-height: calc(100dvh - 48px);
+  object-fit: contain;
+}
+.help-image-preview button {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--foreground);
+  cursor: pointer;
 }
 .help-history-note {
   padding: 14px 16px max(16px, env(safe-area-inset-bottom));

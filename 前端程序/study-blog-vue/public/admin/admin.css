@@ -5087,8 +5087,16 @@ body:not(.admin-dashboard) :focus-visible {
 .help-message.is-admin { margin-left: auto; }
 .help-message header { display: flex; align-items: center; gap: 8px; margin: 0 2px 5px; color: #758497; font-size: 10px; }
 .help-message header time { margin-left: auto; }
+.help-message-recall { margin-left: 4px; padding: 2px 4px; color: #758497; font-size: 11px; }
+.help-message-recall:hover:not(:disabled), .help-message-recall:focus-visible { color: var(--danger); }
 .help-message p { margin: 0; padding: 11px 13px; border-radius: 7px; background: #fff; color: #2d4056; box-shadow: 0 2px 8px rgba(27, 54, 79, .07); font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .help-message.is-admin p { background: #e8f2ee; color: #23483f; }
+.help-message p.is-recalled { border: 1px solid #d8e1e8; background: #f5f7f9; color: #748398; font-style: italic; box-shadow: none; }
+.help-message-image { display: block; width: fit-content; max-width: 100%; margin-top: 8px; overflow: hidden; border: 1px solid #dce4eb; border-radius: 6px; background: #fff; }
+.help-message-image:focus-visible { outline: 3px solid rgba(47, 128, 110, .42); outline-offset: 2px; }
+.help-message-image img { display: block; width: auto; max-width: min(100%, 360px); max-height: 280px; object-fit: contain; }
+.help-message-history { display: flex; justify-content: center; margin: -6px 0 16px; }
+.help-message-history .btn { min-height: 32px; padding-block: 5px; font-size: 12px; }
 .help-chat-empty, .help-chat-loading { display: grid; place-items: center; align-content: center; min-height: 100%; color: #748398; text-align: center; }
 .help-chat-empty strong { color: #34475d; }
 .help-chat-empty p { max-width: 44ch; margin: 7px 0 14px; line-height: 1.6; }
@@ -5099,6 +5107,19 @@ body:not(.admin-dashboard) :focus-visible {
 .help-reply-form { display: grid; gap: 8px; padding: 14px 18px 16px; border-top: 1px solid #e3e8ee; background: #fff; }
 .help-reply-form label { color: #42566d; font-size: 11px; font-weight: 800; }
 .help-reply-form textarea { width: 100%; min-height: 76px; resize: vertical; }
+.help-reply-tools { position: relative; display: flex; align-items: center; gap: 4px; }
+.help-composer-tool { min-height: 30px; padding: 4px 7px; border: 1px solid #dbe3ea; border-radius: 4px; color: #52657a; font-size: 12px; }
+.help-composer-tool:hover, .help-composer-tool:focus-visible, .help-composer-tool[aria-expanded="true"] { border-color: #3a6a94; color: #276f60; background: #f3f8fc; }
+.help-emoji-picker { position: absolute; z-index: 10; top: calc(100% + 6px); left: 0; display: grid; grid-template-columns: repeat(6, 32px); gap: 4px; width: max-content; padding: 7px; border: 1px solid #dbe3ea; border-radius: 6px; background: #fff; box-shadow: 0 10px 24px rgba(27, 54, 79, .16); }
+.help-emoji-picker[hidden] { display: none; }
+.help-emoji-option { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 4px; background: transparent; font-size: 17px; cursor: pointer; }
+.help-emoji-option:hover, .help-emoji-option:focus-visible { background: #e8f2ee; outline: 0; }
+.help-attachment-preview { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.help-attachment-preview[hidden] { display: none; }
+.help-reply-image-preview { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: min(100%, 360px); margin: 0; padding: 6px; border: 1px solid #dce4eb; border-radius: 6px; background: #f7fafc; }
+.help-reply-image-preview img { width: 52px; height: 52px; object-fit: cover; border-radius: 4px; }
+.help-reply-image-preview figcaption { min-width: 0; color: #52657a; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.help-reply-image-preview .btn-text { padding: 3px 4px; color: #65758a; font-size: 11px; }
 .help-reply-actions { display: flex; align-items: center; gap: 12px; }
 .help-reply-actions span { min-width: 0; color: #748398; font-size: 11px; overflow-wrap: anywhere; }
 .help-reply-actions .btn { margin-left: auto; flex: none; }
@@ -5127,7 +5148,9 @@ body:not(.admin-dashboard) :focus-visible {
   .help-context-strip { padding: 8px 12px; }
   .help-message-list { padding: 16px 12px; }
   .help-message { width: 90%; }
+  .help-message-image img { max-width: 100%; max-height: 240px; }
   .help-reply-form { padding: 10px 12px 12px; }
+  .help-reply-image-preview { width: 100%; }
 }
 
 @media (max-width: 420px) {

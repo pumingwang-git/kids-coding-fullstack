@@ -7,7 +7,9 @@ const helpApi = vi.hoisted(() => ({
   listHelpChatLines: vi.fn(),
   getHelpChatLine: vi.fn(),
   createHelpRequest: vi.fn(),
+  recallHelpMessage: vi.fn(),
   subscribeToHelpChatEvents: vi.fn(),
+  uploadHelpAttachment: vi.fn(),
 }));
 
 vi.mock("../src/services/help", async (importOriginal) => ({
@@ -24,7 +26,9 @@ describe("HelpWidget", () => {
     helpApi.listHelpChatLines.mockReset();
     helpApi.getHelpChatLine.mockReset();
     helpApi.createHelpRequest.mockReset();
+    helpApi.recallHelpMessage.mockReset();
     helpApi.subscribeToHelpChatEvents.mockReset();
+    helpApi.uploadHelpAttachment.mockReset();
     helpApi.subscribeToHelpChatEvents.mockImplementation((onChange) => {
       helpApi.onRealtimeChange = onChange;
       const unsubscribe = vi.fn();
@@ -88,7 +92,11 @@ describe("HelpWidget", () => {
     const wrapper = mount(HelpWidget, { attachTo: document.body });
     await flushPromises();
 
-    helpApi.onRealtimeChange({ type: "help_chat_line_changed", event: "admin_message", chat_line_id: 5 });
+    helpApi.onRealtimeChange({
+      type: "help_chat_line_changed",
+      event: "admin_message",
+      chat_line_id: 5,
+    });
     await new Promise((resolve) => setTimeout(resolve, 100));
     await flushPromises();
 
@@ -155,6 +163,38 @@ describe("HelpWidget", () => {
     expect(document.body.textContent).toContain("网络断开，请重试。");
     expect(document.body.textContent).toContain("重试");
     expect(textarea.value).toBe("请帮我看看");
+    wrapper.unmount();
+  });
+
+  it("inserts a selected emoji as plain text", async () => {
+    const wrapper = mount(HelpWidget, { attachTo: document.body });
+    await wrapper.get("button").trigger("click");
+    await flushPromises();
+    const emojiButton = [...document.body.querySelectorAll("button")].find(
+      (item) => item.getAttribute("aria-label") === "选择表情",
+    );
+    await emojiButton.click();
+    const option = [...document.body.querySelectorAll("button")].find(
+      (item) => item.getAttribute("aria-label") === "插入表情 😀",
+    );
+    await option.click();
+    expect(document.body.querySelector("textarea").value).toContain("😀");
+    wrapper.unmount();
+  });
+
+  it("rejects a non-image or an image larger than 10 MB before upload", async () => {
+    const wrapper = mount(HelpWidget, { attachTo: document.body });
+    await wrapper.get("button").trigger("click");
+    await flushPromises();
+    const input = document.body.querySelector('input[type="file"]');
+    const file = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "huge.png", {
+      type: "image/png",
+    });
+    Object.defineProperty(input, "files", { value: [file] });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushPromises();
+    expect(document.body.textContent).toContain("图片不能超过 10 MB。");
+    expect(helpApi.uploadHelpAttachment).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
