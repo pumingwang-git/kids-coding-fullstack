@@ -355,6 +355,9 @@ class HelpMessage(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     request_key_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     request_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    recalled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (
