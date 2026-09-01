@@ -25,7 +25,7 @@ from types import MappingProxyType
 from sqlalchemy import select
 
 from .class_groups import active_class_teacher_assignments, active_student_ids_for_classes
-from .models import AdminRole, AdminRoleCapability
+from .models import AdminRole, AdminRoleCapability, AdminUser, ClassTeacher
 
 logger = logging.getLogger(__name__)
 
@@ -495,6 +495,60 @@ def visible_class_ids(admin, db) -> set[int] | None:
     if db is None:
         raise TypeError("受限班级范围查询必须提供数据库会话。")
     return {row.class_id for row in active_class_teacher_assignments(db, admin.id)}
+
+
+def admin_ids_visible_for_class(db, class_id: int, *, capability: str | None = None) -> set[int]:
+    """反向解 `visible_class_ids()`：**谁看得见这个班级**。
+
+    正向问「给一个账号，他能看哪些班」；这里问「给一个班，谁能看见它」。
+
+    为什么要有反向：答疑的实时推送要在**每条消息、每次输入中提示、每次已读回执**上
+    算一次收件人。正向做法是遍历全部 active 管理员、逐个调 `has_capability()` 和
+    `visible_class_ids()`，等于「扫全表 + 每人两次查询」——挂在最热的路径上，
+    管理员一多就是每次敲键盘上百条 SQL。
+
+    实现方式是**候选集收窄 + 权威判定不变**：
+      候选 = 本班在任带班人 ∪ 全局范围账号
+    这是收件人的**超集**——一个账号要成为收件人，`visible_class_ids()` 要么返回
+    `None`（全局范围，落在第二项），要么返回的集合含 `class_id`（意味着他对这个班
+    有生效的带班关系，落在第一项）。所以收窄不改变结论，最终判定仍然逐字用
+    `visible_class_ids()`，**范围规则没有第二份实现**。
+    """
+    global_role_keys = {role for role, scope in ROLE_SCOPES.items() if scope == GLOBAL_SCOPE}
+    global_role_keys.add(SUPER_ROLE)
+    global_role_keys.update(
+        db.scalars(select(AdminRole.key).where(AdminRole.scope == GLOBAL_SCOPE)).all()
+    )
+
+    candidates = {
+        row
+        for row in db.scalars(
+            select(AdminUser)
+            .join(ClassTeacher, ClassTeacher.admin_user_id == AdminUser.id)
+            .where(
+                ClassTeacher.class_id == class_id,
+                ClassTeacher.ended_at.is_(None),
+                AdminUser.status == "active",
+            )
+        ).all()
+    }
+    candidates.update(
+        db.scalars(
+            select(AdminUser).where(
+                AdminUser.status == "active",
+                AdminUser.role.in_(global_role_keys),
+            )
+        ).all()
+    )
+
+    visible = set()
+    for admin in candidates:
+        if capability is not None and not has_capability(admin, capability, db):
+            continue
+        class_ids = visible_class_ids(admin, db)
+        if class_ids is None or class_id in class_ids:
+            visible.add(admin.id)
+    return visible
 
 
 def visible_student_ids(admin, db) -> set[int] | None:
