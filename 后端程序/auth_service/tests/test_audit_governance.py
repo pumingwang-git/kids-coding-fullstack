@@ -76,6 +76,7 @@ def test_every_audit_event_constructor_is_guarded():
     constructors = []
     for path in APP.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        prefixes = _audit_prefixes(tree, path)
         if path.name == "models.py":
             continue
         for node in ast.walk(tree):
@@ -135,38 +136,66 @@ def _expand_event_name(node: ast.JoinedStr, path: Path) -> set[str]:
     return names
 
 
-def _audit_prefix(tree: ast.Module, path: Path) -> str:
-    """按**实际导入的是哪个 audit** 决定前缀，而不是靠文件名硬编码清单。
+def _audit_prefixes(tree: ast.Module, path: Path) -> dict[str, str]:
+    """按**每个本地名字实际来自哪个模块**决定前缀，而不是整文件判一次。
 
-    admin_auth.audit 写库时加 `admin_` 前缀，auth_secure.audit 不加。
-    早先这里写死了 ("auth_secure.py", "exam.py")，学生端新增
-    profile_update / work_share 时立刻漏判——硬编码清单会漂，同 N7 教训。
+    admin_auth.audit 写库时加 `admin_` 前缀（`admin_auth.py:106`），
+    auth_secure.audit 不加。
+
+    这里演进过两轮：最早写死文件名清单 ("auth_secure.py", "exam.py")，学生端新增
+    profile_update / work_share 时立刻漏判；改成"整文件看导入了谁"之后，
+    `help_requests.py` 又把它打破了——**同一个文件两个都导**：
+        from .admin_auth import audit          # 加前缀
+        from .auth_secure import audit as student_audit   # 不加
+    整文件判一次会把全部 `audit(...)` 都算成不加前缀，结论正好反过来。
+    所以必须按本地名字逐个解析：别名 `student_audit` 记 ""，`audit` 记 "admin_"。
     """
-    if path.name in ("auth_secure.py", "exam.py"):
-        return ""  # 定义 audit / _audit 的文件本身
+    prefixes: dict[str, str] = {}
     for node in ast.walk(tree):
-        if (isinstance(node, ast.ImportFrom) and node.module
-                and node.module.endswith("auth_secure")
-                and any(alias.name == "audit" for alias in node.names)):
-            return ""
-    return "admin_"
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        if node.module.endswith("auth_secure"):
+            prefix = ""
+        elif node.module.endswith("admin_auth"):
+            prefix = "admin_"
+        else:
+            continue
+        for alias in node.names:
+            if alias.name in ("audit", "_audit"):
+                prefixes[alias.asname or alias.name] = prefix
+    return prefixes
+
+
+def _default_audit_prefix(path: Path) -> str:
+    """文件里没导入 audit 时按什么算。
+
+    `auth_secure.py` / `exam.py` 自己定义不加前缀的 audit；`admin_auth.py` 自己定义
+    加前缀的那个，且它的包装函数（`_audit_paper` 等）也都走加前缀那条。
+    """
+    return "" if path.name in ("auth_secure.py", "exam.py") else "admin_"
 
 
 def _literal_audit_event_types() -> set[str]:
     events = set()
     for path in (APP / "routers").glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        prefixes = _audit_prefixes(tree, path)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
                 continue
+            # 别名（例如 `from .auth_secure import audit as student_audit`）也要提取，
+            # 否则学生端事件整批看不见，落进「归类了但路由里找不到」的假象里。
             event_positions = {"audit": 2, "_audit": 2, "_audit_success": 2,
                                "_audit_admin_user_event": 2, "_audit_paper": 2,
                                "_audit_problem": 2, "_audit_role_policy": 2}
+            event_positions.update({name: 2 for name in prefixes})
             event_position = event_positions.get(node.func.id)
             if event_position is None or len(node.args) <= event_position:
                 continue
             event = node.args[event_position]
-            prefix = _audit_prefix(tree, path)
+            # 未在导入表里的包装函数（_audit_paper 等）沿用旧口径：
+            # 它们只出现在管理端文件里。
+            prefix = prefixes.get(node.func.id, _default_audit_prefix(path))
             if isinstance(event, ast.Constant) and isinstance(event.value, str):
                 events.add(f"{prefix}{event.value}")
             elif isinstance(event, ast.JoinedStr):
