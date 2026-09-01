@@ -57,7 +57,7 @@ from ..models import (
     Problem,
     User,
 )
-from ..notification_links import admin_help_request_link
+from ..notification_links import admin_help_request_link, student_help_request_link
 from ..notification_service import create_notification, request_hash
 from ..permissions import (
     admin_ids_visible_for_class,
@@ -1786,6 +1786,22 @@ def reply(
         old_status = row.status
         row.status = "answered"
         row.answered_at = utcnow()
+    # 学生不一定开着挂件：WebSocket 只覆盖在线那一刻，离线的人靠这条通知才知道
+    # 老师回过话了。`teacher_reply` 这个类型与 `student_help_request_link` 早就备好，
+    # 一直没接线——学生端因此收不到任何答疑通知。
+    create_notification(
+        db,
+        kind="teacher_reply",
+        title="教师已回复",
+        body="你的提问有新的回复。",
+        target_type="help_request",
+        target_id=row.id,
+        source_type="help_request",
+        source_id=row.id,
+        link_url=student_help_request_link(row.id, row.chat_line_id),
+        idempotency_key=f"help-teacher-reply:{message.id}",
+        recipients=[{"user_id": row.student_id, "admin_user_id": None}],
+    )
     audit(
         db,
         request.app.state.settings,
