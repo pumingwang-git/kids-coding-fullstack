@@ -1,5 +1,6 @@
 """E6 notification unread-count and revoked-navigation contracts."""
 
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -115,5 +116,13 @@ def test_revoked_student_notification_never_marks_read_or_navigates():
     handler = source[start:end]
 
     assert "if (item.revoked_at) return;" in handler
-    assert handler.index("if (item.revoked_at) return;") < handler.index("markNotificationRead")
-    assert handler.index("if (item.revoked_at) return;") < handler.index("router.push")
+    guard = handler.index("if (item.revoked_at) return;")
+    assert guard < handler.index("markNotificationRead")
+
+    # 导航用的是 push 还是 replace 属于实现细节（答疑通知改走 replace，好让浏览器
+    # 返回能回到学习页面）。这条守卫要钉的是**顺序**：已撤回的通知既不标已读也不跳转。
+    # 把判据写死成 `router.push` 会在换成 replace 时假红——那次就是这么红的。
+    navigations = [match.start() for match in re.finditer(r"router\.(push|replace)\(", handler)]
+    # 顺带钉住"导航确实存在"：否则哪天把跳转整段删掉，本用例会空过。
+    assert navigations, "openNotice 里找不到任何 router 跳转，守卫会变成恒真"
+    assert guard < min(navigations)
