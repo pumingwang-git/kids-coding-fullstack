@@ -65,9 +65,11 @@ EVENT_CATEGORY: dict[str, str] = {
     # 学生端事件按实际库值登记（无 admin_ 前缀）。
     "profile_update": CATEGORY_AUTHZ,   # 改名/换头像属身份类变更，5 年
     "work_share": CATEGORY_COLLAB,      # 作品公开发布，传播范围类，2 年
+    "help_message_recall": CATEGORY_COLLAB,
     **{event: CATEGORY_COLLAB for event in _admin_events(
         "class_announcement_create", "notification_revoke", "help_request_create",
         "help_request_reply", "help_request_close", "help_request_reassign",
+        "help_message_recall", "help_attachment_purge",
     )},
     **{event: CATEGORY_SESSION for event in _admin_events("login", "logout", "refresh")},
     **{event: CATEGORY_SESSION for event in (

@@ -58,8 +58,12 @@ from .routers.exam import router as exam_router
 from .routers.focus import router as focus_router
 from .routers.help_requests import admin_router as admin_help_requests_router
 from .routers.help_requests import admin_chat_router as admin_help_chat_lines_router
+from .routers.help_requests import admin_attachment_router as admin_help_attachments_router
+from .routers.help_requests import admin_message_router as admin_help_messages_router
+from .routers.help_requests import attachment_router as help_attachment_router
 from .routers.help_requests import student_router as student_help_requests_router
 from .routers.help_requests import student_chat_router as student_help_chat_lines_router
+from .routers.help_requests import student_message_router as student_help_messages_router
 from .routers.admin_audit import router as admin_audit_router
 from .routers.learning_catalog import admin_router as admin_learning_catalog_router
 from .routers.learning_catalog import router as learning_catalog_router
@@ -202,6 +206,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_notifications_teaching_router)
     app.include_router(admin_help_requests_router)
     app.include_router(admin_help_chat_lines_router)
+    app.include_router(admin_help_attachments_router)
+    app.include_router(admin_help_messages_router)
+    app.include_router(help_attachment_router)
     app.include_router(admin_audit_router)
     app.include_router(admin_enrollments_router)
     app.include_router(admin_courses_router)
@@ -230,6 +237,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(student_notifications_router)
     app.include_router(student_help_requests_router)
     app.include_router(student_help_chat_lines_router)
+    app.include_router(student_help_messages_router)
     app.include_router(student_profile_router)
     app.include_router(typing_router)
     app.include_router(math_games_router)

@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import (
     APIRouter,
     Depends,
+    File,
     Header,
     HTTPException,
     Query,
     Request,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -54,17 +59,28 @@ from ..models import (
 )
 from ..notification_links import admin_help_request_link
 from ..notification_service import create_notification, request_hash
-from ..permissions import has_capability, log_scope_denial, visible_class_ids
+from ..permissions import (
+    admin_ids_visible_for_class,
+    has_capability,
+    log_scope_denial,
+    visible_class_ids,
+)
 from ..security import utcnow
+from ..scratch_cover import CoverInvalid, normalize_cover
 from ..student_tasks import collect_homework_candidates, homework_phase
 from ..text_sanitize import plain_text
 from .admin_auth import audit, client_ip, current_admin, db_session
 from .admin_auth import require_csrf as require_admin_csrf
+from .auth_secure import audit as student_audit
 from .auth_secure import current_user, limit
 from .auth_secure import require_csrf as require_student_csrf
 
 student_router = APIRouter(prefix="/api/student/help-requests", tags=["help-requests"])
 admin_router = APIRouter(prefix="/api/admin/help-requests", tags=["help-requests"])
+student_message_router = APIRouter(prefix="/api/student/help-messages", tags=["help-requests"])
+admin_message_router = APIRouter(prefix="/api/admin/help-messages", tags=["help-requests"])
+admin_attachment_router = APIRouter(prefix="/api/admin/help-attachments", tags=["help-requests"])
+attachment_router = APIRouter(prefix="/api/help-attachments", tags=["help-requests"])
 student_chat_router = APIRouter(prefix="/api/student/help-chat-lines", tags=["help-chat-lines"])
 admin_chat_router = APIRouter(prefix="/api/admin/help-chat-lines", tags=["help-chat-lines"])
 
@@ -85,7 +101,8 @@ class HelpRequestPayload(BaseModel):
 class HelpMessagePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    body: str = Field(min_length=1, max_length=10_000)
+    body: str = Field(default="", max_length=10_000)
+    attachment_ids: list[int] = Field(default_factory=list, max_length=4)
 
 
 class AssignmentPayload(BaseModel):
@@ -234,12 +251,18 @@ def _hash(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def _serialize(db: Session, row: HelpRequest) -> dict:
-    messages = db.scalars(
-        select(HelpMessage)
-        .where(HelpMessage.help_request_id == row.id)
-        .order_by(HelpMessage.created_at, HelpMessage.id)
-    ).all()
+def _serialize(
+    db: Session,
+    row: HelpRequest,
+    *,
+    messages: list[HelpMessage] | None = None,
+) -> dict:
+    if messages is None:
+        messages = db.scalars(
+            select(HelpMessage)
+            .where(HelpMessage.help_request_id == row.id)
+            .order_by(HelpMessage.created_at, HelpMessage.id)
+        ).all()
     return {
         "id": row.id,
         "help_request_id": row.id,
@@ -259,17 +282,57 @@ def _serialize(db: Session, row: HelpRequest) -> dict:
         "created_at": row.created_at,
         "closed_at": row.closed_at,
         "last_message_at": row.last_message_at,
-        "messages": [
+        "messages": [_message_payload(db, item) for item in messages],
+    }
+
+
+def _message_payload(
+    db: Session,
+    item: HelpMessage,
+    *,
+    read_by_student: bool | None = None,
+    read_by_assigned_teacher: bool | None = None,
+    viewer_student_id: int | None = None,
+    viewer_admin_id: int | None = None,
+) -> dict:
+    # This is deliberately viewer-independent so student/admin REST and WS share
+    # one frozen message shape.  The client combines it with sender_type only for
+    # display; the recall endpoint rechecks the actual actor identity.
+    can_recall = (
+        item.recalled_at is None
+        and item.created_at is not None
+        and utcnow() - _utc(item.created_at) <= timedelta(minutes=2)
+    )
+    payload = {
+        "id": item.id,
+        "help_request_id": item.help_request_id,
+        "body": "" if item.recalled_at else item.body,
+        "created_at": item.created_at,
+        "sender_type": "student" if item.sender_user_id else "admin",
+        "recalled": item.recalled_at is not None,
+        "recalled_at": item.recalled_at,
+        "can_recall": can_recall,
+        "attachments": [
             {
-                "id": item.id,
-                "help_request_id": row.id,
-                "body": item.body,
-                "created_at": item.created_at,
-                "sender_type": "student" if item.sender_user_id else "admin",
+                "id": attachment.id,
+                "kind": attachment.kind,
+                "mime": attachment.mime,
+                "original_name": attachment.original_name,
+                "purged_at": attachment.purged_at,
+                "url": None if attachment.purged_at else f"/api/help-attachments/{attachment.id}",
             }
-            for item in messages
+            for attachment in db.scalars(
+                select(HelpMessageAttachment)
+                .where(HelpMessageAttachment.help_message_id == item.id)
+                .order_by(HelpMessageAttachment.id)
+            )
         ],
     }
+    if read_by_student is not None:
+        payload["read_by_student"] = read_by_student
+    if read_by_assigned_teacher is not None:
+        payload["read_by_assigned_teacher"] = read_by_assigned_teacher
+    return payload
 
 
 def _paged(items: list, total: int, page: int, page_size: int) -> dict:
@@ -432,6 +495,8 @@ def _line_payload(
     include_requests: bool = False,
     viewer_admin_id: int | None = None,
     viewer_student_id: int | None = None,
+    before_id: int | None = None,
+    message_limit: int = 20,
 ) -> dict:
     requests = db.scalars(
         select(HelpRequest)
@@ -483,7 +548,11 @@ def _line_payload(
         "waiting_label": waiting_status["label"],
         "waiting_level": waiting_level,
         "has_student_unanswered": active is not None,
-        "active_help_request": _serialize(db, active) if active is not None else None,
+        "active_help_request": (
+            _serialize(db, active, messages=[] if include_requests else None)
+            if active is not None
+            else None
+        ),
         "last_student_message_body": (
             latest_student_message.body
             if latest_student_message is not None
@@ -499,13 +568,43 @@ def _line_payload(
     if viewer_student_id is not None:
         payload["unread_count"] = _line_student_unread_count(db, line, viewer_student_id)
     if include_requests:
-        payload["requests"] = [_serialize(db, item) for item in requests]
-        line_messages = db.scalars(
+        message_query = (
             select(HelpMessage)
             .join(HelpRequest, HelpRequest.id == HelpMessage.help_request_id)
             .where(HelpRequest.chat_line_id == line.id)
-            .order_by(HelpMessage.created_at, HelpMessage.id)
+        )
+        if before_id is not None:
+            cursor = db.scalar(
+                message_query.where(HelpMessage.id == before_id)
+            )
+            if cursor is None:
+                message_query = message_query.where(HelpMessage.id < 0)
+            else:
+                message_query = message_query.where(
+                    (HelpMessage.created_at < cursor.created_at)
+                    | (
+                        (HelpMessage.created_at == cursor.created_at)
+                        & (HelpMessage.id < cursor.id)
+                    )
+                )
+        newest_first = db.scalars(
+            message_query
+            .order_by(HelpMessage.created_at.desc(), HelpMessage.id.desc())
+            .limit(message_limit + 1)
         ).all()
+        has_more = len(newest_first) > message_limit
+        line_messages = list(reversed(newest_first[:message_limit]))
+        messages_by_request: dict[int, list[HelpMessage]] = {}
+        for item in line_messages:
+            messages_by_request.setdefault(item.help_request_id, []).append(item)
+        payload["requests"] = [
+            _serialize(db, item, messages=messages_by_request.get(item.id, []))
+            for item in requests
+        ]
+        if active is not None:
+            payload["active_help_request"] = _serialize(
+                db, active, messages=messages_by_request.get(active.id, [])
+            )
         student_cursor = db.scalar(
             select(HelpChatLineStudentRead.last_read_message_id).where(
                 HelpChatLineStudentRead.chat_line_id == line.id,
@@ -520,18 +619,22 @@ def _line_payload(
                     HelpChatLineRead.admin_user_id == current.assigned_admin_user_id,
                 )
             ) or 0
-        payload["messages"] = [
-            {
-                "id": item.id,
-                "help_request_id": item.help_request_id,
-                "body": item.body,
-                "created_at": item.created_at,
-                "sender_type": "student" if item.sender_user_id else "admin",
-                "read_by_student": bool(item.sender_admin_user_id and item.id <= student_cursor),
-                "read_by_assigned_teacher": bool(item.sender_user_id and item.id <= assignee_cursor),
-            }
+        messages = [
+            _message_payload(
+                db,
+                item,
+                read_by_student=bool(item.sender_admin_user_id and item.id <= student_cursor),
+                read_by_assigned_teacher=bool(item.sender_user_id and item.id <= assignee_cursor),
+                viewer_student_id=viewer_student_id,
+                viewer_admin_id=viewer_admin_id,
+            )
             for item in line_messages
         ]
+        # S0 freezes the cursor envelope while retaining `messages` for existing clients.
+        payload["messages"] = messages
+        payload["items"] = messages
+        payload["next_cursor"] = line_messages[0].id if has_more else None
+        payload["has_more"] = has_more
         payload["student_profile"] = _student_profile_payload(db, line, requests, utcnow())
     return payload
 
@@ -691,16 +794,32 @@ def _can_act_on_request(db: Session, admin, row: HelpRequest | None) -> bool:
     )
 
 
+def _typing_allowed(websocket: WebSocket, key: str) -> bool:
+    """输入中提示的软限流。
+
+    每一帧 typing 都会触发一次收件人解析 + 一次 Redis 广播 + 向 N 个 socket 扇出，
+    没有限流就是一条放大器：任何登录用户按住键盘就能让服务端反复做这套动作。
+
+    **返回 bool 而不是抛 429**：这是 WebSocket 接收循环，抛出去会被循环外的 except
+    接住并把整条连接关掉，等于把限流做成了掉线（就是 L3 那个坑）。限流器不可用时
+    返回 False——输入中提示丢一帧没有任何代价，不值得为它冒放大风险。
+    """
+    try:
+        return bool(websocket.app.state.rate_limiter.allow("help-typing", key, 12, 10))
+    except Exception:
+        return False
+
+
 def _event_admin_ids(db: Session, line: HelpChatLine) -> set[int]:
-    """仅把无正文的刷新事件发给当前有权查看该聊天线的后台账号。"""
-    recipients = set()
-    for admin in db.scalars(select(AdminUser).where(AdminUser.status == "active")):
-        if not can_respond_to_help(admin, db):
-            continue
-        class_ids = visible_class_ids(admin, db)
-        if class_ids is None or line.class_id in class_ids:
-            recipients.add(admin.id)
-    return recipients
+    """把事件发给当前有权查看该聊天线的后台账号。
+
+    这里**不能**遍历全部 active 管理员：本函数挂在每条消息、每次输入中提示、每次已读
+    回执上，逐个调 `has_capability()` + `visible_class_ids()` 会退化成「扫全表 + 每人
+    两次查询」，管理员一多就是每次敲键盘上百条 SQL。
+    `admin_ids_visible_for_class()` 用「本班带班人 ∪ 全局范围账号」这个超集收窄候选，
+    最终判定仍然逐字走 `visible_class_ids()`，结论不变而查询数与管理员总数无关。
+    """
+    return admin_ids_visible_for_class(db, line.class_id, capability="help_respond")
 
 
 def _publish_line_change(
@@ -735,6 +854,102 @@ def _admin_line_or_404(db: Session, admin, line_id: int) -> HelpChatLine:
             log_scope_denial(admin, "help_chat_line", line_id)
         raise HTTPException(404, "聊天线不存在。")
     return row
+
+
+async def _help_attachment_upload(
+    *, request: Request, db: Session, row: HelpRequest, upload: UploadFile,
+    principal_id: int, principal_kind: str, idempotency_key: str,
+    message_id: int | None = None,
+):
+    """Store one staged image attachment after the request scope is authorized."""
+    settings = request.app.state.settings
+    limit(request, "help-attachment-upload", f"{principal_kind}:{principal_id}", 30, 60)
+    key_hash = _hash(idempotency_key)
+    storage_root = Path(settings.help_attachment_upload_root).resolve()
+    storage_root.mkdir(parents=True, exist_ok=True)
+    storage_key = f"{principal_kind}/{principal_id}/request-{row.id}/{key_hash}.bin"
+    existing = db.scalar(select(HelpMessageAttachment).where(HelpMessageAttachment.storage_key == storage_key))
+    if existing:
+        return existing
+    raw = await upload.read(settings.help_attachment_max_bytes + 1)
+    if len(raw) > settings.help_attachment_max_bytes:
+        raise HTTPException(413, f"附件不能超过 {settings.help_attachment_max_bytes // (1024 * 1024)} MB。")
+    if not raw:
+        raise HTTPException(422, "附件不能为空。")
+    try:
+        # normalize_cover only accepts raster PNG/JPEG/WebP, caps dimensions,
+        # and rewrites bytes; SVG and spoofed Content-Type values cannot pass.
+        raw = normalize_cover(raw)
+    except CoverInvalid as exc:
+        raise HTTPException(415, "附件必须是有效图片。") from exc
+    digest = hashlib.sha256(raw).hexdigest()
+    target = storage_root / storage_key
+    part = target.with_suffix(".part")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part.write_bytes(raw)
+    os.replace(part, target)
+    attachment = HelpMessageAttachment(
+        help_message_id=message_id, kind="image", sha256=digest,
+        byte_size=len(raw), mime="image/webp",
+        original_name=(upload.filename or "image")[:255], storage_key=storage_key,
+        uploaded_by_user_id=principal_id if principal_kind == "student" else None,
+        uploaded_by_admin_user_id=principal_id if principal_kind == "admin" else None,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return attachment
+
+
+def _bind_staged_attachments(
+    db: Session, *, attachment_ids: list[int], row: HelpRequest, message: HelpMessage,
+    principal_id: int, principal_kind: str,
+) -> None:
+    if not attachment_ids:
+        return
+    if len(set(attachment_ids)) != len(attachment_ids):
+        raise HTTPException(422, "附件不能重复。")
+    attachments = db.scalars(
+        select(HelpMessageAttachment).where(HelpMessageAttachment.id.in_(attachment_ids))
+    ).all()
+    if len(attachments) != len(attachment_ids):
+        raise HTTPException(404, "附件不存在。")
+    for attachment in attachments:
+        owner_id = attachment.uploaded_by_user_id if principal_kind == "student" else attachment.uploaded_by_admin_user_id
+        if attachment.help_message_id is not None or owner_id != principal_id:
+            raise HTTPException(404, "附件不存在。")
+        attachment.help_message_id = message.id
+
+
+def _attachment_path(settings, attachment: HelpMessageAttachment) -> Path:
+    root = Path(settings.help_attachment_upload_root).resolve()
+    target = (root / attachment.storage_key).resolve()
+    if root not in target.parents:
+        raise HTTPException(404, "附件不存在。")
+    return target
+
+
+def _recall_message(
+    *, request: Request, db: Session, message: HelpMessage, actor_id: int, actor_kind: str,
+) -> dict:
+    sender_id = message.sender_user_id if actor_kind == "student" else message.sender_admin_user_id
+    if sender_id != actor_id:
+        raise HTTPException(404, "消息不存在。")
+    if message.recalled_at is not None:
+        return _message_payload(db, message, **{f"viewer_{actor_kind}_id": actor_id})
+    if message.created_at is None or utcnow() - _utc(message.created_at) > timedelta(minutes=2):
+        raise HTTPException(409, "消息发送超过 2 分钟，不能撤回。")
+    message.recalled_at = utcnow()
+    message.body = ""
+    for attachment in db.scalars(
+        select(HelpMessageAttachment).where(HelpMessageAttachment.help_message_id == message.id)
+    ):
+        _attachment_path(request.app.state.settings, attachment).unlink(missing_ok=True)
+        attachment.purged_at = message.recalled_at
+    db.commit()
+    row = db.get(HelpRequest, message.help_request_id)
+    _publish_line_change(db, db.get(HelpChatLine, row.chat_line_id), "message_recalled", row)
+    return _message_payload(db, message, **{f"viewer_{actor_kind}_id": actor_id})
 
 
 def _assignment_candidates(db: Session, class_id: int) -> list[dict]:
@@ -952,6 +1167,61 @@ def student_list(
     return _paged([_serialize(db, row) for row in rows], total, page, page_size)
 
 
+@student_router.post("/{request_id}/attachments", status_code=201)
+async def student_upload_help_attachment(
+    request_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    user: User = Depends(current_user),
+    db: Session = Depends(db_session),
+):
+    require_student_csrf(request)
+    if not idempotency_key:
+        raise HTTPException(422, "缺少 Idempotency-Key。")
+    row = _student_row_or_404(db, user.id, request_id)
+    attachment = await _help_attachment_upload(
+        request=request, db=db, row=row, upload=file, principal_id=user.id,
+        principal_kind="student", idempotency_key=idempotency_key,
+    )
+    # 学生端先创建文字消息、再上传文件；只允许绑定到该请求最新的本人消息。
+    message = db.scalar(
+        select(HelpMessage)
+        .where(HelpMessage.help_request_id == row.id, HelpMessage.sender_user_id == user.id)
+        .order_by(HelpMessage.id.desc())
+        .limit(1)
+    )
+    if message is None:
+        raise HTTPException(409, "请先发送消息再上传附件。")
+    attachment.help_message_id = message.id
+    db.commit()
+    db.refresh(attachment)
+    return {"id": attachment.id, "kind": attachment.kind, "mime": attachment.mime,
+            "byte_size": attachment.byte_size, "original_name": attachment.original_name,
+            "url": f"/api/help-attachments/{attachment.id}"}
+
+
+@student_message_router.post("/{message_id}/recall")
+def student_recall_help_message(
+    message_id: int,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(db_session),
+):
+    require_student_csrf(request)
+    limit(request, "help-message-recall", f"student:{user.id}", 20, 60)
+    message = db.get(HelpMessage, message_id)
+    if message is None:
+        raise HTTPException(404, "消息不存在。")
+    _student_row_or_404(db, user.id, message.help_request_id)
+    student_audit(
+        db, request.app.state.settings, "help_message_recall", "success", client_ip(request), user.id,
+        resource_type="help_message", resource_id=message.id, summary={"schema_version": 1},
+    )
+    result = _recall_message(request=request, db=db, message=message, actor_id=user.id, actor_kind="student")
+    return result
+
+
 @student_chat_router.get("")
 def student_chat_lines(
     page: int = Query(default=1, ge=1),
@@ -1005,13 +1275,19 @@ def student_chat_lines(
 
 @student_chat_router.websocket("/events")
 async def student_chat_events(websocket: WebSocket):
-    db = websocket.app.state.session_factory()
-    user = None
+    user_id = None
     try:
-        user = current_user(websocket, db)
-        if not help_realtime_hub.consume_ticket(_websocket_ticket(websocket), "student", user.id):
+        # WebSocket can be idle for hours.  Authenticate with a short session,
+        # then create another short session only while handling an event.
+        db = websocket.app.state.session_factory()
+        try:
+            user_id = current_user(websocket, db).id
+        finally:
+            db.rollback()
+            db.close()
+        if not help_realtime_hub.consume_ticket(_websocket_ticket(websocket), "student", user_id):
             raise HTTPException(403)
-        await help_realtime_hub.connect_student(user.id, websocket)
+        await help_realtime_hub.connect_student(user_id, websocket)
         while True:
             event = await websocket.receive_json()
             if not isinstance(event, dict) or event.get("type") != "typing":
@@ -1019,22 +1295,28 @@ async def student_chat_events(websocket: WebSocket):
             line_id = event.get("chat_line_id")
             if not isinstance(line_id, int) or not isinstance(event.get("is_typing"), bool):
                 continue
-            line = db.scalar(select(HelpChatLine).where(
-                HelpChatLine.id == line_id, HelpChatLine.student_id == user.id
-            ))
-            if line is not None:
-                _publish_line_change(
-                    db,
-                    line,
-                    "student_typing" if event["is_typing"] else "student_stopped_typing",
-                )
+            if not _typing_allowed(websocket, f"student:{user_id}"):
+                continue
+            db = websocket.app.state.session_factory()
+            try:
+                line = db.scalar(select(HelpChatLine).where(
+                    HelpChatLine.id == line_id, HelpChatLine.student_id == user_id
+                ))
+                if line is not None:
+                    _publish_line_change(
+                        db,
+                        line,
+                        "student_typing" if event["is_typing"] else "student_stopped_typing",
+                    )
+            finally:
+                db.rollback()
+                db.close()
     except (HTTPException, WebSocketDisconnect):
         if websocket.client_state.name != "DISCONNECTED":
             await websocket.close(code=1008)
     finally:
-        if user is not None:
-            help_realtime_hub.disconnect_student(user.id, websocket)
-        db.close()
+        if user_id is not None:
+            help_realtime_hub.disconnect_student(user_id, websocket)
 
 
 @student_chat_router.post("/events/ticket")
@@ -1052,6 +1334,8 @@ def student_chat_events_ticket(
 @student_chat_router.get("/{line_id}")
 def student_chat_line_detail(
     line_id: int,
+    before_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=20, ge=1, le=100),
     user: User = Depends(current_user),
     db: Session = Depends(db_session),
 ):
@@ -1064,7 +1348,14 @@ def student_chat_line_detail(
     if row is None:
         raise HTTPException(404, "聊天线不存在。")
     read_changed = _mark_student_line_read(db, row)
-    payload = _line_payload(db, row, include_requests=True, viewer_student_id=user.id)
+    payload = _line_payload(
+        db,
+        row,
+        include_requests=True,
+        viewer_student_id=user.id,
+        before_id=before_id,
+        message_limit=limit,
+    )
     if read_changed:
         _publish_line_change(db, row, "student_read")
     return payload
@@ -1156,41 +1447,79 @@ def admin_chat_lines(
     _require_help_respond(admin, db)
     if sort != "-waiting_seconds,-last_message_at,-id":
         raise HTTPException(422, "不支持的排序字段。")
+    # A chat line may contain historical closed requests.  The queue is driven
+    # by the newest open request, exactly as `_line_payload()` derives `active`.
+    active_request_id = (
+        select(HelpRequest.id)
+        .where(
+            HelpRequest.chat_line_id == HelpChatLine.id,
+            HelpRequest.status == "open",
+        )
+        .order_by(HelpRequest.last_message_at.desc(), HelpRequest.id.desc())
+        .limit(1)
+        .correlate(HelpChatLine)
+        .scalar_subquery()
+    )
+    active_assignee_id = (
+        select(HelpRequest.assigned_admin_user_id)
+        .where(HelpRequest.id == active_request_id)
+        .correlate(HelpChatLine)
+        .scalar_subquery()
+    )
+    active_last_message_at = (
+        select(HelpRequest.last_message_at)
+        .where(HelpRequest.id == active_request_id)
+        .correlate(HelpChatLine)
+        .scalar_subquery()
+    )
     stmt = select(HelpChatLine)
     class_ids = visible_class_ids(admin, db)
     if class_ids is not None:
         stmt = stmt.where(HelpChatLine.class_id.in_(class_ids))
-    rows = db.scalars(stmt).all()
-    payloads = [_line_payload(db, row, viewer_admin_id=admin.id) for row in rows]
     if filter == "closed":
-        payloads = [item for item in payloads if item.get("ended_at") is not None]
+        stmt = stmt.where(HelpChatLine.ended_at.is_not(None))
     elif filter == "mine":
-        payloads = [item for item in payloads if item.get("assigned_admin_user_id") == admin.id]
+        stmt = stmt.where(active_assignee_id == admin.id)
     elif filter == "waiting":
-        payloads = [item for item in payloads if item.get("assigned_admin_user_id") == admin.id and item.get("has_student_unanswered")]
-    payloads.sort(
-        key=lambda item: (
-            item["waiting_seconds"],
-            _utc(item["last_message_at"]),
-            item["id"],
-        ),
-        reverse=True,
+        stmt = stmt.where(
+            active_request_id.is_not(None), active_assignee_id == admin.id
+        )
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    # For an open request, waiting_seconds is now - last_message_at; descending
+    # waiting time is therefore ascending SQL timestamp.  The CASE keeps lines
+    # without an open request at zero, and the final id remains the unique tie-breaker.
+    waiting_order = case((active_request_id.is_not(None), 1), else_=0).desc()
+    rows = db.scalars(
+        stmt.order_by(
+            waiting_order,
+            active_last_message_at.asc(),
+            HelpChatLine.last_message_at.desc(),
+            HelpChatLine.id.desc(),
+        ).offset((page - 1) * page_size).limit(page_size)
+    ).all()
+    return _paged(
+        [_line_payload(db, row, viewer_admin_id=admin.id) for row in rows],
+        total,
+        page,
+        page_size,
     )
-    total = len(payloads)
-    start = (page - 1) * page_size
-    return _paged(payloads[start : start + page_size], total, page, page_size)
 
 
 @admin_chat_router.websocket("/events")
 async def admin_chat_events(websocket: WebSocket):
-    db = websocket.app.state.session_factory()
-    admin = None
+    admin_id = None
     try:
-        admin = current_admin(websocket, db)
-        _require_help_respond(admin, db)
-        if not help_realtime_hub.consume_ticket(_websocket_ticket(websocket), "admin", admin.id):
+        db = websocket.app.state.session_factory()
+        try:
+            admin = current_admin(websocket, db)
+            _require_help_respond(admin, db)
+            admin_id = admin.id
+        finally:
+            db.rollback()
+            db.close()
+        if not help_realtime_hub.consume_ticket(_websocket_ticket(websocket), "admin", admin_id):
             raise HTTPException(403)
-        await help_realtime_hub.connect_admin(admin.id, websocket)
+        await help_realtime_hub.connect_admin(admin_id, websocket)
         while True:
             event = await websocket.receive_json()
             if not isinstance(event, dict) or event.get("type") != "typing":
@@ -1198,26 +1527,35 @@ async def admin_chat_events(websocket: WebSocket):
             line_id = event.get("chat_line_id")
             if not isinstance(line_id, int) or not isinstance(event.get("is_typing"), bool):
                 continue
+            if not _typing_allowed(websocket, f"admin:{admin_id}"):
+                continue
             # 查不到就跳过这一帧，不要抛——循环外的 except 会把整条连接以 1008
             # 关掉，等于一个过期的 chat_line_id 就能让教师掉线。学生侧同一位置
             # 用的就是「查不到则跳过」，两侧行为必须一致。
+            db = websocket.app.state.session_factory()
             try:
-                line = _admin_line_or_404(db, admin, line_id)
-            except HTTPException:
-                continue
-            _publish_line_change(
-                db,
-                line,
-                "admin_typing" if event["is_typing"] else "admin_stopped_typing",
-            )
+                try:
+                    admin = db.get(AdminUser, admin_id)
+                    if admin is None:
+                        continue
+                    line = _admin_line_or_404(db, admin, line_id)
+                except HTTPException:
+                    continue
+                _publish_line_change(
+                    db,
+                    line,
+                    "admin_typing" if event["is_typing"] else "admin_stopped_typing",
+                )
+            finally:
+                db.rollback()
+                db.close()
     except HTTPException:
         await websocket.close(code=1008)
     except WebSocketDisconnect:
         pass
     finally:
-        if admin is not None:
-            help_realtime_hub.disconnect_admin(admin.id, websocket)
-        db.close()
+        if admin_id is not None:
+            help_realtime_hub.disconnect_admin(admin_id, websocket)
 
 
 @admin_chat_router.post("/events/ticket")
@@ -1237,12 +1575,21 @@ def admin_chat_events_ticket(
 @admin_chat_router.get("/{line_id}")
 def admin_chat_line_detail(
     line_id: int,
+    before_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=20, ge=1, le=100),
     admin=Depends(current_admin),
     db: Session = Depends(db_session),
 ):
     _require_help_respond(admin, db)
     line = _admin_line_or_404(db, admin, line_id)
-    payload = _line_payload(db, line, include_requests=True, viewer_admin_id=admin.id)
+    payload = _line_payload(
+        db,
+        line,
+        include_requests=True,
+        viewer_admin_id=admin.id,
+        before_id=before_id,
+        message_limit=limit,
+    )
     latest_id = db.scalar(
         select(func.max(HelpMessage.id)).join(HelpRequest, HelpRequest.id == HelpMessage.help_request_id)
         .where(HelpRequest.chat_line_id == line.id)
@@ -1427,6 +1774,10 @@ def reply(
     message.request_hash = input_hash
     db.add(message)
     db.flush()
+    _bind_staged_attachments(
+        db, attachment_ids=payload.attachment_ids, row=row, message=message,
+        principal_id=admin.id, principal_kind="admin",
+    )
     now = utcnow()
     row.last_message_at = now
     line = db.get(HelpChatLine, row.chat_line_id)
@@ -1450,6 +1801,111 @@ def reply(
     db.commit()
     _publish_line_change(db, line, "admin_message", row)
     return {"id": message.id, "created_at": message.created_at}
+
+
+@admin_router.post("/{request_id}/attachments", status_code=201)
+async def admin_upload_help_attachment(
+    request_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    admin=Depends(current_admin),
+    db: Session = Depends(db_session),
+):
+    require_admin_csrf(request)
+    _require_help_respond(admin, db)
+    if not idempotency_key:
+        raise HTTPException(422, "缺少 Idempotency-Key。")
+    row = _admin_row_or_404(db, admin, request_id)
+    attachment = await _help_attachment_upload(
+        request=request, db=db, row=row, upload=file, principal_id=admin.id,
+        principal_kind="admin", idempotency_key=idempotency_key,
+    )
+    return {"id": attachment.id, "kind": attachment.kind, "mime": attachment.mime,
+            "byte_size": attachment.byte_size, "original_name": attachment.original_name}
+
+
+@admin_message_router.post("/{message_id}/recall")
+def admin_recall_help_message(
+    message_id: int,
+    request: Request,
+    admin=Depends(current_admin),
+    db: Session = Depends(db_session),
+):
+    require_admin_csrf(request)
+    _require_help_respond(admin, db)
+    limit(request, "help-message-recall", f"admin:{admin.id}", 20, 60)
+    message = db.get(HelpMessage, message_id)
+    if message is None:
+        raise HTTPException(404, "消息不存在。")
+    _admin_row_or_404(db, admin, message.help_request_id)
+    audit(
+        db, request.app.state.settings, "help_message_recall", "success", client_ip(request), admin.id,
+        resource_type="help_message", resource_id=message.id,
+        summary={"schema_version": 1},
+    )
+    result = _recall_message(request=request, db=db, message=message, actor_id=admin.id, actor_kind="admin")
+    return result
+
+
+@attachment_router.get("/{attachment_id}")
+def read_help_attachment(
+    attachment_id: int,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    attachment = db.get(HelpMessageAttachment, attachment_id)
+    if attachment is None:
+        raise HTTPException(404, "附件不存在。")
+    message = db.get(HelpMessage, attachment.help_message_id) if attachment.help_message_id else None
+    row = db.get(HelpRequest, message.help_request_id) if message else None
+    if request.cookies.get("admin_access_token"):
+        admin = current_admin(request, db)
+        _require_help_respond(admin, db)
+        if row is None or not _can_act_on_request(db, admin, row):
+            if row is not None:
+                log_scope_denial(admin, "help_attachment", attachment_id)
+            raise HTTPException(404, "附件不存在。")
+    else:
+        user = current_user(request, db)
+        if row is None or row.student_id != user.id:
+            raise HTTPException(404, "附件不存在。")
+    if attachment.purged_at is not None:
+        raise HTTPException(410, "附件已过期。")
+    path = _attachment_path(request.app.state.settings, attachment)
+    if not path.is_file():
+        raise HTTPException(410, "附件已过期。")
+    return Response(content=path.read_bytes(), media_type=attachment.mime,
+                    headers={"Cache-Control": "private, no-store"})
+
+
+@admin_attachment_router.post("/{attachment_id}/purge")
+def purge_help_attachment(
+    attachment_id: int,
+    request: Request,
+    admin=Depends(current_admin),
+    db: Session = Depends(db_session),
+):
+    require_admin_csrf(request)
+    _require_help_respond(admin, db)
+    attachment = db.get(HelpMessageAttachment, attachment_id)
+    message = db.get(HelpMessage, attachment.help_message_id) if attachment else None
+    row = db.get(HelpRequest, message.help_request_id) if message else None
+    if attachment is None or row is None or not _can_act_on_request(db, admin, row):
+        if attachment is not None:
+            log_scope_denial(admin, "help_attachment", attachment_id)
+        raise HTTPException(404, "附件不存在。")
+    if attachment.purged_at is None:
+        _attachment_path(request.app.state.settings, attachment).unlink(missing_ok=True)
+        attachment.purged_at = utcnow()
+        audit(
+            db, request.app.state.settings, "help_attachment_purge", "success", client_ip(request), admin.id,
+            resource_type="help_attachment", resource_id=attachment.id,
+            summary={"schema_version": 1},
+        )
+        db.commit()
+        _publish_line_change(db, db.get(HelpChatLine, row.chat_line_id), "attachment_purged", row)
+    return {"id": attachment.id, "purged_at": attachment.purged_at}
 
 
 @admin_router.post("/{request_id}/close")

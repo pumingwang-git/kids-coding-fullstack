@@ -24,6 +24,7 @@ from app.models import (
     PaperAttempt,
     User,
 )
+from app.routers import help_requests as help_requests_router
 from app.security import password_hash, utcnow
 
 
@@ -504,6 +505,56 @@ def test_student_payload_rejects_assignee_and_rejoining_starts_a_new_line(tmp_pa
         assert lines[1].ended_at is None
     finally:
         db.close()
+
+
+def test_admin_queue_only_builds_payloads_for_the_requested_page(tmp_path, monkeypatch):
+    app = build_app(tmp_path)
+    student = student_login(app, "learner")
+    seeded = _seed_help_class(app)
+    created = student.post(
+        "/api/student/help-requests",
+        headers={**scsrf(student), "Idempotency-Key": "queue-page-root"},
+        json={"class_id": seeded["class_id"], "body": "当前待答疑", "context_type": "general"},
+    )
+    assert created.status_code == 201, created.text
+
+    db = app.state.session_factory()
+    try:
+        learner = db.query(User).filter_by(username="learner").one()
+        start = utcnow() - timedelta(days=1)
+        for index in range(25):
+            at = start + timedelta(minutes=index)
+            line = HelpChatLine(
+                class_id=seeded["class_id"], student_id=learner.id,
+                created_at=at, last_message_at=at, ended_at=at,
+            )
+            db.add(line)
+            db.flush()
+            db.add(HelpRequest(
+                class_id=seeded["class_id"], student_id=learner.id, chat_line_id=line.id,
+                body=f"历史答疑 {index}", context_type="general", context_key=f"queue-page-{index}",
+                request_key_hash=f"queue-page-key-{index}", request_hash=f"queue-page-request-{index}",
+                status="answered", answered_at=at, created_at=at, last_message_at=at,
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    calls = 0
+    original = help_requests_router._line_payload
+
+    def counted_payload(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(help_requests_router, "_line_payload", counted_payload)
+    root, _ = _admin_login(app, "root")
+    response = root.get("/api/admin/help-chat-lines?filter=all&page=1&page_size=20")
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 26
+    assert len(response.json()["items"]) == 20
+    assert calls == 20
 
 
 def test_admin_queue_derives_waiting_state_and_assignment_is_revision_guarded(tmp_path, caplog):
