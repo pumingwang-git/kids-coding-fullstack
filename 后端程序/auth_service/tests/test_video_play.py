@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import pytest
+from celery.exceptions import Retry
 from fastapi.testclient import TestClient
 from test_admin_courses import add_section, create_category, create_course
 from test_exam import admin_login, build_app, scsrf, student_login
@@ -476,7 +477,11 @@ def test_upload_rejects_oversize(tmp_path: Path, monkeypatch):
 # ----------------------------- 转码失败路径 -----------------------------
 
 def test_transcode_failure_marks_failed(tmp_path: Path, monkeypatch):
-    """MinIO 不可达 → eager 模式异常向上抛，video.status 置 failed（供后台标红）。"""
+    """MinIO 不可达 → video.status 必须落 failed（后台看得见），两条分支都要。
+
+    eager（本机无 Redis）直接抛原始异常；worker 模式改为 `self.retry()` 抛 Retry。
+    无论走哪条，**落 failed 都发生在分支之前**——后台不该看到卡在 transcoding 的视频。
+    """
     app = build_app(tmp_path)
     settings = app.state.settings
     db = app.state.session_factory()
@@ -502,11 +507,32 @@ def test_transcode_failure_marks_failed(tmp_path: Path, monkeypatch):
 
     from app.tasks.transcode import transcode_video
 
+    # 任务自己按 `task_always_eager` 分两条路（transcode.py:231）：eager 没有 worker
+    # 消费重试计划，直接抛最终错误；worker 模式才 `self.retry()`。两条都是生产路径，
+    # 所以两条都钉住，且**不许依赖 .env 里有没有 REDIS_URL**——本机配了 Redis
+    # 就走另一条分支，这条用例曾因此假红（Redis 已是既定方案，只会越来越常配）。
+    from app.celery_app import celery_app
+
+    monkeypatch.setitem(celery_app.conf, "task_always_eager", True)
     with pytest.raises(RuntimeError):
-        transcode_video.apply(args=[video_id])  # eager 模式传播异常
+        transcode_video.apply(args=[video_id], throw=True)
 
     db = app.state.session_factory()
     try:
+        assert db.get(Video, video_id).status == "failed"
+        db.get(Video, video_id).status = "processing"   # 复位，好让第二条分支重跑
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setitem(celery_app.conf, "task_always_eager", False)
+    with pytest.raises(Retry):
+        transcode_video.apply(args=[video_id], throw=True)
+
+    db = app.state.session_factory()
+    try:
+        # 关键：**安排重试之前就已经落了 failed**，后台不会看到一个卡在
+        # transcoding 的视频——这正是这条用例最初要守的东西。
         assert db.get(Video, video_id).status == "failed"
     finally:
         db.close()
