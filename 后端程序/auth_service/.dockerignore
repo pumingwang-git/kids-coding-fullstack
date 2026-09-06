@@ -13,6 +13,13 @@
 !alembic.ini
 !requirements.txt
 
+# 滑块验证码的真实图片是镜像资源，不放进运行时数据卷。先放行父目录，
+# 再排除其他 data 内容，只保留验证码图库。
+!data/
+data/*
+!data/captcha_images/
+!data/captcha_images/**
+
 # 放行目录内再剔除缓存（后置规则覆盖前面的放行）
 **/__pycache__/
 **/*.pyc

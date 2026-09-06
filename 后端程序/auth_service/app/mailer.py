@@ -38,20 +38,20 @@ class SmtpEmailSender:
 def build_code_email(sender: str, recipient: str, code: str, event_type: str) -> EmailMessage:
     """Build a consistent HTML email for every email-code security flow."""
     if event_type == "verification":
-        subject, title = "【汪蒲明学习平台】注册邮箱验证码", "确认你的邮箱"
+        subject, title = "【启程学堂】注册邮箱验证码", "确认你的邮箱"
         intro, details = "你正在完成本次注册的邮箱验证。", "请在页面中输入下面的 6 位验证码。"
     elif event_type == "password_change":
-        subject, title = "【汪蒲明学习平台】修改密码验证码", "确认修改密码"
+        subject, title = "【启程学堂】修改密码验证码", "确认修改密码"
         intro, details = "你正在修改登录密码。", "请在安全设置页面中输入下面的 6 位验证码。"
     else:
-        subject, title = "【汪蒲明学习平台】密码重置验证码", "确认重置密码"
+        subject, title = "【启程学堂】密码重置验证码", "确认重置密码"
         intro, details = "你正在找回登录密码。", "请在找回密码页面中输入下面的 6 位验证码。"
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = formataddr(("汪蒲明学习平台", sender))
+    message["From"] = formataddr(("启程学堂", sender))
     message["To"] = recipient
     message.set_content(
-        f"你好，\n\n{intro} 验证码是 {code}，15 分钟内有效。请勿将验证码提供给他人；如非本人操作，请忽略此邮件。\n\n—— 汪蒲明学习平台"
+        f"你好，\n\n{intro} 验证码是 {code}，15 分钟内有效。请勿将验证码提供给他人；如非本人操作，请忽略此邮件。\n\n—— 启程学堂"
     )
     message.add_alternative(
         f"""<!doctype html>
@@ -60,7 +60,7 @@ def build_code_email(sender: str, recipient: str, code: str, event_type: str) ->
     <main style="max-width:600px;margin:0 auto;padding:32px 20px;">
       <section style="overflow:hidden;border:1px solid rgba(34,43,40,.14);border-radius:8px;background:#ffffff;box-shadow:0 10px 24px rgba(34,43,40,.08);">
         <header style="padding:20px 28px;border-bottom:1px solid rgba(34,43,40,.14);background:#dcebe1;">
-          <p style="margin:0;color:#2f806e;font-size:11px;font-weight:700;letter-spacing:.8px;">WANG PUMING · LEARNING PLATFORM</p>
+          <p style="margin:0;color:#2f806e;font-size:11px;font-weight:700;letter-spacing:.8px;">QICHENG ACADEMY · LEARNING PLATFORM</p>
           <h1 style="margin:8px 0 0;font-family:'Noto Serif SC','Songti SC',serif;font-size:24px;font-weight:500;letter-spacing:-1px;">{title}</h1>
         </header>
         <div style="padding:30px 28px 28px;">
@@ -69,7 +69,7 @@ def build_code_email(sender: str, recipient: str, code: str, event_type: str) ->
           <p style="margin:24px 0;padding:18px 16px;border-radius:4px;background:#f8f8f0;color:#2f806e;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:32px;font-weight:800;letter-spacing:8px;text-align:center;">{code}</p>
           <p style="margin:0;color:#68716d;font-size:13px;line-height:1.8;">验证码将在 <strong style="color:#222b28;">15 分钟</strong> 后失效。为保护你的账户，请勿将它提供给任何人。</p>
         </div>
-        <footer style="padding:18px 28px;border-top:1px solid rgba(34,43,40,.14);color:#68716d;font-size:12px;line-height:1.7;">如非本人操作，请忽略此邮件。<br>—— 汪蒲明学习平台</footer>
+        <footer style="padding:18px 28px;border-top:1px solid rgba(34,43,40,.14);color:#68716d;font-size:12px;line-height:1.7;">如非本人操作，请忽略此邮件。<br>—— 启程学堂</footer>
       </section>
     </main>
   </body>
@@ -114,8 +114,8 @@ def build_login_alert_email(sender: str, recipient: str, payload: str) -> EmailM
         "如果是你本人操作，可忽略此邮件；如非本人，请立即重置密码，并在安全中心启用双重验证。"
     )
     message = EmailMessage()
-    message["Subject"] = "【汪蒲明学习平台】检测到异地或新 IP 登录"
-    message["From"] = formataddr(("汪蒲明学习平台", sender))
+    message["Subject"] = "【启程学堂】检测到异地或新 IP 登录"
+    message["From"] = formataddr(("启程学堂", sender))
     message["To"] = recipient
     message.set_content(body)
     return message

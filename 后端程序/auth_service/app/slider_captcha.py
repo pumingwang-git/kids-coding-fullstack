@@ -35,6 +35,7 @@ MISALIGNED_MESSAGE = "滑块未对齐，请再试一次。"
 EXPIRED_MESSAGE = "滑块验证已失效，请刷新后重试。"
 AUTH_SERVICE_ROOT = Path(__file__).resolve().parent.parent
 CAPTCHA_IMAGES_DIR = AUTH_SERVICE_ROOT / "data" / "captcha_images"
+BUNDLED_CAPTCHA_IMAGES_DIR = AUTH_SERVICE_ROOT / "captcha_images"
 _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 
 _PHOTO_POOL: list[Image.Image] = []
@@ -215,16 +216,24 @@ def _load_photo_pool() -> list[Image.Image]:
     with _PHOTO_LOCK:
         if _PHOTO_POOL_READY:
             return _PHOTO_POOL
-        pool = []
-        if CAPTCHA_IMAGES_DIR.is_dir():
-            for path in sorted(CAPTCHA_IMAGES_DIR.iterdir()):
+        pool: list[Image.Image] = []
+        # 数据卷里的图库允许后续运营替换；Docker 的 /app/data 被空卷覆盖时，
+        # 再使用镜像自带的图库，保证不会无声降级为 SVG。
+        for image_dir in (CAPTCHA_IMAGES_DIR, BUNDLED_CAPTCHA_IMAGES_DIR):
+            if not image_dir.is_dir():
+                continue
+            candidate_pool = []
+            for path in sorted(image_dir.iterdir()):
                 if path.suffix.lower() in _IMAGE_EXTS:
                     try:
                         with Image.open(path) as img:
                             img.load()
-                        pool.append(Image.open(path))
+                        candidate_pool.append(Image.open(path))
                     except Exception:
                         continue
+            if candidate_pool:
+                pool = candidate_pool
+                break
         _PHOTO_POOL = pool
         _PHOTO_POOL_READY = True
         return pool

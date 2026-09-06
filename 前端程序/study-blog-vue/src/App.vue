@@ -227,7 +227,7 @@ onMounted(async () => {
     <header class="app-header">
       <RouterLink class="brand" to="/" aria-label="返回网站首页">
         <img :src="'/assets/otter-avatar-128.webp'" alt="" width="44" height="44" />
-        <span>汪蒲明学习平台</span>
+        <span>启程学堂</span>
       </RouterLink>
       <button
         class="portal-menu-button"

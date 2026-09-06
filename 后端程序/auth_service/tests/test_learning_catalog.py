@@ -11,6 +11,7 @@ def test_public_catalog_and_nested_category_filter(tmp_path: Path):
     areas = admin.get("/api/learning-areas").json()["items"]
     assert [item["key"] for item in areas] == ["kids", "programmer"]
     assert areas[0]["modules"][0]["module_key"] == "overview"
+    assert next(item for item in areas if item["key"] == "programmer")["status"] == "planning"
 
     tree = admin.get("/api/course-taxonomy?area_key=kids").json()["items"]
     cpp = next(item for item in tree if item["name"] == "C/C++")

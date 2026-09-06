@@ -1466,10 +1466,10 @@ label small {
 .area-directory .directory-live {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr 300px;
-  min-height: 390px;
+  grid-template-columns: 1fr 240px;
+  min-height: 286px;
   align-items: center;
-  padding: 52px;
+  padding: 30px 42px;
   border: 0;
   border-radius: 36px 10px 36px 10px;
   background: var(--kids-sky);
@@ -1477,8 +1477,13 @@ label small {
 }
 .directory-live img {
   width: 100%;
-  height: 300px;
+  height: 220px;
   object-fit: contain;
+}
+.area-planning-note {
+  margin: 22px 0 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 .directory-resource {
   border-style: dashed !important;
@@ -2798,11 +2803,11 @@ label small {
   .area-directory .directory-live {
     display: block;
     grid-column: auto;
-    min-height: 520px;
-    padding: 32px 26px;
+    min-height: 410px;
+    padding: 28px 26px;
   }
   .directory-live img {
-    height: 240px;
+    height: 180px;
   }
   .project-intro img,
   .blog-intro img {

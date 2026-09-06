@@ -45,6 +45,7 @@ const props = defineProps({
 
 const route = useRoute();
 const router = useRouter();
+const visibleOnCurrentRoute = computed(() => route.meta.shell !== "portal");
 
 const open = ref(false);
 const loading = ref(false);
@@ -467,6 +468,13 @@ watch(open, (isOpen) => {
   if (isOpen) load().then(focusComposer);
 });
 
+watch(visibleOnCurrentRoute, (visible) => {
+  if (!visible) {
+    open.value = false;
+    previewAttachment.value = null;
+  }
+});
+
 watch(
   () => props.initialLineId,
   (lineId) => {
@@ -497,7 +505,14 @@ watch(selectedClassId, async (classId, previous) => {
 </script>
 
 <template>
-  <Button ref="trigger" class="help-widget-trigger" type="button" size="lg" @click="open = true">
+  <Button
+    v-if="visibleOnCurrentRoute"
+    ref="trigger"
+    class="help-widget-trigger"
+    type="button"
+    size="lg"
+    @click="open = true"
+  >
     <MessageCircleQuestion data-icon="inline-start" />
     问老师
     <span v-if="unreadCount" class="help-unread-dot" :aria-label="`有 ${unreadCount} 条未读回复`">{{
@@ -507,7 +522,7 @@ watch(selectedClassId, async (classId, previous) => {
 
   <Teleport to="body">
     <aside
-      v-if="open"
+      v-if="visibleOnCurrentRoute && open"
       ref="chatWindow"
       class="help-window"
       :style="floatingStyles"
@@ -681,7 +696,7 @@ watch(selectedClassId, async (classId, previous) => {
   </Teleport>
   <Teleport to="body">
     <div
-      v-if="previewAttachment"
+      v-if="visibleOnCurrentRoute && previewAttachment"
       class="help-image-preview"
       role="dialog"
       aria-modal="true"

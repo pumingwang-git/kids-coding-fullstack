@@ -8,9 +8,13 @@ const areas = ref([]);
 const loading = ref(true);
 const error = ref("");
 onMounted(async () => {
-  try { areas.value = (await request("/api/learning-areas")).items || []; }
-  catch (err) { error.value = err?.message || "专区目录加载失败。"; }
-  finally { loading.value = false; }
+  try {
+    areas.value = (await request("/api/learning-areas")).items || [];
+  } catch (err) {
+    error.value = err?.message || "专区目录加载失败。";
+  } finally {
+    loading.value = false;
+  }
 });
 </script>
 
@@ -25,19 +29,35 @@ onMounted(async () => {
     </header>
     <section class="area-directory">
       <p v-if="loading" class="portal-state">正在加载专区目录…</p>
-      <div v-else-if="error" class="honest-empty"><p>{{ error }}</p></div>
-      <article v-for="area in areas" :key="area.key" :class="{ 'directory-live': area.status === 'active' }">
+      <div v-else-if="error" class="honest-empty">
+        <p>{{ error }}</p>
+      </div>
+      <article
+        v-for="area in areas"
+        :key="area.key"
+        :class="{ 'directory-live': area.status === 'active' }"
+      >
         <div>
-          <span :class="area.status === 'active' ? 'status-live' : 'status-planning'">{{ area.status === "active" ? "已开放" : "规划中" }}</span>
+          <span :class="area.status === 'active' ? 'status-live' : 'status-planning'">{{
+            area.status === "active" ? "已开放" : "规划中"
+          }}</span>
           <h2>{{ area.name }}</h2>
           <p>{{ area.description }}</p>
-          <RouterLink class="primary-action" :to="`/learning/${area.key}`"
+          <RouterLink
+            v-if="area.status === 'active'"
+            class="primary-action"
+            :to="`/learning/${area.key}`"
             >查看专区 <AppIcon name="arrow-right"
           /></RouterLink>
+          <p v-else class="area-planning-note">专区内容正在准备中。</p>
         </div>
         <img
           v-if="area.status === 'active'"
-          :src="area.theme_key === 'kids' ? '/assets/otter-coding-720.webp' : '/assets/otter-thinking-720.webp'"
+          :src="
+            area.theme_key === 'kids'
+              ? '/assets/otter-coding-720.webp'
+              : '/assets/otter-thinking-720.webp'
+          "
           :alt="`${area.name}学习场景`"
           loading="lazy"
           decoding="async"

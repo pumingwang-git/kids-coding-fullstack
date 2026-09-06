@@ -5,8 +5,7 @@
         <p class="eyebrow">PERSONAL BLOG · FRONTEND LEARNER</p>
         <h1>从好奇开始，<br />让想法<span>发光。</span></h1>
         <p>
-          你好，我是汪蒲明。一名正在学习现代 Web
-          开发的前端开发者，也在把每一次练习沉淀成能亲手使用的作品。
+          这里记录启程学堂从想法到产品的过程，把每一次学习和实践沉淀成可以亲手使用的作品。
         </p>
         <div class="action-row">
           <RouterLink class="button button-primary" to="/study">

@@ -25,7 +25,7 @@ PASSWORD = "A-long-password-123!"
 def test_verification_email_has_html_and_plain_text():
     message = build_verification_email("sender@example.com", "learner@example.com", "123456")
     assert isinstance(message, EmailMessage)
-    assert str(message["Subject"]) == "【汪蒲明学习平台】注册邮箱验证码"
+    assert str(message["Subject"]) == "【启程学堂】注册邮箱验证码"
     assert str(message["To"]) == "learner@example.com"
     assert message.is_multipart()
     assert "123456" in message.get_body(preferencelist=("html",)).get_content()

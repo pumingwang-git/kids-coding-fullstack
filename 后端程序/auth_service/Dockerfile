@@ -20,6 +20,9 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY . .
+# /app/data 会被命名卷覆盖。验证码图库保留在镜像独立路径，避免卷为空时
+# 自动降级为 SVG 图案。
+COPY data/captcha_images /app/captcha_images
 
 # 上传落盘根目录（/media、/avatars、转码临时区等都在 data 下；用命名卷持久化）
 RUN mkdir -p data/transcode data/media data/course_covers data/avatars \
