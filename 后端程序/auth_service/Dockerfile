@@ -6,9 +6,12 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# ffmpeg/ffprobe：转码；curl：健康检查；build 基础库：部分轮子需要
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg curl ca-certificates \
+# ffmpeg/ffprobe：转码；curl：健康检查。
+# 弱网/代理环境下 apt 易断流：加多次重试 + 关闭 HTTP 管道（逐个下载更稳）+ 拉长超时。
+RUN printf 'Acquire::Retries "12";\nAcquire::http::Timeout "60";\nAcquire::http::Pipeline-Depth "0";\n' \
+        > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
