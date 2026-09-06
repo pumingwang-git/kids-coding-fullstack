@@ -25,7 +25,7 @@ export async function bootstrap() {
     container.innerHTML = `
       <main class="boot-error">
         <div class="boot-error__mark" aria-hidden="true">24</div>
-        <h1>暂时连不上学习平台</h1>
+        <h1>暂时连不上启程学堂</h1>
         <p>请检查网络后重试。已经在这台设备登录过时，离线记录仍会保留。</p>
         <button type="button" onclick="window.location.reload()">重新连接</button>
       </main>`;

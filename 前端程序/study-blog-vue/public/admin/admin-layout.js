@@ -68,7 +68,7 @@ export function initLayout() {
 
 function renderSidebar(sidebar) {
   const page = currentPage();
-  let html = '<a class="brand" href="index.html"><i>LP</i><span>学习平台<small>运营工作台</small></span></a><nav class="menu">';
+  let html = '<a class="brand" href="index.html"><i>QC</i><span>启程学堂<small>运营工作台</small></span></a><nav class="menu">';
   for (const group of MENU) {
     if (group.children) {
       const open = group.children.some((child) => child.page === page) ? " open" : "";
@@ -116,7 +116,7 @@ function renderTopbar(topbar) {
   const active = findActive(page);
   const crumb = active ? active.crumb : "后台管理";
   topbar.innerHTML = `
-    <div class="crumb"><span>学习平台</span><b>${crumb}</b></div>
+    <div class="crumb"><span>启程学堂</span><b>${crumb}</b></div>
     <div class="topbar-right">
       <a class="btn-text topbar-notifications" href="notifications.html" aria-label="通知">通知<span id="adminNotificationCount" class="topbar-notification-count" hidden></span></a>
       <span class="muted" id="adminName">加载中…</span>

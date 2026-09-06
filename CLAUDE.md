@@ -1,6 +1,6 @@
 # 项目约定
 
-企业级学习平台。两端：`前端程序/study-blog-vue`（学生端 Vue 3 + Vite；管理端 `public/admin` 是**原生 HTML/JS**）、`后端程序/auth_service`（FastAPI + SQLAlchemy + Alembic）。
+启程学堂是一个企业级学习平台。两端：`前端程序/study-blog-vue`（学生端 Vue 3 + Vite；管理端 `public/admin` 是**原生 HTML/JS**）、`后端程序/auth_service`（FastAPI + SQLAlchemy + Alembic）。
 
 ---
 
