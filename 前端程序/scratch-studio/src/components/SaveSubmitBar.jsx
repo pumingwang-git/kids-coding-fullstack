@@ -33,7 +33,7 @@ import {
  *    `flexWrap: 'wrap'` 一折行就多出一整条杠。
  *  - 「项目 #N」删掉：学生看不懂，排查看地址栏就有。
  */
-export default function SaveSubmitBar ({ctx, vm, backHref, demoHref, onSubmitted}) {
+export default function SaveSubmitBar ({ctx, vm, backHref, demoHref, onSubmitted, onProjectSaved}) {
     const {block, challenge, project} = ctx;
     const blockId = block.id;
     const projectId = project && project.id;
@@ -59,6 +59,7 @@ export default function SaveSubmitBar ({ctx, vm, backHref, demoHref, onSubmitted
         try {
             const blob = await vm.saveProjectSb3();
             const res = await saveProjectSb3(projectId, blob, SAVE_SOURCE.MANUAL, challenge.id);
+            if (onProjectSaved) onProjectSaved();
             setSaveState('saved');
             pushToast(res.unchanged ? '内容未变，已同步' : `已保存（版本 ${res.revision.revision_no}）`, 'ok');
         } catch (e) {
@@ -66,7 +67,7 @@ export default function SaveSubmitBar ({ctx, vm, backHref, demoHref, onSubmitted
             setSaveState('error');
             pushToast(`保存失败：${e.message}（可重试，编辑内容未丢失）`, 'error');
         }
-    }, [vm, projectId, challenge.id]);
+    }, [vm, projectId, challenge.id, onProjectSaved]);
 
     useEffect(() => {
         const onKey = e => {

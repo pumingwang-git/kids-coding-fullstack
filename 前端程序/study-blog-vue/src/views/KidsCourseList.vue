@@ -201,7 +201,7 @@ watch(
     </header>
 
     <!-- 课程类型：桌面端在左侧目录二级导航切换，此处仅移动端显示 -->
-    <nav class="course-kind-mobile" aria-label="课程类型">
+    <nav class="course-kind-mobile course-kind-tabs" aria-label="课程类型">
       <button
         v-for="kind in kinds"
         :key="kind.key"
@@ -216,7 +216,7 @@ watch(
     <nav class="course-direction-bar" aria-label="学习方向筛选">
       <button
         type="button"
-        class="dir-tab"
+        class="dir-tab direction-option"
         :class="{ active: selectedCategory === null }"
         @click="selectDirection(null)"
       >
@@ -226,7 +226,7 @@ watch(
         v-for="cat in taxonomy"
         :key="cat.id"
         type="button"
-        class="dir-tab"
+        class="dir-tab direction-option"
         :class="{ active: selectedDirection?.id === cat.id }"
         @click="selectDirection(cat.id)"
       >

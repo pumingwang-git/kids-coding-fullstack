@@ -3,7 +3,7 @@
 //
 // 状态不存 localStorage：答案在服务器上，刷新后重新拉 entry 就能恢复现场
 // （有 ongoing_attempt_id 就直接回作答页）。本地缓存进度只会带来"两边不一致"。
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   fetchEntry,
@@ -20,6 +20,7 @@ import ExamResult from "../components/exam/ExamResult.vue";
 import ExamRunner from "../components/exam/ExamRunner.vue";
 import ImageLightbox from "../components/exam/ImageLightbox.vue";
 import "../styles/exam.css";
+import { paperAttemptHelpContext, resetHelpState, setActiveHelpContext, setHelpEnabled } from "../stores/helpContext";
 
 const route = useRoute();
 const router = useRouter();
@@ -90,6 +91,7 @@ async function loadEntry({ resume = true, review = false, reviewId = null } = {}
   try {
     const payload = await source.value.loadEntry();
     entry.value = payload;
+    setHelpEnabled(payload.help_enabled !== false);
     // 「查看成绩」两种直达：reviewId 指定某一次；review=true 取最近一次已交卷。
     // 都不让学生先过一遍候考页再自己找回看入口。
     const target = reviewId ?? (review ? lastSubmittedAttempt(payload) : null);
@@ -164,6 +166,11 @@ function onRunnerError(error) {
   errorText.value = error?.message || "作答过程中发生错误。";
 }
 
+function onCurrentQuestion(question) {
+  if (!source.value.showReturnBar || !question?.problem_id_no || !attemptId.value) return;
+  setActiveHelpContext(paperAttemptHelpContext(attemptId.value, question.problem_id_no));
+}
+
 /** 成绩页的主行动。课时作业回课时，独立考试链接回自己的候考页——两种入口，两个终点。 */
 async function onBack() {
   errorText.value = "";
@@ -180,6 +187,10 @@ onMounted(() => {
   const reviewId = /^\d+$/.test(String(reviewQuery)) ? Number(reviewQuery) : null;
   autostartPending = route.query.autostart === "1";
   loadEntry({ review: reviewQuery === "last", reviewId });
+});
+
+onBeforeUnmount(() => {
+  resetHelpState();
 });
 </script>
 
@@ -253,6 +264,7 @@ onMounted(() => {
       @submitted="onSubmitted"
       @expired="onExpired"
       @error="onRunnerError"
+      @current-change="onCurrentQuestion"
     />
 
     <ExamResult

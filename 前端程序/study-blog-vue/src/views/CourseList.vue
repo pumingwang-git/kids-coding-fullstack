@@ -162,7 +162,7 @@ onMounted(async () => {
           v-for="(course, index) in courses"
           :key="course.id"
           class="course-card"
-          :to="{ name: 'course-detail', params: { courseId: course.id }, query: { area: route.params.areaKey || 'kids' } }"
+          :to="{ name: 'course-detail', params: { courseId: course.id }, query: { area: route?.params?.areaKey || 'kids' } }"
         >
           <img :src="cover(course, index)" :alt="course.title" />
           <span

@@ -9,6 +9,7 @@
 //
 // 续期也盖不住真正的登出：会话被吊销时 /refresh 自己就会失败，401 照样浮上来。
 import { refreshSession } from "./auth";
+import { beginRequest, completeRequest, failRequest } from "./runtimeLogger";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -60,9 +61,17 @@ async function request(path, options = {}) {
   const isMutation = options.method && options.method !== "GET";
   if (isMutation) headers["X-CSRF-Token"] = await csrfToken();
 
+  const url = `${apiBase}/api/exam${path}`;
+  const context = beginRequest(url);
   const send = () =>
-    fetch(`${apiBase}/api/exam${path}`, { credentials: "include", ...options, headers });
-  let response = await send();
+    fetch(url, { credentials: "include", ...options, headers: { ...headers, "X-Request-ID": context.id } });
+  let response;
+  try {
+    response = await send();
+  } catch (error) {
+    failRequest(context, url, error);
+    throw error;
+  }
   let body = response.status === 204 ? null : await response.json().catch(() => ({}));
 
   // CSRF cookie 会随会话轮换；重取一次再试，避免作答中途因为换了 token 而存不上。
@@ -84,8 +93,12 @@ async function request(path, options = {}) {
       // 保留原始 401
     }
   }
-  if (!response.ok)
-    throw new ExamError(errorMessage(body), response.status, body?.detail?.code ?? null);
+  if (!response.ok) {
+    const error = new ExamError(errorMessage(body), response.status, body?.detail?.code ?? null);
+    failRequest(context, url, error);
+    throw error;
+  }
+  completeRequest(context, url, response.status);
   return body;
 }
 

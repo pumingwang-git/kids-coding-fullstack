@@ -29,9 +29,13 @@ export const MENU_BAR_HEIGHT = 48;
  * 是否把整条菜单栏染成平台主色。
  *
  * 官方那条紫色（`$looks-secondary` = #855CD6）在 menu-bar.css 里是 Sass 变量，
- * 构建时已编译成字面量，**不是 CSS 变量**，没法用变量覆盖，只能加一条我们自己的
- * 规则盖掉（见 injectStyle）。合并之后整个页面只剩这一条栏，给它上自家品牌色是
- * 明牌不是伪装；要退回官方紫色，把这里改成 false，其余代码不用动。
+ * 构建时已编译成字面量，**不是 CSS 变量**，没法用变量覆盖。全站 300+ 处紫色现在
+ * 由构建期的调色板统一换掉（`scripts/brand-palette.cjs` + webpack 的
+ * BrandPalettePlugin），这条规则不再是"唯一的染色手段"。
+ *
+ * 留着它是因为菜单栏底色是平台身份最强的一块：将来官方把栏底换成别的颜色（比如
+ * 蓝），调色板认不出来，这条仍然把它拉回 `--accent`。所以把这里改成 false 只是
+ * 放弃这道兜底，**不等于变回官方紫**——紫色在构建期就已经没了。
  */
 export const BRAND_MENU_BAR = true;
 

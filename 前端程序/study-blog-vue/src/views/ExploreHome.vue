@@ -160,26 +160,14 @@ onMounted(load);
         class="work-card gallery-card"
         @click="studioPreview(work.id)"
       >
-        <!-- 作品封面：优先用后端缩略图，否则显示默认舞台占位 -->
+        <!-- 作品封面。`thumbnail_url` 服务端保证不为空：有舞台截图发截图，
+             没有（老作品 / 分享快照 / 截图失败）发生成占位图，前端不判空 -->
         <div class="work-cover">
           <img
-            v-if="work.thumbnail_url"
             :src="work.thumbnail_url"
             :alt="work.title"
             loading="lazy"
           />
-          <div v-else class="work-cover-placeholder">
-            <svg viewBox="0 0 240 180" xmlns="http://www.w3.org/2000/svg">
-              <rect width="240" height="180" fill="#f0f4f8" />
-              <rect x="20" y="60" width="200" height="100" rx="4" fill="#e1e8ed" />
-              <circle cx="60" cy="100" r="22" fill="#4d82c2" opacity="0.85" />
-              <rect x="100" y="85" width="100" height="8" rx="2" fill="#b0c4de" />
-              <rect x="100" y="100" width="80" height="8" rx="2" fill="#b0c4de" />
-              <rect x="100" y="115" width="60" height="8" rx="2" fill="#b0c4de" />
-              <rect x="20" y="20" width="50" height="14" rx="2" fill="#dcecff" />
-              <rect x="170" y="20" width="50" height="14" rx="2" fill="#dcecff" />
-            </svg>
-          </div>
           <span v-if="work.is_public === false" class="work-cover-badge">私密</span>
         </div>
         <div class="work-card-body">

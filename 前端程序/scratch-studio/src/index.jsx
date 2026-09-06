@@ -1,3 +1,6 @@
+// 必须排在 @scratch/scratch-gui 之前：它把运行时 publicPath 挂成全局，
+// NestedPublicPathPlugin 回填的那句代码要读它。理由见该文件头注。
+import './gui/publicPath';
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {Provider} from 'react-redux';

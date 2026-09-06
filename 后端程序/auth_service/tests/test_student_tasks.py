@@ -518,6 +518,62 @@ def test_practice_queue_orders_later_created_block_by_course_sort_order(tmp_path
     assert body["current"]["origin"]["block_sort"] == 0
 
 
+def test_practice_queue_filters_list_only_this_student_scope(tmp_path: Path):
+    """筛选项是该学生自己的课包 / 章节 / 知识点，不是全站字典表。"""
+    app = build_app(tmp_path)
+    student = student_login(app)
+    mine_no = seed_choice_problem(app, problem_id_no="Q350001")["problem_id_no"]
+    others_no = seed_choice_problem(app, problem_id_no="Q350002")["problem_id_no"]
+    mine = build_practice(app, problem_id_no=mine_no)
+    others = build_practice(app, problem_id_no=others_no)
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=mine["course_id"])
+
+    db = app.state.session_factory()
+    try:
+        for problem_no, tag_name in ((mine_no, "我的知识点"), (others_no, "别人的知识点")):
+            problem = db.scalar(select(Problem).where(Problem.problem_id_no == problem_no))
+            tag = Tag(name=tag_name, category="knowledge")
+            db.add(tag)
+            db.flush()
+            db.add(ProblemTag(problem_id=problem.id, tag_id=tag.id))
+        db.commit()
+    finally:
+        db.close()
+
+    body = student.get("/api/student/practice/queue").json()
+    filters = body["filters"]
+    assert [item["id"] for item in filters["courses"]] == [mine["course_id"]]
+    assert others["course_id"] not in {item["id"] for item in filters["courses"]}
+    assert [item["course_id"] for item in filters["sections"]] == [mine["course_id"]]
+    assert filters["knowledge"] == ["我的知识点"]
+
+
+def test_practice_queue_filters_do_not_collapse_when_a_filter_is_applied(tmp_path: Path):
+    """别拦过头：选了某个课包之后，下拉里仍要能看到另一个课包，否则学生切不回去。"""
+    app = build_app(tmp_path)
+    student = student_login(app)
+    numbers = [seed_choice_problem(app, problem_id_no=f"Q35100{i}")["problem_id_no"]
+               for i in (1, 2)]
+    first = build_practice(app, problem_id_no=numbers[0])
+    second = build_practice(app, problem_id_no=numbers[1])
+    user = _learner(app)
+    set_enrollment(app, student_id=user.id, course_id=first["course_id"])
+    set_enrollment(app, student_id=user.id, course_id=second["course_id"])
+
+    both = {first["course_id"], second["course_id"]}
+    unfiltered = student.get("/api/student/practice/queue").json()["filters"]
+    assert {item["id"] for item in unfiltered["courses"]} == both
+
+    filtered = student.get(
+        f"/api/student/practice/queue?course_id={first['course_id']}"
+    ).json()
+    # 结果被筛窄了，但可选范围没有
+    assert filtered["current"]["origin"]["course_id"] == first["course_id"]
+    assert {item["id"] for item in filtered["filters"]["courses"]} == both
+    assert {item["course_id"] for item in filtered["filters"]["sections"]} == both
+
+
 def test_exam_phase_groups_every_existing_exam_window():
     source = SimpleNamespace(
         open_at=NOW + timedelta(hours=2), close_at=NOW + timedelta(hours=3), entry_open_minutes=30,

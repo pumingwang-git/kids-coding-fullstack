@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {useStore} from 'react-redux';
 import GUI, {defaultProjectId, setProjectId} from '@scratch/scratch-gui';
 import {
@@ -37,9 +37,17 @@ import {subscribeProjectTitle} from './gui/projectTitle';
  * 出处：`node_modules/@scratch/scratch-gui/src/reducers/project-title.js:1`
  */
 const SET_PROJECT_TITLE = 'projectTitle/SET_PROJECT_TITLE';
+const SET_PROJECT_CHANGED = 'scratch-gui/project-changed/SET_PROJECT_CHANGED';
 
-/** 平台品牌标。主站资源，生产同源；Studio 直连 8602 时会 404，那时保留猫标。 */
-const PLATFORM_LOGO = '/assets/otter-avatar-128.webp';
+/**
+ * 工作台的标。主站资源，生产同源；Studio 直连 8602/8611 时会 404，那时保留官方标
+ * （`swapLogo` 预载失败就不换，宁可还是官方标也不要一个裂图）。
+ *
+ * 图是扣掉底色的透明 PNG 转 webp：原图那层浅青底和字母的柔和投影都是照着浅底画的，
+ * 压在深绿菜单栏上会变成一圈浅色毛边，所以底色和投影一起去掉了。高 128px 是给 2x 屏
+ * 留的余量——菜单栏里实际只显示 1.6rem（≈25.6px），宽度按比例走。
+ */
+const PLATFORM_LOGO = '/assets/scratch-wordmark-128.webp';
 
 /** 等待官方 GUI 完成默认项目加载（loadingState 进入 SHOWING_*） */
 function waitUntilShown (store, timeout = 15000) {
@@ -110,6 +118,7 @@ const overlayStyle = {
 export default function StudioApp () {
     const store = useStore();
     const vm = store.getState().scratchGui.vm;
+    const projectDirtyRef = useRef(false);
 
     const [ctx, setCtx] = useState(null);
     const [status, setStatus] = useState('loading'); // loading | ready | locked | error
@@ -164,7 +173,7 @@ export default function StudioApp () {
     // 换标 + 注入菜单栏样式。放在这里而不是 index.jsx：它依赖菜单栏已经渲染出来，
     // 而菜单栏是 GUI 的一部分，与本组件同一次提交挂载。
     useEffect(() => {
-        applyBranding({logoSrc: PLATFORM_LOGO, logoAlt: '汪蒲明学习平台'});
+        applyBranding({logoSrc: PLATFORM_LOGO, logoAlt: 'Scratch 工作台'});
     }, []);
 
     // 保存成功后，用后端返回的 _serialize 结果刷新 ctx 里对应 target 的地址。
@@ -172,7 +181,34 @@ export default function StudioApp () {
     // （地址原为 null）按钮一直点不动，覆盖保存则仍指向旧快照。
     const handleProjectSaved = useCallback((saved) => {
         setCtx(prev => mergeSavedProject(target, prev, saved));
-    }, [target]);
+        projectDirtyRef.current = false;
+        store.dispatch({type: SET_PROJECT_CHANGED, changed: false});
+    }, [target, store]);
+
+    // Studio 走平台自己的保存接口，官方 ProjectSaverHOC 不会替我们清掉脏状态。
+    // 关闭/刷新时直接读取 Redux，避免 React 闭包拿到过期的编辑状态。
+    const markProjectSaved = useCallback(() => {
+        projectDirtyRef.current = false;
+        store.dispatch({type: SET_PROJECT_CHANGED, changed: false});
+    }, [store]);
+
+    useEffect(() => {
+        const markProjectDirty = () => {
+            projectDirtyRef.current = true;
+        };
+        vm.on('PROJECT_CHANGED', markProjectDirty);
+        return () => vm.removeListener('PROJECT_CHANGED', markProjectDirty);
+    }, [vm]);
+
+    useEffect(() => {
+        const warnBeforeUnload = event => {
+            if (!projectDirtyRef.current) return;
+            event.preventDefault();
+            event.returnValue = true;
+        };
+        window.addEventListener('beforeunload', warnBeforeUnload);
+        return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+    }, [store]);
 
     // 提交成功后只刷新作业元数据（判定、示范项目开放状态等），不重新加载 VM 项目，
     // 避免学生刚完成提交就被服务器版本覆盖当前编辑中的内容。
@@ -276,7 +312,12 @@ export default function StudioApp () {
                         if (!cancelled) await vm.loadProject(buf);
                     }
                 }
-                if (!cancelled) setStatus('ready');
+                if (!cancelled) {
+                    // 装载 .sb3 也会触发 VM 的 PROJECT_CHANGED；它是服务器基线，不能
+                    // 让学生什么都没改就收到离开提示。
+                    projectDirtyRef.current = false;
+                    setStatus('ready');
+                }
             } catch (e) {
                 if (!cancelled) {
                     setStatus('error');
@@ -334,7 +375,7 @@ export default function StudioApp () {
             tone = 'readonly';
             content = <DemoBar ctx={ctx} backHref={backHref} />;
         } else if (freeEdit) {
-            content = <FreeBar ctx={ctx} vm={vm} title={workTitle} />;
+            content = <FreeBar ctx={ctx} vm={vm} title={workTitle} onProjectSaved={markProjectSaved} />;
         } else if (galleryPreview) {
             tone = 'readonly';
             content = <PreviewBar ctx={ctx} backHref={backHref} />;
@@ -346,6 +387,7 @@ export default function StudioApp () {
                     backHref={backHref}
                     demoHref={demoHref}
                     onSubmitted={handleChallengeSubmitted}
+                    onProjectSaved={markProjectSaved}
                 />
             );
         }

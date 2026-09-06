@@ -27,6 +27,11 @@ import {
 } from "../services/prefetch";
 import { useLessonProgress } from "../composables/useLessonProgress";
 import { useLessonPrefetch } from "../composables/useLessonPrefetch";
+import {
+  clearActiveHelpContext,
+  lessonBlockHelpContext,
+  setActiveHelpContext,
+} from "../stores/helpContext";
 import LessonLoading from "../components/lesson/LessonLoading.vue";
 import LessonDrawer from "../components/lesson/LessonDrawer.vue";
 import LessonIcon from "../components/lesson/LessonIcon.vue";
@@ -476,6 +481,7 @@ onMounted(() => {
   load();
 });
 onBeforeUnmount(() => {
+  clearActiveHelpContext();
   document.removeEventListener("keydown", onKeydown);
   window.removeEventListener("resize", queueVideoFrameSync);
   window.visualViewport?.removeEventListener("resize", queueVideoFrameSync);
@@ -485,6 +491,10 @@ onBeforeUnmount(() => {
   videoResizeObserver?.disconnect();
   // 预签的令牌是按课时签的，别让它活过这个页面
   clearBlockPrefetch();
+});
+
+watch(currentBlock, (block) => setActiveHelpContext(lessonBlockHelpContext(block)), {
+  immediate: true,
 });
 watch(lessonId, () => load());
 watch([phase, currentId], () => nextTick(observeVideoFrame));

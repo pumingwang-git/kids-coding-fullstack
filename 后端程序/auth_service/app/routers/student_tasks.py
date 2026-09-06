@@ -129,6 +129,34 @@ def list_practice(
                   for row in rows], page, page_size)
 
 
+def _practice_filters(db: Session, rows: list[dict]) -> dict:
+    """筛选项只列该学生实际有的课包 / 章节 / 知识点。
+
+    **必须用未筛选的候选集算**：若跟着当前选择一起收窄，选了某个课包之后章节下拉
+    会塌成只剩那一条，学生再也切不回去。筛选项描述的是「可选范围」，不是「当前结果」。
+    """
+    courses = {row["course_id"]: row["course_title"] for row in rows}
+    sections = {
+        row["section_id"]: (row["section_title"], row["course_id"], row["section_sort"])
+        for row in rows
+    }
+    numbers = {row["problem_id_no"] for row in rows}
+    knowledge = sorted(set(db.scalars(
+        select(Tag.name)
+        .join(ProblemTag, ProblemTag.tag_id == Tag.id)
+        .join(Problem, Problem.id == ProblemTag.problem_id)
+        .where(Tag.category == "knowledge", Problem.problem_id_no.in_(numbers or [""]))
+    )))
+    return {
+        "courses": [{"id": course_id, "title": title}
+                    for course_id, title in sorted(courses.items())],
+        "sections": [{"id": section_id, "title": title, "course_id": course_id}
+                     for section_id, (title, course_id, _sort) in sorted(
+                         sections.items(), key=lambda row: (row[1][1], row[1][2], row[0]))],
+        "knowledge": knowledge,
+    }
+
+
 @router.get("/practice/queue")
 def practice_queue(
     request: Request, course_id: int | None = None, section_id: int | None = None,
@@ -136,7 +164,8 @@ def practice_queue(
     db: Session = Depends(db_session),
 ):
     user = current_user(request, db)
-    rows = collect_practice_candidates(db, user)
+    all_rows = collect_practice_candidates(db, user)
+    rows = all_rows
     if course_id is not None:
         rows = [row for row in rows if row["course_id"] == course_id]
     if section_id is not None:
@@ -215,7 +244,7 @@ def practice_queue(
         "current": items[0] if items else None,
         "upcoming": items[1:1 + preview],
         "counts": counts,
-        "filters": {"courses": [], "sections": [], "knowledge": []},
+        "filters": _practice_filters(db, all_rows),
     }
 
 

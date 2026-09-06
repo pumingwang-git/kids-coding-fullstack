@@ -39,6 +39,13 @@ const CSRF_SCOPES = {
     }
 };
 
+// Studio 是独立 webpack 应用，不能与 Vue 主站共享模块实例；在这里保留同一套
+// 单飞、会话死亡闸和短冷却，避免并发 401 重复使用旧 refresh token。
+let refreshPromise = null;
+let sessionDead = false;
+let refreshBlockedUntil = 0;
+const REFRESH_COOLDOWN_MS = 5000;
+
 function csrfScope (url) {
     return String(url).startsWith('/api/admin/') ? CSRF_SCOPES.admin : CSRF_SCOPES.student;
 }
@@ -99,6 +106,50 @@ async function toError (response) {
     return err;
 }
 
+function sessionGoneError () {
+    const error = new Error('登录已失效，请重新登录。');
+    error.status = 401;
+    return error;
+}
+
+async function refreshSession () {
+    if (sessionDead) throw sessionGoneError();
+    if (Date.now() < refreshBlockedUntil) {
+        const error = new Error('续期失败，请稍后重试。');
+        error.status = 0;
+        throw error;
+    }
+    if (!refreshPromise) {
+        refreshPromise = (async () => {
+            let token = await csrfToken(CSRF_SCOPES.student);
+            let response = await send('/api/auth/refresh', {
+                method: 'POST',
+                body: '{}'
+            }, token);
+            if (response.status === 403) {
+                const detail = await response.clone().json().catch(() => null);
+                if (detail && detail.detail === 'CSRF 校验失败。') {
+                    token = await csrfToken(CSRF_SCOPES.student, true);
+                    response = await send('/api/auth/refresh', {
+                        method: 'POST',
+                        body: '{}'
+                    }, token);
+                }
+            }
+            if (!response.ok) throw await toError(response);
+            sessionDead = false;
+            return response.json();
+        })().catch(error => {
+            if (error && error.status === 401) sessionDead = true;
+            else refreshBlockedUntil = Date.now() + REFRESH_COOLDOWN_MS;
+            throw error;
+        }).finally(() => {
+            refreshPromise = null;
+        });
+    }
+    return refreshPromise;
+}
+
 function send (url, options, token) {
     // 字符串 body 必须自报 application/json。不写的话浏览器给 fetch 兜的是
     // `text/plain;charset=UTF-8`，FastAPI 解不出请求体，**所有 JSON 写请求一律 422**
@@ -119,7 +170,8 @@ function send (url, options, token) {
 async function request (url, options = {}) {
     const writing = !['GET', 'HEAD'].includes(String(options.method || 'GET').toUpperCase());
     const scope = writing ? csrfScope(url) : null;
-    let response = await send(url, options, scope ? await csrfToken(scope) : null);
+    let token = scope ? await csrfToken(scope) : null;
+    let response = await send(url, options, token);
 
     // CSRF Cookie 随会话轮换，而 Studio 是长时间开着的页面（一节课能编四十分钟）。
     // 令牌过期时重取一次再试，而不是把「保存失败」直接甩给学生——学员端的 exam.js
@@ -127,7 +179,20 @@ async function request (url, options = {}) {
     if (writing && response.status === 403) {
         const stale = await response.clone().json().catch(() => null);
         if (stale && stale.detail === 'CSRF 校验失败。') {
-            response = await send(url, options, await csrfToken(scope, true));
+            token = await csrfToken(scope, true);
+            response = await send(url, options, token);
+        }
+    }
+
+    // access token 的有效期短于一节创作课。续期成功后只重放一次原请求，
+    // 续期失败则保留第一次的 401，让上层显示明确的重新登录提示。
+    if (response.status === 401) {
+        try {
+            await refreshSession();
+            token = scope ? await csrfToken(scope) : null;
+            response = await send(url, options, token);
+        } catch (e) {
+            // 会话已撤销或续期失败时，继续用原响应走下面的统一错误处理。
         }
     }
 
@@ -282,11 +347,18 @@ export function fetchWorkContext (workId) {
     return request(`/api/scratch/works/${workId}`);
 }
 
-/** PUT /api/scratch/works/{id} —— 保存自由作品当前版本（multipart file） */
-export function saveWorkSb3 (workId, sb3Blob, source = 'autosave') {
+/**
+ * PUT /api/scratch/works/{id} —— 保存自由作品当前版本（multipart file[,cover]）
+ *
+ * `coverBlob` 是舞台截图（见 `gui/stageSnapshot.js`），可选：抓不到就不带这个
+ * 字段，服务端沿用旧封面。**必须和 .sb3 同一次请求**，分两次传会出现「图是新版、
+ * 内容是旧版」的错配。服务端那边封面失败也不牵连作品保存。
+ */
+export function saveWorkSb3 (workId, sb3Blob, source = 'autosave', coverBlob = null) {
     const form = new FormData();
     form.append('file', sb3Blob, 'work.sb3');
     form.append('source', source);
+    if (coverBlob) form.append('cover', coverBlob, 'cover.webp');
     return request(`/api/scratch/works/${workId}`, {method: 'PUT', body: form});
 }
 

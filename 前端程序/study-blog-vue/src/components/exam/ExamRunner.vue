@@ -33,7 +33,7 @@ const props = defineProps({
   // 不按看板上的序号找——看板顺序是卷面顺序，作答顺序是这次 attempt 的乱序结果。
   initialProblem: { type: String, default: "" },
 });
-const emit = defineEmits(["submitted", "expired", "error"]);
+const emit = defineEmits(["submitted", "expired", "error", "current-change"]);
 
 const loading = ref(true);
 const data = ref(null);
@@ -83,6 +83,9 @@ let timer = null;
 
 const questions = computed(() => data.value?.questions || []);
 const current = computed(() => questions.value[currentIndex.value] || null);
+watch(current, (question) => {
+  if (question) emit("current-change", question);
+}, { immediate: true });
 const answeredKeys = computed(
   () =>
     new Set(

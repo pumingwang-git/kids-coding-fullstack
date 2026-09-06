@@ -16,9 +16,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 
@@ -27,6 +29,7 @@ from sqlalchemy import select
 from ..celery_app import celery_app
 from ..config import get_settings
 from ..database import build_database
+from ..logging_config import log_business_event
 from ..models import Video, VideoUpload, VideoVariant
 from ..s3_multipart import get_minio_client
 
@@ -37,6 +40,7 @@ RENDITIONS = [
     ("1080p", 1080, "4000k", "128k"),
 ]
 HLS_TIME = 6
+logger = logging.getLogger("auth_service.transcode")
 
 _TIMEOUT = 60 * 60  # 单档转码超时 1 小时（2GB 源文件足够）
 
@@ -109,6 +113,9 @@ def _kb(vbr: str) -> int:
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
 def transcode_video(self, video_id: int) -> None:
+    task_id = getattr(self.request, "id", None) or f"video:{video_id}"
+    started = time.perf_counter()
+    log_business_event(logger, "video_transcode", "started", task_id=task_id, resource_type="video", resource_id=video_id)
     settings = get_settings()
     _, session_factory = build_database(settings.database_url)
     work = _abs(settings.transcode_work_root) / f"v{video_id}-{uuid.uuid4().hex[:8]}"
@@ -116,6 +123,7 @@ def transcode_video(self, video_id: int) -> None:
     try:
         video = db.get(Video, video_id)
         if video is None:
+            log_business_event(logger, "video_transcode", "not_found", task_id=task_id, resource_type="video", resource_id=video_id)
             return
         source = db.scalar(
             select(VideoUpload)
@@ -126,6 +134,7 @@ def transcode_video(self, video_id: int) -> None:
         if source is None:
             video.status = "failed"
             db.commit()
+            log_business_event(logger, "video_transcode", "missing_source", task_id=task_id, resource_type="video", resource_id=video_id)
             return
 
         video.status = "transcoding"
@@ -171,7 +180,7 @@ def transcode_video(self, video_id: int) -> None:
             _run(cmd)
             _upload_dir(client, settings.minio_play_bucket, f"video-{video_id}/{name}/", out_dir)
             variants.append((name, _kb(vbr) if vbr else 0, max_h))
-            print(f"[transcode] video {video_id} {name} 完成")
+            logger.info("transcode rendition completed", extra={"task_id": task_id, "resource_id": video_id})
 
         # 多码率 master.m3u8。RESOLUTION 按源宽高比推算实际输出尺寸（scale 保持宽高比，
         # 宽取偶：ffmpeg scale=-2 的行为）；write_text 用 newline="\n" 避免 Windows 把
@@ -217,8 +226,9 @@ def transcode_video(self, video_id: int) -> None:
             video.primary_variant_id = primary.id
         video.status = "ready"
         db.commit()
-        print(f"[transcode] video {video_id} 转码完成，档位={[v[0] for v in variants]}")
+        log_business_event(logger, "video_transcode", "success", task_id=task_id, resource_type="video", resource_id=video_id)
     except Exception as exc:
+        logger.exception("video transcode failed", extra={"task_id": task_id, "resource_id": video_id, "duration_ms": round((time.perf_counter() - started) * 1000, 2)})
         db.rollback()
         try:
             v = db.get(Video, video_id)

@@ -1,5 +1,7 @@
 const apiBase = import.meta.env.VITE_API_BASE_URL || "";
 
+import { beginRequest, completeRequest, failRequest } from "./runtimeLogger";
+
 const fieldNames = {
   username: "用户名",
   email: "邮箱",
@@ -145,8 +147,15 @@ async function request(path, options = {}, retryOnUnauthorized = true) {
   }
   // path 以 /api/ 开头视为绝对路径（如 /api/lessons/2/play，绕过 /api/auth 前缀）
   const url = path.startsWith("/api/") ? `${apiBase}${path}` : `${apiBase}/api/auth${path}`;
-  const send = () => fetch(url, { credentials: "include", ...options, headers });
-  let response = await send();
+  const context = beginRequest(url);
+  const send = () => fetch(url, { credentials: "include", ...options, headers: { ...headers, "X-Request-ID": context.id } });
+  let response;
+  try {
+    response = await send();
+  } catch (error) {
+    failRequest(context, url, error);
+    throw error;
+  }
   let body = await parseBody(response);
   if (isMutation && response.status === 403 && body?.detail === "CSRF 校验失败。") {
     headers["X-CSRF-Token"] = await csrfToken(true);
@@ -169,8 +178,10 @@ async function request(path, options = {}, retryOnUnauthorized = true) {
     const error = new Error(errorMessage(body));
     error.status = response.status;
     error.code = body?.detail?.code ?? null;
+    failRequest(context, url, error);
     throw error;
   }
+  completeRequest(context, url, response.status);
   return body;
 }
 

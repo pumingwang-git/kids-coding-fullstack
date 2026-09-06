@@ -8,6 +8,7 @@
 """
 import hmac
 import json
+import logging
 import secrets
 import uuid
 from datetime import timedelta
@@ -23,6 +24,7 @@ from ..audit_summary import (
     ensure_known_event_type,
     event_type_options,
 )
+from ..logging_config import log_business_event
 from ..models import (
     AdminRole,
     AdminRoleCapability,
@@ -39,7 +41,6 @@ from ..permissions import (
     authorization_snapshot,
     can_manage_classes,
     has_capability,
-    is_super,
     role_options,
 )
 from ..rate_limit import RateLimiterUnavailable
@@ -116,6 +117,11 @@ def audit(
             resource_id=resource_id,
             summary_json=json.dumps(summary, ensure_ascii=False, sort_keys=True) if summary else None,
         )
+    )
+    log_business_event(
+        logging.getLogger("auth_service.audit"), event_type, outcome,
+        admin_user_id=admin_user_id, user_id=user_id,
+        resource_type=resource_type, resource_id=resource_id,
     )
 
 

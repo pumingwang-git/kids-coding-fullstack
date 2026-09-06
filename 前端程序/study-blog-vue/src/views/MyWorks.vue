@@ -165,23 +165,10 @@ onMounted(load);
         <!-- 作品封面 -->
         <div class="work-cover">
           <img
-            v-if="work.thumbnail_url"
             :src="work.thumbnail_url"
             :alt="work.title"
             loading="lazy"
           />
-          <div v-else class="work-cover-placeholder">
-            <svg viewBox="0 0 240 180" xmlns="http://www.w3.org/2000/svg">
-              <rect width="240" height="180" fill="#f0f4f8" />
-              <rect x="20" y="60" width="200" height="100" rx="4" fill="#e1e8ed" />
-              <circle cx="60" cy="100" r="22" fill="#4d82c2" opacity="0.85" />
-              <rect x="100" y="85" width="100" height="8" rx="2" fill="#b0c4de" />
-              <rect x="100" y="100" width="80" height="8" rx="2" fill="#b0c4de" />
-              <rect x="100" y="115" width="60" height="8" rx="2" fill="#b0c4de" />
-              <rect x="20" y="20" width="50" height="14" rx="2" fill="#dcecff" />
-              <rect x="170" y="20" width="50" height="14" rx="2" fill="#dcecff" />
-            </svg>
-          </div>
           <span class="work-cover-badge" :class="work.is_public ? 'badge-public' : 'badge-private'">
             {{ work.is_public ? "公开" : "私密" }}
           </span>

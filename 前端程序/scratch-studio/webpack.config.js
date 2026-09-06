@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const {DefinePlugin} = require('webpack');
+const {repaintScratchPurple, findResidualPurple} = require('./scripts/brand-palette.cjs');
 
 /**
  * @scratch/scratch-gui 的 npm 包不仅有 JS 入口，还会在运行时按相对路径加载
@@ -156,6 +157,123 @@ class ScratchSecurityPatchPlugin {
     }
 }
 
+/**
+ * 修掉 scratch-gui 产物里被硬编码的**嵌套** publicPath。
+ *
+ * dist 里有第二个 webpack runtime（打包 scratch-storage 时留下的），它的
+ * `.p` 是写死的 `"/"`，只用来起 scratch-storage 的取数 worker：
+ *
+ *     __nested_webpack_require_108080__.p = "/"
+ *     __nested_webpack_require_108080__.u = e => "chunks/fetch-worker.<hash>.js"
+ *
+ * Studio 挂在主站 `/scratch-studio/` 下时，这条请求打到**站点根**，被 Vue 的 SPA
+ * history fallback 接走 → 回来 index.html → worker 里 `Unexpected token '<'`。
+ * 素材的字节全靠这个 worker 拉，它起不来，`storage.load()` 就永远不 settle：
+ * 素材库能开、缩略图能显示（走 cdn 绝对地址，不经这条路），**点了却什么都不发生**，
+ * 且不报错。完整现场与实测见 `src/gui/publicPath.js` 头注。
+ *
+ * 改成读一个自己声明的全局，值由 `src/gui/publicPath.js` 在启动时写入。
+ * 与安全补丁 / 品牌调色同一个 hook、同一个 stage：改的就是最终发给浏览器的字节。
+ */
+const NESTED_PUBLIC_PATH = /(__nested_webpack_require_\d+__)\.p\s*=\s*["']\/["']/g;
+// 开发模式的 eval-source-map 把依赖源码包进 JS 字符串，字符串内的引号会变成
+// `\"`。不能把它与生产形式混成同一个替换：写回未转义的 `"/"` 会直接破坏 eval。
+const NESTED_PUBLIC_PATH_ESCAPED = /(__nested_webpack_require_\d+__)\.p\s*=\s*\\["']\/\\["']/g;
+const NESTED_PUBLIC_PATH_FIXED = /__nested_webpack_require_\d+__\.p\s*=\s*\(self\.__STUDIO_PUBLIC_PATH__\|\|\\?["']\/\\?["']\)/;
+const NESTED_PUBLIC_PATH_REPLACEMENTS = [
+    [NESTED_PUBLIC_PATH, '$1.p=(self.__STUDIO_PUBLIC_PATH__||"/")'],
+    [NESTED_PUBLIC_PATH_ESCAPED, '$1.p=(self.__STUDIO_PUBLIC_PATH__||\\"/\\")']
+];
+
+class NestedPublicPathPlugin {
+    apply (compiler) {
+        compiler.hooks.thisCompilation.tap('NestedPublicPathPlugin', compilation => {
+            compilation.hooks.processAssets.tap(
+                {
+                    name: 'NestedPublicPathPlugin',
+                    stage: compiler.webpack.Compilation.PROCESS_ASSETS_STAGE_SUMMARIZE
+                },
+                assets => {
+                    let patched = 0;
+                    let sawWorker = false;
+                    let alreadyPatched = false;
+                    for (const [filename, asset] of Object.entries(assets)) {
+                        if (!filename.endsWith('.js')) continue;
+                        const source = asset.source().toString();
+                        if (source.includes('chunks/fetch-worker.')) sawWorker = true;
+                        if (NESTED_PUBLIC_PATH_FIXED.test(source)) alreadyPatched = true;
+                        const fixed = NESTED_PUBLIC_PATH_REPLACEMENTS.reduce(
+                            (next, [pattern, replacement]) => next.replace(pattern, replacement),
+                            source
+                        );
+                        if (fixed === source) continue;
+                        patched += 1;
+                        compilation.updateAsset(
+                            filename,
+                            new compiler.webpack.sources.RawSource(fixed)
+                        );
+                    }
+                    // 升级 scratch-gui 后官方若换了写法，这条补丁会静默失效，
+                    // 症状是「素材库点了没反应」——那是最难从现象猜回来的一类 bug。
+                    // 宁可让构建停下来。
+                    if (sawWorker && patched === 0 && !alreadyPatched) {
+                        throw new Error(
+                            'scratch-gui 的嵌套 publicPath 没被改写：产物里仍有 ' +
+                            'chunks/fetch-worker，却匹配不到 `__nested_webpack_require_*__.p="/"`。' +
+                            '检查 NestedPublicPathPlugin 的正则（见 src/gui/publicPath.js 头注）'
+                        );
+                    }
+                }
+            );
+        });
+    }
+}
+
+/**
+ * 品牌调色：把产物里的官方紫换成平台主色。替换表与理由见
+ * `scripts/brand-palette.cjs`（含"积木配色不许动"的哨兵）。
+ *
+ * 与 ScratchSecurityPatchPlugin 同一个 hook、同一个 stage：产物已经过压缩，
+ * 改的就是最终发给浏览器的那份字节。懒加载的 `chunks/*.js` 也在资产表里，
+ * 造型/声音编辑器点开时才插入的那批样式一并覆盖到。
+ */
+class BrandPalettePlugin {
+    apply (compiler) {
+        compiler.hooks.thisCompilation.tap('BrandPalettePlugin', compilation => {
+            compilation.hooks.processAssets.tap(
+                {
+                    name: 'BrandPalettePlugin',
+                    stage: compiler.webpack.Compilation.PROCESS_ASSETS_STAGE_SUMMARIZE
+                },
+                assets => {
+                    for (const [filename, asset] of Object.entries(assets)) {
+                        if (!filename.endsWith('.js') && !filename.endsWith('.map')) continue;
+                        const source = asset.source().toString();
+                        const painted = repaintScratchPurple(source);
+                        if (painted === source) continue;
+                        compilation.updateAsset(
+                            filename,
+                            new compiler.webpack.sources.RawSource(painted)
+                        );
+                    }
+                    // 漏网即报错：升级后官方换了写法（比如改用 CSS 变量或别的紫），
+                    // 界面会悄悄花掉一半。宁可让构建停下来。
+                    for (const [filename, asset] of Object.entries(compilation.getAssets())) {
+                        if (!filename.endsWith('.js') && !filename.endsWith('.map')) continue;
+                        const residual = findResidualPurple(asset.source.source().toString());
+                        if (residual) {
+                            throw new Error(
+                                `Scratch 官方紫未被替换：${residual}（${filename}）——` +
+                                '检查 scripts/brand-palette.cjs 的替换表'
+                            );
+                        }
+                    }
+                }
+            );
+        });
+    }
+}
+
 module.exports = (env, argv) => {
     const isDev = argv.mode !== 'production';
 
@@ -202,7 +320,9 @@ module.exports = (env, argv) => {
             }),
             new ScratchGuiAssetsPlugin(),
             new PlatformExtensionsPlugin(),
-            new ScratchSecurityPatchPlugin()
+            new ScratchSecurityPatchPlugin(),
+            new NestedPublicPathPlugin(),
+            new BrandPalettePlugin()
         ],
         devServer: {
             port: 8602,

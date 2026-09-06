@@ -268,12 +268,15 @@ export function fetchWorkContext (workId) {
     return delay().then(() => ({...work, limits: {...mockChallenge.limits}}));
 }
 
-export function saveWorkSb3 (workId, sb3Blob, source) {
+export function saveWorkSb3 (workId, sb3Blob, source, coverBlob) {
     const work = mockWorks.get(Number(workId));
     if (!work) return Promise.reject(new Error('作品不存在。'));
     work.has_content = true;
     work.sprite_count = 1;
     work.size_bytes = sb3Blob ? sb3Blob.size : 0;
+    // 封面在 mock 里只记有没有截到：真实模式下它会被服务端重编码落盘，这里没有
+    // 服务端，但保留这个字段能让"截图那条路跑没跑通"在 mock 下也看得见。
+    work.cover_bytes = coverBlob ? coverBlob.size : 0;
     work.updated_at = new Date().toISOString();
     work.content_url = `/api/scratch/works/${work.id}/content.sb3`;
     return delay(400).then(() => ({work_id: work.id, unchanged: false, saved_at: work.updated_at}));

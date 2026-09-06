@@ -35,6 +35,7 @@ def _is_production_secret_rejected(value: str | None) -> bool:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     environment: str = "development"
+    log_level: str = "INFO"
     # The URL is supplied only through the environment or the local .env file.
     database_url: str
     jwt_secret_key: str = "development-only-change-me-please-32-bytes"

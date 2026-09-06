@@ -1,23 +1,30 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath, URL } from "node:url";
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8000",
+      "/api": { target: "http://127.0.0.1:8002", ws: true },
       // 题干配图。URL 是站点相对路径（/media/{sha[:2]}/{sha}.ext），没有 base_url 可配——
       // 开发期由后端的 StaticFiles 发（ENVIRONMENT != production 才挂），生产由 nginx 直发。
       // 少了这一条，后台预览和学员端的题图在 dev 下全是 404。
-      "/media": "http://127.0.0.1:8000",
+      "/media": "http://127.0.0.1:8001",
       // 学生头像。与题干配图同因：URL 是站点相对路径（/avatars/{sha[:2]}/{sha}.ext），
       // dev 必须代理到后端，否则 SPA fallback 会把 index.html 当头像返回，
       // <img> 解不出图——上传流程在 dev 下看着就像坏的。
-      "/avatars": "http://127.0.0.1:8000",
+      "/avatars": "http://127.0.0.1:8001",
       // 视频播放流 /v/{token}/{videoId}/...。同样是站点相对路径（master.m3u8 内就是
       // 相对引用，播放器会按 /v/ 拼 URL）——dev 必须代理到后端，否则 SPA fallback
       // 会把 index.html 当 m3u8 返回，Video.js 一直转圈不播放。
-      "/v": "http://127.0.0.1:8000",
+      "/v": "http://127.0.0.1:8001",
       // Scratch 工作台。它是独立的 webpack 子应用（dev 跑在 8602，生产由 nginx 挂在
       // 同源 /scratch-studio/）。少了这一条，学员端「打开编程工作台」会被 SPA 的
       // history fallback 接走：Vite 返回 index.html → 路由匹配不到 /scratch-studio/

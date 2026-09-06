@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -112,6 +113,8 @@ class JudgeRunner:
     # ---------- 内部 ----------
 
     def _run(self, task: JudgeTask) -> None:
+        started = time.perf_counter()
+        logger.info("judge task started", extra={"task_id": task.key, "resource_id": task.submission_id})
         with self._lock:
             self._waiting.pop(task.key, None)
             self._running.add(task.key)
@@ -120,7 +123,23 @@ class JudgeRunner:
         except Exception:
             # 线程池里抛出去的异常没人接，会变成静默丢失的提交。这里兜住并留痕；
             # worker 内部已经把 judge_failed 落库了，这条日志是给运维看的。
-            logger.exception("判题任务异常退出：submission_id=%s", task.submission_id)
+            logger.exception(
+                "judge task failed",
+                extra={
+                    "task_id": task.key,
+                    "resource_id": task.submission_id,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+        else:
+            logger.info(
+                "judge task completed",
+                extra={
+                    "task_id": task.key,
+                    "resource_id": task.submission_id,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
         finally:
             with self._lock:
                 self._running.discard(task.key)

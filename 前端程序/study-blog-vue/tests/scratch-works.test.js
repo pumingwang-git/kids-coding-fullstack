@@ -66,6 +66,33 @@ afterEach(() => {
 });
 
 describe("自由作品 API 客户端", () => {
+  it("读取作品遇到 401 时续期一次并重试原请求", async () => {
+    let workAttempts = 0;
+    vi.stubGlobal("fetch", async (url, options = {}) => {
+      calls.push({ url, method: options.method || "GET", headers: options.headers || {} });
+      if (url === "/api/auth/csrf") {
+        setCookies({ csrf_token: "FRESH-TOKEN" });
+        return jsonResponse({ message: "ok" });
+      }
+      if (url === "/api/auth/refresh") return jsonResponse({ access_expires_at: "2099-01-01T00:00:00Z" });
+      if (url === "/api/scratch/works/7") {
+        workAttempts += 1;
+        return workAttempts === 1
+          ? jsonResponse({ detail: "登录已过期，请重新登录。" }, 401)
+          : jsonResponse({ id: 7, title: "我的作品" });
+      }
+      return jsonResponse({ ok: true });
+    });
+
+    await expect(fetchWorkContext(7)).resolves.toEqual({ id: 7, title: "我的作品" });
+    expect(calls.map((call) => call.url)).toEqual([
+      "/api/scratch/works/7",
+      "/api/auth/csrf",
+      "/api/auth/refresh",
+      "/api/scratch/works/7",
+    ]);
+  });
+
   it("createWork 发 POST /api/scratch/works，带学生端 CSRF 头", async () => {
     await createWork("小猫散步");
     const call = calls.find((c) => c.url === "/api/scratch/works");
@@ -90,6 +117,25 @@ describe("自由作品 API 客户端", () => {
     expect(call.headers["X-CSRF-Token"]).toBe("STUDENT-TOKEN");
     // FormData 由 fetch 自己序列化，断言它被作为 body 传了即可
     expect(call.body).toBeInstanceOf(FormData);
+  });
+
+  it("传了封面就带 cover 字段，与 .sb3 同一次请求", async () => {
+    // 分两次请求传会出现「图是新版、内容是旧版」的错配，所以必须同一个 FormData。
+    const blob = new Blob(["sb3-bytes"], { type: "application/zip" });
+    const cover = new Blob(["webp-bytes"], { type: "image/webp" });
+    await saveWorkSb3(7, blob, "manual", cover);
+    const form = calls.find((c) => c.body instanceof FormData).body;
+    expect(form.get("file")).toBeTruthy();
+    expect(form.get("cover")).toBeTruthy();
+  });
+
+  // 哨兵：截图失败（null）时不许把字段塞进去——空字段会让服务端把它当一张坏图
+  it("没截到封面时不带 cover 字段", async () => {
+    const blob = new Blob(["sb3-bytes"], { type: "application/zip" });
+    await saveWorkSb3(7, blob, "manual", null);
+    const form = calls.find((c) => c.body instanceof FormData).body;
+    expect(form.get("file")).toBeTruthy();
+    expect(form.get("cover")).toBeNull();
   });
 
   it("updateWork 发 PATCH JSON body（标题/公开开关）", async () => {

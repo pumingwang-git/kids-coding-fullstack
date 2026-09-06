@@ -1,5 +1,6 @@
 import hmac
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -9,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..audit_summary import ensure_known_event_type
+from ..logging_config import log_business_event
 from ..mailer import deliver_outbox
 from ..models import (
     AuditEvent,
@@ -96,6 +98,10 @@ def audit(db, settings, event, outcome, ip, user_id=None, *,
             resource_type=resource_type, resource_id=resource_id,
             summary_json=json.dumps(summary, ensure_ascii=False, sort_keys=True) if summary else None,
         )
+    )
+    log_business_event(
+        logging.getLogger("auth_service.audit"), event, outcome,
+        user_id=user_id, resource_type=resource_type, resource_id=resource_id,
     )
 
 

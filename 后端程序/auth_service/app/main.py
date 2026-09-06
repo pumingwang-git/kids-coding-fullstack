@@ -13,19 +13,21 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from .config import Settings, get_settings
 from .database import build_database
+from .help_realtime import help_realtime_hub
 from .judge import build_judge_client
 from .judge.runner import JudgeRunner
-from .help_realtime import help_realtime_hub
 from .learning_catalog import ensure_learning_catalog
+from .logging_config import RequestLoggingMiddleware, configure_logging
 from .mailer import InMemoryEmailSender, SmtpEmailSender
 from .models import Base
 from .permissions import ensure_admin_role_catalog
 from .rate_limit import InMemoryRateLimiter, RedisRateLimiter
+from .routers.admin_audit import router as admin_audit_router
 from .routers.admin_auth import router as admin_router
 from .routers.admin_classes import router as admin_classes_router
 from .routers.admin_course_content import router as admin_course_content_router
-from .routers.admin_dashboard import router as admin_dashboard_router
 from .routers.admin_courses import router as admin_courses_router
+from .routers.admin_dashboard import router as admin_dashboard_router
 from .routers.admin_dryrun import router as admin_dryrun_router
 from .routers.admin_dryrun import run_dry_run
 from .routers.admin_enrollments import router as admin_enrollments_router
@@ -56,15 +58,14 @@ from .routers.courses import router as student_courses_router
 from .routers.exam import judge_submission, sweep_stale_judgings
 from .routers.exam import router as exam_router
 from .routers.focus import router as focus_router
-from .routers.help_requests import admin_router as admin_help_requests_router
-from .routers.help_requests import admin_chat_router as admin_help_chat_lines_router
 from .routers.help_requests import admin_attachment_router as admin_help_attachments_router
+from .routers.help_requests import admin_chat_router as admin_help_chat_lines_router
 from .routers.help_requests import admin_message_router as admin_help_messages_router
+from .routers.help_requests import admin_router as admin_help_requests_router
 from .routers.help_requests import attachment_router as help_attachment_router
-from .routers.help_requests import student_router as student_help_requests_router
 from .routers.help_requests import student_chat_router as student_help_chat_lines_router
 from .routers.help_requests import student_message_router as student_help_messages_router
-from .routers.admin_audit import router as admin_audit_router
+from .routers.help_requests import student_router as student_help_requests_router
 from .routers.learning_catalog import admin_router as admin_learning_catalog_router
 from .routers.learning_catalog import router as learning_catalog_router
 from .routers.lesson_practice import router as lesson_practice_router
@@ -117,6 +118,7 @@ class NoStoreJSONMiddleware:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     settings.validate_production()
+    configure_logging(settings.log_level)
     engine, session_factory = build_database(settings.database_url)
     # 迁移负责建表，初始化器只补齐缺失目录。测试环境由 create_all 建表；尚未迁移的
     # 开发库跳过初始化，避免应用导入阶段用业务代码替代 Alembic。
@@ -196,6 +198,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.environment == "production":
         app.add_middleware(HTTPSRedirectMiddleware)
     app.add_middleware(NoStoreJSONMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
     if settings.trusted_proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.trusted_proxies)
     app.include_router(admin_router)

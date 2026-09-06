@@ -28,6 +28,10 @@ defineProps({ name: { type: String, required: true }, size: { type: Number, defa
       <rect x="3" y="3" width="18" height="18" rx="4" />
       <path d="m7.5 12 3 3 6-7" />
     </template>
+    <template v-else-if="name === 'bell'">
+      <path d="M18 10a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+      <path d="M10 22h4" />
+    </template>
     <template v-else-if="name === 'spark'">
       <path d="m12 2 1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2Z" />
       <path d="m18.5 15 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" />

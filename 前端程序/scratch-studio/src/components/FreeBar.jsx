@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {createWork, saveWorkSb3, updateWork} from '../api';
 import {SAVE_SOURCE} from '../api/types';
+import {grabStageSnapshot} from '../gui/stageSnapshot';
 import {pillStyle, primaryBtnStyle, disabledStyle, noteStyle} from '../theme';
 import {pushToast} from './Toast';
 import MoreMenu from './MoreMenu';
@@ -21,7 +22,7 @@ import MoreMenu from './MoreMenu';
  *
  * 保存失败不丢 VM 编辑状态（与闯关同一约定），只提示可重试。
  */
-export default function FreeBar ({ctx, vm, title}) {
+export default function FreeBar ({ctx, vm, title, onProjectSaved}) {
     const [workId, setWorkId] = useState(ctx.id || null);
     const [isPublic, setIsPublic] = useState(ctx.is_public !== false);
     const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
@@ -35,6 +36,9 @@ export default function FreeBar ({ctx, vm, title}) {
         setSaveState('saving');
         try {
             const blob = await vm.saveProjectSb3();
+            // 顺序不能反：先打包再截图，两者之间学生没有操作机会，图与内容对得上。
+            // 抓不到返回 null，这次保存就不带封面（服务端沿用旧的），不打断保存。
+            const cover = await grabStageSnapshot(vm);
             const normalizedTitle = (title || '').trim() || '未命名作品';
             // 草稿首次保存时才建档，标题和公开状态在同一次操作中写入。
             const created = workId ? null : await createWork(normalizedTitle, isPublic);
@@ -46,8 +50,9 @@ export default function FreeBar ({ctx, vm, title}) {
                 url.searchParams.delete('draft');
                 window.history.replaceState({}, '', url);
             }
-            const res = await saveWorkSb3(savedId, blob, SAVE_SOURCE.MANUAL);
+            const res = await saveWorkSb3(savedId, blob, SAVE_SOURCE.MANUAL, cover);
             await updateWork(savedId, {title: normalizedTitle, is_public: isPublic});
+            if (onProjectSaved) onProjectSaved();
             setSaveState('saved');
             setSavedOnce(true);
             pushToast(res.unchanged ? '内容未变，已同步' : '已保存', 'ok');
@@ -55,7 +60,7 @@ export default function FreeBar ({ctx, vm, title}) {
             setSaveState('error');
             pushToast(`保存失败：${e.message}（可重试，编辑内容未丢失）`, 'error');
         }
-    }, [vm, workId, title, isPublic]);
+    }, [vm, workId, title, isPublic, onProjectSaved]);
 
     // 保存是本能动作，给它一个本能快捷键。浏览器默认的"保存网页"没有意义，拦掉。
     useEffect(() => {
